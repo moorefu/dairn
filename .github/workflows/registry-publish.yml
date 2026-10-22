@@ -1,0 +1,78 @@
+name: 发布到 npm 与 PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已通过矩阵验证并发布到 GitHub Release 的版本标签，例如 v0.1.0-rc.1
+        required: true
+      target:
+        description: 发布目标注册表
+        type: choice
+        options: [both, npm, pypi]
+        default: both
+
+permissions:
+  contents: read
+
+jobs:
+  npm:
+    name: 发布 ${{ inputs.tag }} 到 npm
+    if: inputs.target != 'pypi'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: npm
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - name: 下载 GitHub Release 中已验证的 npm tarball
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p incoming
+          gh release download "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --pattern '*.tgz' --dir incoming
+      - name: 发布 tarball（预发布用 next，正式版用 latest）
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -eu
+          test -n "${NODE_AUTH_TOKEN:-}" || {
+            echo '缺少 NPM_TOKEN：创建 npm Granular Access Token（Publish 权限）并配置到仓库 Secrets'
+            exit 1
+          }
+          tgz=$(ls incoming/*.tgz)
+          version=$(python3 -c "import json,tarfile,sys; print(json.load(tarfile.open(sys.argv[1]).extractfile('package/package.json'))['version'])" "$tgz")
+          tag=latest
+          case "$version" in *-*) tag=next ;; esac
+          npm publish "$tgz" --access public --tag "$tag"
+
+  pypi:
+    name: 发布 ${{ inputs.tag }} 到 PyPI
+    if: inputs.target != 'npm'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: pypi
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: 下载 GitHub Release 中已验证的 Wheel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          gh release download "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --pattern '*.whl' --dir dist
+      - name: 发布 Wheel
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          set -eu
+          test -n "${TWINE_PASSWORD:-}" || {
+            echo '缺少 PYPI_TOKEN：创建 PyPI API token 并配置到仓库 Secrets'
+            exit 1
+          }
+          python -m pip install --quiet --disable-pip-version-check twine
+          python -m twine upload --non-interactive dist/*.whl

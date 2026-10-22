@@ -48,13 +48,12 @@ jobs:
           retention-days: 14
 
   test:
-    name: 冒烟验证 ${{ matrix.package }} / ${{ matrix.runner }}
+    name: 冒烟验证 ${{ matrix.runner }}（npm、Wheel、ZIP）
     needs: build
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        package: [npm, wheel, zip]
         runner:
           - ubuntu-24.04
           - ubuntu-24.04-arm
@@ -69,19 +68,19 @@ jobs:
         with:
           python-version: '3.13'
       - uses: actions/setup-node@v4
-        if: matrix.package == 'npm'
         with:
           node-version: '22'
       - uses: actions/download-artifact@v4
         with:
           name: dairn-packages
           path: incoming
+      # 一个 runner 一次验收三类制品，矩阵只需覆盖平台，不再按制品拆分。
       - name: 安装、版本、初始化与结构校验
-        run: python -B -X utf8 tools/verify-packages.py --smoke --artifacts incoming --package ${{ matrix.package }} --out validation/runner
+        run: python -B -X utf8 tools/verify-packages.py --smoke --artifacts incoming --out validation/runner
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: validation-${{ matrix.runner }}-${{ matrix.package }}
+          name: validation-${{ matrix.runner }}
           path: validation/runner/
           if-no-files-found: error
 
@@ -100,7 +99,7 @@ jobs:
   publish:
     name: 发布版本与 latest 三类制品
     needs: [build, test, accepted]
-    # 只有推送 v<package.json 版本> 标签才发布；普通分支推送和手动运行只做构建验证。
+    # 只有推送 v<版本> 标签才发布；普通分支推送和手动运行只做构建验证。
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10

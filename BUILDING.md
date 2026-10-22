@@ -46,28 +46,56 @@ POSIX 首次启动 APE 需要 `uname`、`mkdir`、`dd`、`gzip`、`chmod`、`mv`
 
 Linux 可在 `python:3.12-bookworm` 容器中执行该脚本。Windows Podman 若无法挂载工作盘，使用 `podman cp` 复制工程和缓存，运行后取回 APE、manifest 与构建记录。
 
-## GitHub Actions：3 × 6 矩阵
+## GitHub Actions：6 个 runner 的冒烟矩阵
 
-[发布工作流](.github/workflows/release.yml) 在 Ubuntu 构建一次，后续按制品和 runner 展开 **18 个独立任务**，全部下载同一个 artifact 并校验指纹。
+[发布工作流](.github/workflows/release.yml) 在 Ubuntu 构建一次，随后在 6 个 runner 上各跑一个任务；每个任务用 `tools/verify-packages.py` 的默认 `--package all` 一次验收 npm、Wheel、ZIP 三类制品，合计 18 项验证。所有任务下载同一个 artifact 并校验指纹。
 
-| 系统 | 架构 | runner | 必测制品 |
-| --- | --- | --- | --- |
-| Windows | x64 | `windows-2025` | npm、Wheel、ZIP |
-| Windows | ARM64 | `windows-11-arm` | npm、Wheel、ZIP |
-| Linux | x64 | `ubuntu-24.04` | npm、Wheel、ZIP |
-| Linux | ARM64 | `ubuntu-24.04-arm` | npm、Wheel、ZIP |
-| macOS | x64 | `macos-15-intel` | npm、Wheel、ZIP |
-| macOS | ARM64 | `macos-15` | npm、Wheel、ZIP |
+| 系统 | 架构 | runner |
+| --- | --- | --- |
+| Windows | x64 | `windows-2025` |
+| Windows | ARM64 | `windows-11-arm` |
+| Linux | x64 | `ubuntu-24.04` |
+| Linux | ARM64 | `ubuntu-24.04-arm` |
+| macOS | x64 | `macos-15-intel` |
+| macOS | ARM64 | `macos-15` |
 
 构建任务先获取并校验 QuickJS，自举嵌入后生成同一套三类制品；标签推送时制品版本取自标签，没有标签时取 `package.json`。矩阵统一使用 `--smoke` 最小验证：校验制品指纹，安装 npm/Wheel 或解压 ZIP，再执行 `version`、初始化和 `validate`。初始化使用 Python 模板，仅验证内嵌资源和项目结构，不执行项目工具链。测试 runner 不下载 QuickJS、不安装 Go，不跑 Go race、npm 深度测试或自举回归。
 
-各任务独立保存结果，不跳过失败；18 个任务全部成功后汇总才通过。Windows ARM64 由系统兼容层执行 APE 的 Windows x64 入口。流程支持 push、PR 和手动运行，上游版本统一从锁文件读取；发布只由标签触发。
+各任务独立保存结果，不跳过失败；6 个任务全部成功后汇总才通过。Windows ARM64 由系统兼容层执行 APE 的 Windows x64 入口。流程支持 push、PR 和手动运行，上游版本统一从锁文件读取；发布只由标签触发。
 
-推送 `v<版本>` 标签且矩阵全部通过后，发布任务才下载本次已验证的同一套制品，校验 SHA256，再上传 npm `.tgz`、Wheel `.whl`、运行 `.zip` 和 `checksums.json` 至 GitHub Release。发布版本即标签版本（`package.json` 只在该次运行没有标签时兜底）；alpha/beta/rc 标为预发布。普通分支推送和 PR 只构建验证、不发布，只有发布任务获得 `contents: write`。这里发布的是下载附件，npm/PyPI 注册表仍需单独配置。
+推送 `v<版本>` 标签且矩阵全部通过后，发布任务才下载本次已验证的同一套制品，校验 SHA256，再上传 npm `.tgz`、Wheel `.whl`、运行 `.zip` 和 `checksums.json` 至 GitHub Release。发布版本即标签版本（`package.json` 只在该次运行没有标签时兜底）；alpha/beta/rc 标为预发布。普通分支推送和 PR 只构建验证、不发布，只有发布任务获得 `contents: write`。GitHub Release 只是附件；npm 与 PyPI 通过下面的注册表发布工作流单独推送。
 
 先发布不可变的版本 Release，再创建或更新标签为 `latest` 的滚动 Release；预发布也更新该入口并保留预发布标记。文档使用 `/releases/tag/latest` 和 `/releases/download/latest/…`，不依赖 GitHub 仅指向正式版的 `/releases/latest` 路径。
 
 发布使用草稿，附件齐全后公开。同一提交、相同文件重跑不改写 Release；同版本指向其他提交或已发布不同文件时失败，须先更新版本号。更新 `latest` 时先上传整套别名和索引，再移动标签并公开；旧工作流重跑不会回退 `latest`。GitHub 自动附带的源码归档独立于 Dairn 的运行 ZIP。
+
+## 发布到 npm 与 PyPI
+
+GitHub Release 只保存附件，注册表通过手动触发的 [注册表发布工作流](.github/workflows/registry-publish.yml) 发布：下载对应 Release 里**已验证的同一份** `.tgz`/`.whl`，不重新构建，因此注册表上的字节与矩阵验证一致。发布前确认名称仍可用：
+
+```sh
+npm view dairn version                                  # 404 表示未被占用
+curl -s -o /dev/null -w '%{http_code}\n' https://pypi.org/pypi/dairn/json
+```
+
+两个名称当前都未被占用。工作流入口：Actions → **发布到 npm 与 PyPI** → Run workflow，填写已发布的标签（如 `v0.1.0-rc.1`），选择 `both`/`npm`/`pypi`。
+
+### npm（npmjs.com）
+
+1. 在 npmjs.com 注册账号，创建 Granular Access Token（Publish 权限，作用域限 `dairn` 或新包），存为仓库 Secret `NPM_TOKEN`。
+2. 发布命令与工作流等价：`npm publish incoming/dairn-0.1.0-rc.1.tgz --access public --tag next`。预发布版本（带 `-alpha`/`-beta`/`-rc`）必须用 `--tag next`，正式版才用 `--tag latest`，否则 `npm install dairn` 会装到预发布版。
+3. 版本不可覆盖：同一版本重复发布会失败，需先升版本（新标签）。
+4. 可选升级：npmjs.com → 包 Settings → Trusted Publishing 配置 GitHub 仓库、工作流 `registry-publish.yml` 和环境 `npm`；随后可移除 `NPM_TOKEN`，由 OIDC 发布并附带 provenance（需 `package.json` 含 `repository` 字段并给 `npm publish` 加 `--provenance`）。
+
+### PyPI（pypi.org）
+
+1. 在 pypi.org 注册账号并创建 API token（首次发布可先用账号级 token，项目建立后收紧到 `dairn` 项目），存为仓库 Secret `PYPI_TOKEN`。
+2. 发布命令与工作流等价：`python -m twine upload dist/dairn-0.1.0rc1-py3-none-any.whl`（用户名 `__token__`，密码为 token）。工作流使用 `TWINE_USERNAME=__token__` 与 `PYPI_TOKEN`。
+3. PyPI 上预发布版本默认可下载但不被 `pip install dairn` 选中，需要 `pip install --pre dairn`；正式版正常安装。
+4. 版本不可覆盖：同一版本重复上传会失败，需先升版本（新标签）。
+5. 可选升级：PyPI → Publishing 添加 GitHub trusted publisher（仓库 `moorefu/dairn`、工作流 `registry-publish.yml`、环境 `pypi`），再把工作流里的 twine 步骤换成 `pypa/gh-action-pypi-publish@release/v1`，无需长期 token。
+
+GitHub Release 与注册表发布互相独立：Release 永远先发；注册表发布会因名称被占用、版本已存在或令牌缺失而失败，此时补新版本再发，不要覆盖已发布字节。
 
 ## 本地复核
 
