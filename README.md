@@ -4,19 +4,19 @@ Dairn 是供 AI Agent 调用的开发治理内核，提供项目初始化、确�
 
 ## 安装
 
-npm 包名、PyPI 分发名与模块名都是 `dairn`；包内自带 APE 和校验信息，安装时无需另外下载运行时。CLI 命令名是 `dairn`。版本由发布标签决定：正式版进入默认通道，预发布进入 npm 的 `next` dist-tag 与 PyPI 的预发布通道。
+npm 包名是 `@moorefu/dairn`（unscoped `dairn` 被 npm 以“与既有包过于相似”为由拒绝），PyPI 分发名与模块名是 `dairn`；包内自带 APE 和校验信息，安装时无需另外下载运行时。CLI 命令名是 `dairn`。版本由发布标签决定：正式版进入默认通道，预发布进入 npm 的 `next` dist-tag 与 PyPI 的预发布通道。
 
 | 渠道 | 安装方式 | 环境 |
 | --- | --- | --- |
-| npm（[npmjs.com](https://www.npmjs.com/package/dairn)） | `npm install dairn`；预发布 `npm install dairn@next` | Node.js 18+、npm |
+| npm（[npmjs.com](https://www.npmjs.com/package/@moorefu/dairn)） | `npm install @moorefu/dairn`；预发布 `npm install @moorefu/dairn@next` | Node.js 18+、npm |
 | PyPI（[pypi.org](https://pypi.org/project/dairn/)） | `python -m pip install dairn`；预发布 `python -m pip install --pre dairn` | Python 3.10+ |
 | 离线 tgz（[dairn-latest.tgz](https://github.com/moorefu/dairn/releases/download/latest/dairn-latest.tgz)） | `npm install --offline --ignore-scripts ./dairn-latest.tgz` | Node.js 18+、npm |
 | 离线 Wheel（[安装索引 wheels.html](https://github.com/moorefu/dairn/releases/download/latest/wheels.html)） | `python -m pip install --upgrade --pre --no-index --find-links ./wheels.html dairn` | Python 3.10+ |
 | 离线 ZIP（[dairn-latest.zip](https://github.com/moorefu/dairn/releases/download/latest/dairn-latest.zip)） | 解压后使用 `dairn.cmd` 或 `sh dairn.sh` | 自带 QuickJS 运行时 |
 
-如果默认通道还没有正式版（例如当前只有预发布版本），上面的 `npm install dairn` / `pip install dairn` 会找不到可安装版本，请改用 `@next` / `--pre`；也可以固定到具体版本：`npm install dairn@<版本>`、`python -m pip install dairn==<PEP 440 版本>`。
+如果默认通道还没有正式版（例如当前只有预发布版本），上面的 `npm install @moorefu/dairn` / `pip install dairn` 会找不到可安装版本，请改用 `@next` / `--pre`；也可以固定到具体版本：`npm install @moorefu/dairn@<版本>`、`python -m pip install dairn==<PEP 440 版本>`。
 
-npm 本地安装后用 `npx dairn` 调用，全局安装（`npm install -g dairn`）后可直接 `dairn`。`latest` 是离线下载入口，包内保留真实版本；Wheel 按规范保留版本文件名，下载索引后 pip 会获取其中指定的 Wheel 并校验 SHA256；需要固定版本时使用 [历史 Release](https://github.com/moorefu/dairn/releases)。
+npm 本地安装后用 `npx dairn` 调用，全局安装（`npm install -g @moorefu/dairn`）后可直接 `dairn`。`latest` 是离线下载入口，包内保留真实版本；Wheel 按规范保留版本文件名，下载索引后 pip 会获取其中指定的 Wheel 并校验 SHA256；需要固定版本时使用 [历史 Release](https://github.com/moorefu/dairn/releases)。
 
 ## 使用
 
