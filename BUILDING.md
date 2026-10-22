@@ -53,7 +53,7 @@ Linux 可在 `python:3.12-bookworm` 容器中执行该脚本。Windows Podman �
 | macOS | x64 | `macos-15-intel` | npm、Wheel、ZIP |
 | macOS | ARM64 | `macos-15` | npm、Wheel、ZIP |
 
-npm/Wheel 任务离线安装各自制品；ZIP 任务检查运行文件白名单，解压并使用自身启动器。三类均检查版本、失败退出码、中文/空格路径下的初始化和项目校验。npm 另测损坏拒绝；Wheel 另测 RECORD 与源码重建；ZIP 另测原生宿主、策略、空 PATH 运行与自举、源码变更重嵌入。构建回归从 checkout 暂存源码并装入本次发布的 APE；Linux ZIP 任务补充完整治理与 Go race 回归。
+矩阵统一使用 `--smoke` 最小验证：校验制品指纹，安装 npm/Wheel 或解压 ZIP，再执行 `version`、初始化和 `validate`。初始化使用 Python 模板，仅验证内嵌资源和项目结构，不执行项目工具链。runner 不安装 Go，不跑 Go race、npm 深度测试、源码重建或自举回归；源码编译集中在构建任务。
 
 各任务独立保存结果，不跳过失败；18 个任务全部成功后汇总才通过。Windows ARM64 由系统兼容层执行 APE 的 Windows x64 入口。流程支持 push、PR 和手动版本参数，上传制品但不自动发布注册表包。
 
@@ -62,10 +62,10 @@ npm/Wheel 任务离线安装各自制品；ZIP 任务检查运行文件白名单
 ```sh
 python -B -X utf8 tools/verify-packages.py
 python tools/checksums.py
-python -B -X utf8 tools/verify-packages.py --artifacts dist --package npm --out validation/distribution/windows-npm
-python -B -X utf8 tools/verify-podman.py --image localhost/dairn-validation:2026-10-22 --artifacts dist --package zip --out validation/distribution/linux-zip
+python -B -X utf8 tools/verify-packages.py --smoke --artifacts dist --package npm --out validation/smoke/windows-npm
+python -B -X utf8 tools/verify-podman.py --image localhost/dairn-validation:2026-10-22 --smoke --artifacts dist --package zip --out validation/smoke/linux-zip
 ```
 
-`--package` 可选 `npm`、`wheel`、`zip` 或默认的 `all`。本地完整镜像由 `tools/Containerfile.validation` 组合官方 Python、Node、Go 镜像；运行验收时断网。日志与 JSON 结果保存在 `validation/`，不再另外维护 Markdown 验收报告。
+`--package` 可选 `npm`、`wheel`、`zip` 或默认的 `all`。`--smoke` 与 Actions 保持一致；不加此参数可在本地运行完整制品验收。`tools/verify-linux.py` 的 Go 回归仅供本地按需执行。本地镜像由 `tools/Containerfile.validation` 组合，运行验收时断网。日志与 JSON 结果保存在已忽略的 `validation/`。
 
-本地覆盖 Windows x64 和 Linux x64；macOS/ARM64 需以远程 Actions 结果为准。按当前要求尚未推送或运行远程矩阵，目标仓库为 [moorefu/dairn](https://github.com/moorefu/dairn)。
+本地覆盖 Windows x64 和 Linux x64；macOS/ARM64 以 [moorefu/dairn 的 Actions](https://github.com/moorefu/dairn/actions) 对应提交结果为准。

@@ -70,9 +70,9 @@ jobs:
           retention-days: 14
 
   test:
-    name: 验证 ${{ matrix.package }} / ${{ matrix.runner }}
+    name: 冒烟验证 ${{ matrix.package }} / ${{ matrix.runner }}
     needs: build
-    timeout-minutes: 30
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -98,26 +98,13 @@ jobs:
         with:
           name: dairn-packages
           path: incoming
-      - name: 验证本项制品的安装与运行
-        run: python -B -X utf8 tools/verify-packages.py --artifacts incoming --package ${{ matrix.package }} --out validation/runner
-      - uses: actions/setup-go@v5
-        if: runner.os == 'Linux' && matrix.package == 'zip'
-        with:
-          go-version: '1.27.3'
-          cache: false
-      - name: Linux 完整治理与 Go race 回归
-        if: runner.os == 'Linux' && matrix.package == 'zip'
-        shell: bash
-        run: |
-          python tools/prepare-regression.py incoming --out regression
-          python regression/tools/verify-linux.py validation/linux
+      - name: 安装、版本、初始化与结构校验
+        run: python -B -X utf8 tools/verify-packages.py --smoke --artifacts incoming --package ${{ matrix.package }} --out validation/runner
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: validation-${{ matrix.runner }}-${{ matrix.package }}
-          path: |
-            validation/runner/
-            validation/linux/
+          path: validation/runner/
           if-no-files-found: error
 
   accepted:

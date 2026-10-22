@@ -14,12 +14,17 @@ parser.add_argument('--runtime-zip', type=Path, help='从运行 ZIP 装入待测
 parser.add_argument('--packages', action='store_true', help='使用含 pip/venv 的 Python 镜像验收打包与自举')
 parser.add_argument('--artifacts', type=Path, help='在含 Python/npm 的镜像中验收同一套已构建制品')
 parser.add_argument('--package', choices=['all', 'npm', 'wheel', 'zip'], default='all')
+parser.add_argument('--smoke', action='store_true', help='与 Actions 一致，只执行制品冒烟验证')
 parser.add_argument('--out', type=Path, default=root / 'validation/windows')
 args = parser.parse_args()
+if args.smoke and not args.artifacts:
+    parser.error('--smoke 需要 --artifacts')
 image = json.loads(subprocess.check_output(['podman', 'image', 'inspect', args.image]))[0]
 runner = 'python3 tools/verify-packages.py --skip-npm --out /results' if args.packages else 'python3 tools/verify-linux.py /results'
 if args.artifacts:
     runner = 'python3 tools/verify-packages.py --artifacts /artifacts --package ' + args.package + ' --out /results'
+    if args.smoke:
+        runner += ' --smoke'
     args.runtime_zip = checked_runtime_zip(root, args.artifacts)
 cid = subprocess.check_output([
     'podman', 'create', '--network', 'none', '--entrypoint', '/bin/sh', args.image,

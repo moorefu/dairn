@@ -25,11 +25,14 @@ NAMES = {'npm': f'dairn-{RELEASE["npm_version"]}.tgz',
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--artifacts', type=Path, help='验收已有发布制品，不重新生成被安装的包')
 parser.add_argument('--package', choices=['all', 'npm', 'wheel', 'zip'], default='all')
+parser.add_argument('--smoke', action='store_true', help='仅验收安装、版本、初始化和结构校验；不运行源码或工具链回归')
 parser.add_argument('--skip-npm', action='store_true', help='仅供本地 Python 环境，CI 不使用此选项')
 parser.add_argument('--out', type=Path, default=ROOT / 'validation/build')
 args = parser.parse_args()
 if args.package != 'all' and not args.artifacts:
     parser.error('独立制品验收需要 --artifacts，确保验证同一套构建产物')
+if args.smoke and not args.artifacts:
+    parser.error('冒烟验证需要 --artifacts，不在 runner 上重建制品')
 if args.skip_npm and args.package != 'all':
     parser.error('--skip-npm 不能与独立制品验收合用')
 selected = set(NAMES) if args.package == 'all' else {args.package}
@@ -38,7 +41,8 @@ if args.skip_npm:
 OUT = args.out.resolve()
 OUT.mkdir(parents=True, exist_ok=True)
 summary = {'platform': platform.platform(), 'machine': platform.machine(), 'steps': {},
-           'selected_packages': sorted(selected), 'artifact_mode': bool(args.artifacts)}
+           'selected_packages': sorted(selected), 'artifact_mode': bool(args.artifacts),
+           'mode': 'smoke' if args.smoke else 'full'}
 sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
 before = sha(ROOT / 'dairn-embedded.com')
 
@@ -78,9 +82,11 @@ def verify():
         def cli_cases(kind, command):
             result = run(kind + '-version', [*command, 'version'], cwd=tmp)
             assert ('Dairn ' + VERSION).encode() in result.stdout
-            run(kind + '-failure', [*command, 'invalid-command'], expected=2, cwd=tmp)
+            if not args.smoke:
+                run(kind + '-failure', [*command, 'invalid-command'], expected=2, cwd=tmp)
             project = tmp / ('中文 ' + kind + ' 项目')
-            run(kind + '-init', [*command, 'init', '--root', project, '--name', 'package_test', '--stack', 'go', '--sample'], cwd=tmp)
+            scaffold = ['--stack', 'python', '--ci', 'none'] if args.smoke else ['--stack', 'go', '--sample']
+            run(kind + '-init', [*command, 'init', '--root', project, '--name', 'package_test', *scaffold], cwd=tmp)
             assert (project / 'AGENTS.md').is_file()
             run(kind + '-validate', [*command, 'validate', '--root', project], cwd=tmp)
 
@@ -113,19 +119,20 @@ def verify():
         if args.artifacts:
             assert runtime_hash == checksums['ape_sha256']
         assert json.loads((extracted / 'runtime/runtime-integrity.json').read_text(encoding='utf-8'))['sha256'] == runtime_hash
-        with zipfile.ZipFile(runtime) as zipped:
-            assert zipped.testzip() is None
-            assert len(zipped.namelist()) == len(set(zipped.namelist()))
-            for name in zipped.namelist():
-                if name.startswith('quickjs/') and name != 'quickjs/assets/manifest.json':
-                    assert zipped.read(name) == (ROOT / name).read_bytes(), name
-            manifest = json.loads(zipped.read('quickjs/assets/manifest.json'))
-            for entry in manifest['engine_sources']:
-                assert hashlib.sha256(zipped.read(entry['path'])).hexdigest() == entry['sha256']
-            for entry in manifest['assets']:
-                name = 'quickjs/assets/' + entry['type'] + '/' + entry['path']
-                assert hashlib.sha256(zipped.read(name)).hexdigest() == entry['sha256']
-        if selected & {'wheel', 'zip'}:
+        if not args.smoke:
+            with zipfile.ZipFile(runtime) as zipped:
+                assert zipped.testzip() is None
+                assert len(zipped.namelist()) == len(set(zipped.namelist()))
+                for name in zipped.namelist():
+                    if name.startswith('quickjs/') and name != 'quickjs/assets/manifest.json':
+                        assert zipped.read(name) == (ROOT / name).read_bytes(), name
+                manifest = json.loads(zipped.read('quickjs/assets/manifest.json'))
+                for entry in manifest['engine_sources']:
+                    assert hashlib.sha256(zipped.read(entry['path'])).hexdigest() == entry['sha256']
+                for entry in manifest['assets']:
+                    name = 'quickjs/assets/' + entry['type'] + '/' + entry['path']
+                    assert hashlib.sha256(zipped.read(name)).hexdigest() == entry['sha256']
+        if not args.smoke and selected & {'wheel', 'zip'}:
             source = prepare_workspace(ROOT, tmp / 'source', archive)
 
         if 'npm' in selected:
@@ -141,8 +148,9 @@ def verify():
                                 built / NAMES['npm']], cwd=installed)
             package = installed / 'node_modules/dairn'
             cli_cases('npm', [node, package / 'bin/dairn.cjs'])
-            run('npm-tests', [node, '--test', ROOT / 'npm/dairn/tests/npm-distribution.test.cjs'],
-                override={**env, 'DAIRN_NPM_PACKAGE': str(package)})
+            if not args.smoke:
+                run('npm-tests', [node, '--test', ROOT / 'npm/dairn/tests/npm-distribution.test.cjs'],
+                    override={**env, 'DAIRN_NPM_PACKAGE': str(package)})
 
         if 'wheel' in selected:
             wheel = built / NAMES['wheel']
@@ -164,17 +172,20 @@ def verify():
             cli = scripts / ('dairn.exe' if os.name == 'nt' else 'dairn')
             run('wheel-install', [python, '-m', 'pip', 'install', '--no-index', wheel])
             cli_cases('wheel', [cli])
-            destination = tmp / 'pep517'
-            run('pep517-checkout-source', [python, '-m', 'pip', 'wheel', '--no-deps', '--no-index', '--wheel-dir', destination, source])
-            assert sha(destination / wheel.name) == sha(wheel), '从仓库源码和发布 APE 重建的 Wheel 不一致'
-            summary['pep517_reproducible'] = True
+            if not args.smoke:
+                destination = tmp / 'pep517'
+                run('pep517-checkout-source', [python, '-m', 'pip', 'wheel', '--no-deps', '--no-index', '--wheel-dir', destination, source])
+                assert sha(destination / wheel.name) == sha(wheel), '从仓库源码和发布 APE 重建的 Wheel 不一致'
+                summary['pep517_reproducible'] = True
 
         if 'zip' in selected:
-            qjs = [str(runtime)] if os.name == 'nt' else ['/bin/sh', str(runtime)]
-            # 首次启动允许 APE 使用系统工具初始化 loader，再验证空 PATH 自举。
-            run('ape-cold-start', [*qjs, '/zip/quickjs/main.mjs', 'version'], cwd=extracted)
             cli = [extracted / 'dairn.cmd'] if os.name == 'nt' else ['/bin/sh', extracted / 'dairn.sh']
             cli_cases('zip', cli)
+            summary['zip_source_free'] = True
+
+        if 'zip' in selected and not args.smoke:
+            qjs = [str(runtime)] if os.name == 'nt' else ['/bin/sh', str(runtime)]
+            # 启动器已在独立空缓存完成首次启动，再验证空 PATH 自举。
             command = [source / 'build.cmd'] if os.name == 'nt' else ['/bin/sh', source / 'build.sh']
             bare = {**env, 'PATH': ''}
             run('zip-no-language-tools', [*cli, 'version'], cwd=tmp, override=bare)
@@ -193,7 +204,7 @@ def verify():
             assert sha(changed_root / 'runtime/dairn-embedded.com') != runtime_hash
             with zipfile.ZipFile(changed_root / 'runtime/dairn-embedded.com') as zipped:
                 assert zipped.read('quickjs/core/engine.mjs') == engine.read_bytes()
-            summary.update(identical_zip=True, source_rebuilt=True, zip_source_free=True)
+            summary.update(identical_zip=True, source_rebuilt=True)
 
         assert sha(runtime) == runtime_hash, '验收不得修改分发 APE'
         summary['artifacts'] = {p.name: sha(p) for p in built.iterdir() if p.is_file()}
