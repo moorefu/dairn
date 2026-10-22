@@ -143,8 +143,9 @@ jobs:
           path: validation/ci/
           if-no-files-found: error
 
-  test-windows-integration:
-    name: Windows 集成回归（launcher + Go -race）
+  test-python-windows:
+    name: Python 集成回归（Windows 套件）
+    needs: build
     runs-on: windows-2025
     timeout-minutes: 45
     steps:
@@ -158,12 +159,33 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
-      - uses: actions/cache@v4
+      - uses: actions/download-artifact@v4
         with:
-          path: .build/quickjs
-          key: quickjs-${{ runner.os }}-${{ hashFiles('quickjs.lock.json') }}
-      - name: 构建运行时与三类制品
-        run: python tools/build.py
+          name: dairn-packages
+          path: incoming
+      - name: 从发布 ZIP 提取运行时
+        shell: pwsh
+        run: |
+          $code = @'
+          import glob
+          import pathlib
+          import zipfile
+
+          candidates = glob.glob('incoming/*.zip')
+          assert len(candidates) == 1, candidates
+          with zipfile.ZipFile(candidates[0]) as zipped:
+              runtime = [name for name in zipped.namelist()
+                         if name.endswith('/runtime/dairn-embedded.com')]
+              integrity = [name for name in zipped.namelist()
+                           if name.endswith('/runtime/runtime-integrity.json')]
+              assert len(runtime) == 1 and len(integrity) == 1, (runtime, integrity)
+              target = pathlib.Path('runtime')
+              target.mkdir(parents=True, exist_ok=True)
+              (target / 'dairn-embedded.com').write_bytes(zipped.read(runtime[0]))
+              (target / 'runtime-integrity.json').write_bytes(zipped.read(integrity[0]))
+          print('extracted runtime from release ZIP')
+          '@
+          $code | python -
       - name: 定位 MSYS2/MinGW gcc
         shell: pwsh
         run: |
@@ -178,10 +200,10 @@ jobs:
           if (-not (Test-Path $gcc)) { throw "gcc missing: $gcc" }
           & $gcc --version
           "CC_BIN=$(Split-Path -Parent $gcc)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: 完整 Windows 验收（Go -race 纳入总体验收）
+      - name: Python 集成回归（Windows 套件）
         env:
           DAIRN_OFFLINE: '1'
-        run: python -B -X utf8 tools/verify-windows.py --cc-bin "$env:CC_BIN" --require-go-checks
+        run: python -B -X utf8 tools/verify-windows.py --artifacts incoming --cc-bin "$env:CC_BIN" --require-go-checks
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -192,7 +214,7 @@ jobs:
   accepted:
     name: 全部矩阵通过
     if: always()
-    needs: [build, test, test-python, test-windows-integration]
+    needs: [build, test, test-python, test-python-windows]
     runs-on: ubuntu-24.04
     steps:
       - name: 必须全部成功
@@ -200,8 +222,8 @@ jobs:
           BUILD_RESULT: ${{ needs.build.result }}
           TEST_RESULT: ${{ needs.test.result }}
           TEST_PYTHON_RESULT: ${{ needs.test-python.result }}
-          TEST_WINDOWS_INTEGRATION_RESULT: ${{ needs.test-windows-integration.result }}
-        run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success && test "$TEST_PYTHON_RESULT" = success && test "$TEST_WINDOWS_INTEGRATION_RESULT" = success
+          TEST_PYTHON_WINDOWS_RESULT: ${{ needs.test-python-windows.result }}
+        run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success && test "$TEST_PYTHON_RESULT" = success && test "$TEST_PYTHON_WINDOWS_RESULT" = success
 
   publish:
     name: 发布版本与 latest 三类制品

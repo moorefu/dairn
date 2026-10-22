@@ -92,9 +92,9 @@ Linux 可在 `python:3.12-bookworm` 容器中执行该脚本。Windows Podman �
 除矩阵外还有两个集成回归 job，均被 `accepted` 汇总门禁：
 
 - **test-python**（`ubuntu-24.04`）：从发布 ZIP 提取运行时，运行 `tools/verify-linux.py` 的 15 个 Python 套件 + native policy/host；工作流清空 CI 平台变量，模拟本地开发者环境。
-- **test-windows-integration**（`windows-2025`）：重新构建 Windows 运行时与三类制品，定位 MSYS2/MinGW gcc（镜像预装或 `C:\msys64\pacman` 安装），运行 `tools/verify-windows.py --cc-bin <gcc目录> --require-go-checks`。该 job 覆盖 launcher/vendored runtime、npm/Wheel 安装、Go `-race`（纳入总体验收）与 fresh-clone 受管哈希；产物写入 `validation/windows` 并上传 artifact。
+- **test-python-windows**（`windows-2025`）：与 Linux 套件同源复用 build job 的 `dairn-packages` artifact——从发布 ZIP 提取运行时，并把 wheel/npm 制品复制到 `dist/`（`verify-windows.py --artifacts incoming`），不在 Windows 重新构建任何制品；不下载 QuickJS、不跑 `python tools/build.py`。随后定位 MSYS2/MinGW gcc（镜像预装或 `C:\msys64\pacman` 安装），运行 `tools/verify-windows.py --artifacts incoming --cc-bin <gcc目录> --require-go-checks`。脚本同样清空 CI 平台变量；覆盖 launcher/vendored runtime、npm/Wheel 安装、Go `-race`（纳入总体验收）与 fresh-clone 受管哈希；产物写入 `validation/windows` 并上传 artifact。
 
-各任务独立保存结果，不跳过失败；矩阵、test-python 与 Windows 集成回归全部成功后汇总才通过。Windows ARM64 由系统兼容层执行 APE 的 Windows x64 入口。流程支持 push、PR 和手动运行，上游版本统一从锁文件读取；发布只由标签触发。
+各任务独立保存结果，不跳过失败；矩阵、test-python 与 test-python-windows 全部成功后汇总才通过。Windows ARM64 由系统兼容层执行 APE 的 Windows x64 入口。流程支持 push、PR 和手动运行，上游版本统一从锁文件读取；发布只由标签触发。
 
 推送 `v<版本>` 标签且矩阵全部通过后，发布任务才下载本次已验证的同一套制品，校验 SHA256，再上传 npm `.tgz`、Wheel `.whl`、运行 `.zip` 和 `checksums.json` 至 GitHub Release。发布版本即标签版本（`package.json` 只在该次运行没有标签时兜底）；alpha/beta/rc 标为预发布。普通分支推送和 PR 只构建验证、不发布，只有发布任务获得 `contents: write`。GitHub Release 只是附件；npm 与 PyPI 通过下面的注册表发布工作流单独推送。
 

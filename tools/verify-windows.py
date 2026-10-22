@@ -27,6 +27,9 @@ parser.add_argument('--cc-bin', type=Path, default=None,
                     help='C 编译器目录（如 E:\\msys64\\mingw64\\bin），用于 CGO/Go -race')
 parser.add_argument('--require-go-checks', action='store_true',
                     help='要求 go-checks（含 -race）通过并纳入总体验收')
+parser.add_argument('--artifacts', type=Path, default=None,
+                    help='复用已构建的发布制品目录（含 wheel/tgz）；跳过 npm run build，'
+                         '与 Linux 集成回归从 CI artifact 提取运行时的方式一致')
 args = parser.parse_args()
 if os.name != 'nt':
     parser.error('此脚本必须在 Windows 原生环境运行')
@@ -37,8 +40,22 @@ if args.cc_bin:
     if not gcc.is_file():
         parser.error('--cc-bin 下未找到 gcc.exe：' + str(gcc))
     args.cc_bin = args.cc_bin.resolve()
+if args.artifacts:
+    if not args.artifacts.is_dir():
+        parser.error('--artifacts 目录不存在：' + str(args.artifacts))
+    args.artifacts = args.artifacts.resolve()
+    (ROOT / 'dist').mkdir(parents=True, exist_ok=True)
+    for pattern in ('*.whl', '*.tgz', '*.zip', 'checksums.json'):
+        for source in sorted(args.artifacts.glob(pattern)):
+            shutil.copyfile(source, ROOT / 'dist' / source.name)
 OUT = ROOT / 'validation/windows'
 OUT.mkdir(parents=True, exist_ok=True)
+# 集成测试必须像本地开发者一样运行：清除 CI 平台注入的环境变量，
+# 否则 dairn check 会进入 CI 保护模式并要求 DAIRN_EXPECTED_POLICY_SHA256。
+for _key in ('GITHUB_ACTIONS','GITHUB_EVENT_NAME','GITHUB_EVENT_PATH','GITHUB_REF','GITHUB_SHA',
+             'GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB','GITHUB_REPOSITORY','GITHUB_WORKFLOW',
+             'GITLAB_CI','CI_PIPELINE_SOURCE','CI_MERGE_REQUEST_DIFF_BASE_SHA','CI_MERGE_REQUEST_LABELS'):
+    os.environ.pop(_key, None)
 APE = ROOT / 'runtime/dairn-embedded.com'
 # host 契约测试要求真正的 QuickJS 解释器作为子进程；构建缓存里有 qjs 时优先使用。
 _QJS_CANDIDATES = sorted((ROOT / '.build/quickjs').glob('qjs-*.com')) if (ROOT / '.build/quickjs').is_dir() else []
@@ -55,6 +72,9 @@ summary = {'platform': platform.platform(), 'ape_sha256': digest(APE),
            'go_skipped': args.skip_go,
            'go_checks_required': bool(args.require_go_checks and not args.skip_go),
            'cc_bin': str(args.cc_bin) if args.cc_bin else None,
+           'artifacts_source': str(args.artifacts) if args.artifacts else None,
+           'artifacts_reused': bool(args.artifacts),
+           'ci_env_cleared': True,
            'tests': {}}
 
 
@@ -73,8 +93,10 @@ def run(name, argv, expected=0, cwd=ROOT, timeout=180, run_env=None):
     return result
 
 
-names = ['cli', 'host', 'policy', 'npm', 'wheel-install', 'wheel', 'npm-pack',
-         'npm-install', 'npm-installed']
+names = ['cli', 'host', 'policy', 'npm', 'wheel-install', 'wheel']
+if not args.artifacts:
+    names += ['npm-pack']
+names += ['npm-install', 'npm-installed']
 if not args.skip_go:
     names += ['go-env', 'go-init', 'go-checks']
 for name in names:
@@ -109,7 +131,8 @@ with tempfile.TemporaryDirectory(prefix='dairn-win-') as temp:
                             'passed': result.returncode == expected})
     summary['tests']['wheel']['passed'] = all(c['passed'] for c in wheel_cases)
     (OUT / 'wheel.json').write_text(json.dumps(wheel_cases, indent=2) + '\n', encoding='utf-8')
-    run('npm-pack', ['npm.cmd', 'run', 'build'], run_env=isolated)
+    if not args.artifacts:
+        run('npm-pack', ['npm.cmd', 'run', 'build'], run_env=isolated)
     tgz = ROOT / 'dist' / NAMES['npm']
     summary['npm_tarball_sha256'] = digest(tgz)
     install = tmp / 'npm 项目'
