@@ -141,7 +141,9 @@ def verify():
 
         if 'npm' in selected:
             with tarfile.open(built / NAMES['npm']) as tar:
-                assert json.load(tar.extractfile('package/package.json'))['version'] == VERSION
+                package_meta = json.load(tar.extractfile('package/package.json'))
+                assert package_meta['version'] == VERSION
+                assert package_meta['name'] == RELEASE['npm_name'], 'npm tarball 包名必须与 package.json 一致'
                 ape_member = tar.getmember('package/runtime/dairn-embedded.com')
                 if os.name != 'nt':
                     assert ape_member.mode & 0o111, 'npm 包内运行时必须带执行位，否则 bash 无法执行 APE 加载器'
@@ -155,7 +157,7 @@ def verify():
             (installed / 'package.json').write_text('{"private":true,"name":"dairn-test"}')
             run('npm-install', [npm, 'install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund',
                                 built / NAMES['npm']], cwd=installed)
-            package = installed / 'node_modules/dairn'
+            package = installed / 'node_modules' / package_meta['name']
             cli_cases('npm', [node, package / 'bin/dairn.cjs'])
             if not args.smoke:
                 run('npm-tests', [node, '--test', ROOT / 'tools/tests/npm-distribution.test.cjs'],

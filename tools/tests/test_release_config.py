@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from release_config import artifact_names, load_release, tag_version, version_info
+from release_config import artifact_names, load_release, npm_filename, tag_version, version_info
 
 
 class ReleaseConfigTests(unittest.TestCase):
@@ -32,13 +32,26 @@ class ReleaseConfigTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, '不是有效的发布版本'):
                 tag_version(name)
 
-    def release_root(self, temp, version='2.3.4'):
+    def release_root(self, temp, version='2.3.4', npm_name='dairn'):
         root = Path(temp)
         (root / 'tools').mkdir()
         (root / 'tools/release.json').write_text(
             json.dumps({'name': 'dairn', 'python_name': 'dairn'}), encoding='utf-8')
-        (root / 'package.json').write_text(json.dumps({'version': version}), encoding='utf-8')
+        (root / 'package.json').write_text(
+            json.dumps({'name': npm_name, 'version': version}), encoding='utf-8')
         return root
+
+    def test_scoped_npm_name_drives_tarball_filename(self):
+        self.assertEqual(npm_filename('@moorefu/dairn'), 'moorefu-dairn')
+        with tempfile.TemporaryDirectory(prefix='dairn-version-') as temp:
+            root = self.release_root(temp, npm_name='@moorefu/dairn')
+            with patch.dict(os.environ, {'DAIRN_VERSION': 'v0.1.0-rc.2'}, clear=True):
+                release = load_release(root)
+            self.assertEqual(release['npm_name'], '@moorefu/dairn')
+            self.assertEqual(artifact_names(release), {
+                'npm': 'moorefu-dairn-0.1.0-rc.2.tgz',
+                'wheel': 'dairn-0.1.0rc2-py3-none-any.whl',
+                'zip': 'dairn-0.1.0-rc.2.zip'})
 
     def test_tag_version_overrides_package_json(self):
         with tempfile.TemporaryDirectory(prefix='dairn-version-') as temp:
@@ -67,7 +80,7 @@ class ReleaseConfigTests(unittest.TestCase):
             config = {'name': 'dairn', 'python_name': 'dairn'}
             (root / 'tools/release.json').write_text(json.dumps(config), encoding='utf-8')
             for version, wheel_version in [('2.3.4-rc.5', '2.3.4rc5'), ('3.0.0', '3.0.0')]:
-                (root / 'package.json').write_text(json.dumps({'version': version}), encoding='utf-8')
+                (root / 'package.json').write_text(json.dumps({'name': 'dairn', 'version': version}), encoding='utf-8')
                 with patch.dict(os.environ, {}, clear=True):
                     release = load_release(root)
                 self.assertEqual(artifact_names(release), {

@@ -74,23 +74,23 @@ Linux 可在 `python:3.12-bookworm` 容器中执行该脚本。Windows Podman �
 GitHub Release 只保存附件，注册表通过手动触发的 [注册表发布工作流](.github/workflows/registry-publish.yml) 发布：下载对应 Release 里**已验证的同一份** `.tgz`/`.whl`，不重新构建，因此注册表上的字节与矩阵验证一致。发布前确认名称仍可用：
 
 ```sh
-npm view dairn version                                  # 404 表示未被占用
+npm view @moorefu/dairn version                          # 404 表示该 scoped 包尚未创建
 curl -s -o /dev/null -w '%{http_code}\n' https://pypi.org/pypi/dairn/json
 ```
 
-两个名称中 PyPI 的 `dairn` 已建立，npm 首次发布前仍需确认名称可用。工作流入口：Actions → **发布到 npm 与 PyPI** → Run workflow，填写**版本标签**（如 `v0.1.0-rc.2`，不能填 `latest` 这类滚动别名），选择 `both`/`npm`/`pypi`。工作流会先检查目标版本是否已存在，已存在则跳过，因此发布成功后可以安全重跑 `both`；失败时会输出 `::error::` 注解和常见令牌问题提示，便于直接定位。
+npm 使用 scoped 包名 `@moorefu/dairn`（`moorefu` scope 须属于你的账号），PyPI 使用 `dairn`。工作流入口：Actions → **发布到 npm 与 PyPI** → Run workflow，填写**版本标签**（如 `v0.1.0-rc.2`，不能填 `latest` 这类滚动别名），选择 `both`/`npm`/`pypi`。工作流会先检查目标版本是否已存在，已存在则跳过，因此发布成功后可以安全重跑 `both`；失败时会输出 `::error::` 注解和常见令牌问题提示，便于直接定位。
 
 ### npm（npmjs.com）
 
-1. 在 npmjs.com 注册账号，创建 Granular Access Token（Publish 权限，作用域限 `dairn` 或新包），存为仓库 Secret `NPM_TOKEN`。
-2. 发布命令与工作流等价：`npm publish ./incoming/dairn-0.1.0-rc.1.tgz --access public --tag next`（tarball 路径必须带 `./` 或使用绝对路径，否则 npm 会按 GitHub `owner/repo` 简写解析）。预发布版本（带 `-alpha`/`-beta`/`-rc`）必须用 `--tag next`，正式版才用 `--tag latest`，否则 `npm install dairn` 会装到预发布版。
-3. 版本不可覆盖：同一版本重复发布会失败，需先升版本（新标签）；工作流已自动跳过已存在版本。若失败：`EOTP` 表示账号 2FA 要求一次性密码（改用 Automation token 或给 Granular token 勾选 Bypass 2FA）、`E401` 表示令牌无效或过期、`E403` 表示令牌缺少发布权限或作用域/包名不匹配。
+1. 在 npmjs.com 创建/使用 `@moorefu` scope，创建 Granular Access Token（Read and write + **All packages**——新包还无法在令牌里单独勾选；账号开启 2FA 时勾选 Bypass 2FA），存为仓库 Secret `NPM_TOKEN`。
+2. 发布命令与工作流等价：`npm publish ./incoming/moorefu-dairn-0.1.0-rc.2.tgz --access public --tag next`（tarball 路径必须带 `./` 或使用绝对路径，否则 npm 会按 GitHub `owner/repo` 简写解析）。预发布版本（带 `-alpha`/`-beta`/`-rc`）必须用 `--tag next`，正式版才用 `--tag latest`，否则 `npm install @moorefu/dairn` 会装到预发布版。
+3. 版本不可覆盖：同一版本重复发布会失败，需先升版本（新标签）；工作流已自动跳过已存在版本。若失败：`EOTP` 表示账号 2FA 要求一次性密码（改用 Automation token 或给 Granular token 勾选 Bypass 2FA）、`E401` 表示令牌无效或过期、`E403` 表示令牌缺少发布权限或 scope/包名不匹配。
 4. 可选升级：npmjs.com → 包 Settings → Trusted Publishing 配置 GitHub 仓库、工作流 `registry-publish.yml` 和环境 `npm`；随后可移除 `NPM_TOKEN`，由 OIDC 发布并附带 provenance（需 `package.json` 含 `repository` 字段并给 `npm publish` 加 `--provenance`）。
 
 ### PyPI（pypi.org）
 
 1. 在 pypi.org 注册账号并创建 API token（首次发布可先用账号级 token，项目建立后收紧到 `dairn` 项目），存为仓库 Secret `PYPI_TOKEN`。
-2. 发布命令与工作流等价：`python -m twine upload dist/dairn-0.1.0rc1-py3-none-any.whl`（用户名 `__token__`，密码为 token）。工作流使用 `TWINE_USERNAME=__token__` 与 `PYPI_TOKEN`。
+2. 发布命令与工作流等价：`python -m twine upload dist/dairn-0.1.0rc2-py3-none-any.whl`（用户名 `__token__`，密码为 token）。工作流使用 `TWINE_USERNAME=__token__` 与 `PYPI_TOKEN`。
 3. PyPI 上预发布版本默认可下载但不被 `pip install dairn` 选中，需要 `pip install --pre dairn`；正式版正常安装。
 4. 版本不可覆盖：同一版本重复上传会失败；此外 **PyPI 不允许重用已上传过的文件名，即使删除了项目或该版本也不行**，删除后必须升版本（新 tag）重新构建上传。
 5. 可选升级：PyPI → Publishing 添加 GitHub trusted publisher（仓库 `moorefu/dairn`、工作流 `registry-publish.yml`、环境 `pypi`），再把工作流里的 twine 步骤换成 `pypa/gh-action-pypi-publish@release/v1`，无需长期 token。

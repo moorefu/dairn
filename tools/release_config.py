@@ -36,16 +36,25 @@ def resolve_version(root=ROOT):
     return json.loads((Path(root) / 'package.json').read_text(encoding='utf-8'))['version']
 
 
+def npm_filename(npm_name):
+    """npm pack 对 scoped 包名使用去掉 @、把 / 换成 - 的文件名。"""
+    return npm_name.lstrip('@').replace('/', '-')
+
+
 def load_release(root=ROOT):
     root = Path(root)
     config = json.loads((root / 'tools/release.json').read_text(encoding='utf-8'))
     if {'version', 'python_version', 'npm_version'} & config.keys():
         raise ValueError('版本只由标签或 package.json 的 version 决定，release.json 不得定义')
-    return {**config, **version_info(resolve_version(root))}
+    package = json.loads((root / 'package.json').read_text(encoding='utf-8'))
+    npm_name = package.get('name')
+    if not isinstance(npm_name, str) or not npm_name.strip():
+        raise ValueError('package.json 必须定义 npm 包名 name')
+    return {**config, 'npm_name': npm_name, **version_info(resolve_version(root))}
 
 
 def artifact_names(config):
     info = version_info(config['version'])
-    return {'npm': f'{config["name"]}-{info["version"]}.tgz',
+    return {'npm': f'{npm_filename(config.get("npm_name", config["name"]))}-{info["version"]}.tgz',
             'wheel': f'{config["python_name"].replace("-", "_")}-{info["python_version"]}-py3-none-any.whl',
             'zip': f'{config["name"]}-{info["version"]}.zip'}
