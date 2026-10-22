@@ -143,10 +143,56 @@ jobs:
           path: validation/ci/
           if-no-files-found: error
 
+  test-windows-integration:
+    name: Windows 集成回归（launcher + Go -race）
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - uses: actions/cache@v4
+        with:
+          path: .build/quickjs
+          key: quickjs-${{ runner.os }}-${{ hashFiles('quickjs.lock.json') }}
+      - name: 构建运行时与三类制品
+        run: python tools/build.py
+      - name: 定位 MSYS2/MinGW gcc
+        shell: pwsh
+        run: |
+          $gcc = (Get-Command gcc.exe -ErrorAction SilentlyContinue).Source
+          if (-not $gcc) {
+            $pacman = 'C:\msys64\usr\bin\pacman.exe'
+            if (-not (Test-Path $pacman)) { throw 'gcc not found and MSYS2 pacman missing' }
+            & $pacman -Sy --noconfirm --needed mingw-w64-x86_64-gcc
+            if ($LASTEXITCODE -ne 0) { throw 'MSYS2 gcc installation failed' }
+            $gcc = 'C:\msys64\mingw64\bin\gcc.exe'
+          }
+          if (-not (Test-Path $gcc)) { throw "gcc missing: $gcc" }
+          & $gcc --version
+          "CC_BIN=$(Split-Path -Parent $gcc)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: 完整 Windows 验收（Go -race 纳入总体验收）
+        env:
+          DAIRN_OFFLINE: '1'
+        run: python -B -X utf8 tools/verify-windows.py --cc-bin "$env:CC_BIN" --require-go-checks
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-windows-integration
+          path: validation/windows/
+          if-no-files-found: error
+
   accepted:
     name: 全部矩阵通过
     if: always()
-    needs: [build, test, test-python]
+    needs: [build, test, test-python, test-windows-integration]
     runs-on: ubuntu-24.04
     steps:
       - name: 必须全部成功
@@ -154,7 +200,8 @@ jobs:
           BUILD_RESULT: ${{ needs.build.result }}
           TEST_RESULT: ${{ needs.test.result }}
           TEST_PYTHON_RESULT: ${{ needs.test-python.result }}
-        run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success && test "$TEST_PYTHON_RESULT" = success
+          TEST_WINDOWS_INTEGRATION_RESULT: ${{ needs.test-windows-integration.result }}
+        run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success && test "$TEST_PYTHON_RESULT" = success && test "$TEST_WINDOWS_INTEGRATION_RESULT" = success
 
   publish:
     name: 发布版本与 latest 三类制品

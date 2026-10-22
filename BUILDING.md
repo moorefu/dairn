@@ -44,12 +44,17 @@ POSIX 首次启动 APE 需要 `uname`、`mkdir`、`dd`、`gzip`、`chmod`、`mv`
 
 在 Windows x64 + Git for Windows 上先 `python tools/build.py`，再运行 `python tools/verify-windows.py`（需要 node/git/npm/go；Go 默认从 `C:\Program Files\Go\bin` 查找，也可用 `--go-bin` 指定）。**没有 Go 工具链时加 `--skip-go`**：跳过 `go-env/go-init/go-checks`，CLI、launcher、native host/policy、npm、wheel 步骤照常执行并参与总体验收（`go_skipped=true`，`acceptance_passed` 不含 Go）。
 
+要在本机把 Go `-race` 也纳入总体验收，提供 C 编译器目录并加 `--require-go-checks`，例如本机 MSYS2：
+
+```powershell
+python -B -X utf8 tools\verify-windows.py --cc-bin 'E:\msys64\mingw64\bin' --require-go-checks
+```
+
+脚本会把 `--cc-bin` 放到 PATH 最前并设置 `CC=gcc`、`CGO_ENABLED=1`，Go 临时缓存/临时对象放在 ASCII 路径（MSYS2 gcc 对非 ASCII `GOTMPDIR` 支持不稳定）。
+
 其中 `quickjs.tests.test_windows` 覆盖普通生命周期、junction 边界、真实子进程门禁，以及项目 launcher 文件、vendored 运行时离线执行、缺失运行时 127 报错、`core.autocrlf=true` 克隆后的受管哈希稳定性；`test_host_native.mjs` 用构建缓存中的原生 `qjs-*.com` 运行（没有缓存时回退 APE），覆盖 `host.readBytes` + 内建 SHA256。Go 步骤使用临时 `GOCACHE/GOTMPDIR/GOMODCACHE`，避免宿主机全局 Go 缓存 ACL 影响结果。
 
-本机实测（`go1.27.3 windows/amd64`，无 C 编译器）：
-
-- `cli/host/policy/npm/wheel-install/wheel/npm-pack/npm-install/npm-installed/go-env/go-init` 全部按预期通过，`acceptance_passed=true`、`original_unchanged=true`。
-- `go-checks`：`lint`/`unit`/`build` 通过；`integration`（`go test -race`）因 `CGO_ENABLED=0` 且无 `gcc` 失败。Go 门禁结果独立记录，不参与总体验收，避免在缺少 C 工具链时把“无法证明”伪装成“通过”。安装 MinGW-w64 等 C 编译器后该 gate 才可全绿。
+本机实测（`go1.27.3 windows/amd64` + MSYS2 `gcc 16.1.0`，`--cc-bin E:\msys64\mingw64\bin --require-go-checks`）：全部 12 个步骤通过，`go_checks` 的 `lint/unit/integration(-race)/build` 4/4 通过，`go_checks_required=true`、`acceptance_passed=true`、`original_unchanged=true`。
 
 Windows 相关实现约束：
 
@@ -84,7 +89,12 @@ Linux 可在 `python:3.12-bookworm` 容器中执行该脚本。Windows Podman �
 
 构建任务先获取并校验 QuickJS，自举嵌入后生成同一套三类制品，并在打包后执行 `sh ./dairn.sh docs check` 与 `python -m unittest quickjs.tests.test_assets_lint` 作为分发资产一致性门禁；标签推送时制品版本取自标签，没有标签时取 `package.json`。矩阵统一使用 `--smoke` 最小验证：校验制品指纹，安装 npm/Wheel 或解压 ZIP，再执行 `version`、初始化、`validate` 与 `docs check`。初始化使用 Python 模板，仅验证内嵌资源和项目结构，不执行项目工具链。测试 runner 不下载 QuickJS、不安装 Go，不跑 Go race、npm 深度测试或自举回归。
 
-各任务独立保存结果，不跳过失败；6 个任务全部成功后汇总才通过。Windows ARM64 由系统兼容层执行 APE 的 Windows x64 入口。流程支持 push、PR 和手动运行，上游版本统一从锁文件读取；发布只由标签触发。
+除矩阵外还有两个集成回归 job，均被 `accepted` 汇总门禁：
+
+- **test-python**（`ubuntu-24.04`）：从发布 ZIP 提取运行时，运行 `tools/verify-linux.py` 的 15 个 Python 套件 + native policy/host；工作流清空 CI 平台变量，模拟本地开发者环境。
+- **test-windows-integration**（`windows-2025`）：重新构建 Windows 运行时与三类制品，定位 MSYS2/MinGW gcc（镜像预装或 `C:\msys64\pacman` 安装），运行 `tools/verify-windows.py --cc-bin <gcc目录> --require-go-checks`。该 job 覆盖 launcher/vendored runtime、npm/Wheel 安装、Go `-race`（纳入总体验收）与 fresh-clone 受管哈希；产物写入 `validation/windows` 并上传 artifact。
+
+各任务独立保存结果，不跳过失败；矩阵、test-python 与 Windows 集成回归全部成功后汇总才通过。Windows ARM64 由系统兼容层执行 APE 的 Windows x64 入口。流程支持 push、PR 和手动运行，上游版本统一从锁文件读取；发布只由标签触发。
 
 推送 `v<版本>` 标签且矩阵全部通过后，发布任务才下载本次已验证的同一套制品，校验 SHA256，再上传 npm `.tgz`、Wheel `.whl`、运行 `.zip` 和 `checksums.json` 至 GitHub Release。发布版本即标签版本（`package.json` 只在该次运行没有标签时兜底）；alpha/beta/rc 标为预发布。普通分支推送和 PR 只构建验证、不发布，只有发布任务获得 `contents: write`。GitHub Release 只是附件；npm 与 PyPI 通过下面的注册表发布工作流单独推送。
 

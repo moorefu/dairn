@@ -35,7 +35,8 @@ class NotesSeal(unittest.TestCase):
         self.root=self.work/'project'
         self.ok('init','--path',self.root,'--stack','go','--sample')
         self.note=self.root/'.agents/notes/archived/architecture/2026-10-01-storage.md'
-        self.note.parent.mkdir(parents=True)
+        # init 会预建 archived/<kind> 目录（空目录不随 Git 分发），这里允许已存在。
+        self.note.parent.mkdir(parents=True, exist_ok=True)
         self.note.write_text(NOTE)
 
     def call(self,*args):

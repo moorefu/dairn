@@ -2,6 +2,7 @@
  * These are structural checks, NOT proof of human approval or trusted CI execution.
  */
 import {tasksValidate} from './tasks.mjs';
+import {sha256} from './sha256.mjs';
 const posix = p => p.replace(/\\/g, '/');
 const join = (a,b) => a.replace(/\/$/,'')+'/'+b;
 const isObj = x => x !== null && typeof x === 'object' && !Array.isArray(x);

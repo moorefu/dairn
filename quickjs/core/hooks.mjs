@@ -232,6 +232,8 @@ export function installHooks(h, root, o) {
       catch (e) { warnings.push('chmod failed for ' + action.path + ': ' + (e && e.message ? e.message : String(e))); }
     }
   }
-  const applied = actions.filter(action => action.status === 'create' || action.status === 'update').length;
+  // applied 只统计真正写盘的动作；plan（未加 --apply）必须报告 0，
+  // 否则 CI/Agent 会把“计划了 5 个文件”误读为“已安装 5 个 hook”。
+  const applied = apply ? actions.filter(action => action.status === 'create' || action.status === 'update').length : 0;
   return {schema: 1, apply, applied, actions: actions.map(action => ({path: action.path, status: action.status})), warnings};
 }

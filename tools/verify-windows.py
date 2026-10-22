@@ -2,6 +2,8 @@
 
 没有 Go 工具链时可用 --skip-go：跳过 go-env/go-init/go-checks，其余 CLI、
 launcher、npm、wheel、native 检查照常执行并参与总体验收。
+默认 Go 结果独立记录（-race 依赖 CGO/C 编译器）；提供 --cc-bin（如
+E:\\msys64\\mingw64\\bin）并加 --require-go-checks 时，Go 门禁纳入总体验收。
 """
 import argparse
 import hashlib
@@ -21,9 +23,20 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--go-bin', type=Path, default=Path(r'C:\Program Files\Go\bin'))
 parser.add_argument('--skip-go', action='store_true',
                     help='没有 Go 工具链时跳过 Go 相关步骤（其余验收照常执行）')
+parser.add_argument('--cc-bin', type=Path, default=None,
+                    help='C 编译器目录（如 E:\\msys64\\mingw64\\bin），用于 CGO/Go -race')
+parser.add_argument('--require-go-checks', action='store_true',
+                    help='要求 go-checks（含 -race）通过并纳入总体验收')
 args = parser.parse_args()
 if os.name != 'nt':
     parser.error('此脚本必须在 Windows 原生环境运行')
+if args.skip_go and args.require_go_checks:
+    parser.error('--skip-go 与 --require-go-checks 不能同时使用')
+if args.cc_bin:
+    gcc = args.cc_bin / 'gcc.exe'
+    if not gcc.is_file():
+        parser.error('--cc-bin 下未找到 gcc.exe：' + str(gcc))
+    args.cc_bin = args.cc_bin.resolve()
 OUT = ROOT / 'validation/windows'
 OUT.mkdir(parents=True, exist_ok=True)
 APE = ROOT / 'runtime/dairn-embedded.com'
@@ -39,7 +52,10 @@ for tool in required:
         hint = '；无 Go 环境可加 --skip-go 只跑非 Go 验收' if tool == 'go' else ''
         parser.error('缺少验收依赖：' + tool + hint)
 summary = {'platform': platform.platform(), 'ape_sha256': digest(APE),
-           'go_skipped': args.skip_go, 'tests': {}}
+           'go_skipped': args.skip_go,
+           'go_checks_required': bool(args.require_go_checks and not args.skip_go),
+           'cc_bin': str(args.cc_bin) if args.cc_bin else None,
+           'tests': {}}
 
 
 def run(name, argv, expected=0, cwd=ROOT, timeout=180, run_env=None):
@@ -68,7 +84,9 @@ run('cli', [sys.executable, '-B', '-X', 'utf8', '-m', 'unittest',
 run('host', [HOST_QJS, ROOT / 'quickjs/tests/test_host_native.mjs'])
 run('policy', [APE, ROOT / 'quickjs/tests/test_native.mjs'])
 run('npm', ['node', '--test', 'tools/tests/npm-distribution.test.cjs'])
-with tempfile.TemporaryDirectory(prefix='dairn Windows 安装 ') as temp:
+# 安装/Wheel/npm 下仍使用中文+空格路径做兼容性验证；临时根目录自身保持 ASCII，
+# 因为 MSYS2/gcc 等原生工具链对非 ASCII GOTMPDIR/GOCACHE 路径支持不稳定。
+with tempfile.TemporaryDirectory(prefix='dairn-win-') as temp:
     tmp = Path(temp)
     isolated = {**env, 'DAIRN_CACHE_HOME': str(tmp / 'runtime-cache'),
                 'npm_config_cache': str(tmp / 'npm-cache')}
@@ -114,6 +132,11 @@ with tempfile.TemporaryDirectory(prefix='dairn Windows 安装 ') as temp:
                   'GOMODCACHE': str(tmp / 'go-mod')}
         for name in ('go-build', 'go-tmp', 'go-mod'):
             (tmp / name).mkdir(exist_ok=True)
+        if args.cc_bin:
+            # MSYS2/MinGW-w64：gcc 自身依赖同目录 DLL，必须把其 bin 放在 PATH 最前。
+            go_env['PATH'] = str(args.cc_bin) + os.pathsep + go_env['PATH']
+            go_env['CC'] = 'gcc'
+            go_env['CGO_ENABLED'] = '1'
         go_env_result = run('go-env', ['go', 'env', '-json', 'GOVERSION', 'GOOS', 'GOARCH',
                                        'CGO_ENABLED', 'CC'], run_env=go_env)
         try:
@@ -123,18 +146,21 @@ with tempfile.TemporaryDirectory(prefix='dairn Windows 安装 ') as temp:
         project = tmp / 'Go 示例'
         run('go-init', [ROOT / 'dairn.cmd', 'init', '--root', project,
                         '--name', 'go_demo', '--stack', 'go', '--sample'], run_env=go_env)
-        result = run('go-checks', [ROOT / 'dairn.cmd', 'check', '--all', '--root', project],
-                     run_env=go_env)
+        run('go-checks', [ROOT / 'dairn.cmd', 'check', '--all', '--root', project],
+            run_env=go_env)
         evidence = project / '.dairn/governance/evidence/all-qjs-checks.json'
         if evidence.exists():
             shutil.copyfile(evidence, OUT / 'go-checks.json')
             checks = json.loads(evidence.read_text(encoding='utf-8'))['checks']
             summary['go_checks'] = [{k: c.get(k) for k in ['gate', 'status', 'returncode']} for c in checks]
 summary['original_unchanged'] = digest(APE) == summary['ape_sha256']
-# Go 门禁结果独立记录：-race 需要 CGO/C 编译器（CC），本项不参与总体验收，
-# 以避免在缺少 C 工具链的 Windows 机器上把“无法证明”伪装成“通过”。
+# 默认 Go 门禁结果独立记录（-race 需要 CGO/C 编译器），不参与总体验收；
+# 显式提供 --cc-bin --require-go-checks 时，go-checks 与其他套件一样必须通过。
 summary['acceptance_passed'] = summary['original_unchanged'] and all(
     v['passed'] for k, v in summary['tests'].items() if k != 'go-checks')
+if summary['go_checks_required']:
+    go_result = summary['tests'].get('go-checks', {})
+    summary['acceptance_passed'] = summary['acceptance_passed'] and bool(go_result.get('passed'))
 (OUT / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 print(json.dumps(summary, ensure_ascii=False, indent=2))
 sys.exit(0 if summary['acceptance_passed'] else 1)
