@@ -189,9 +189,13 @@ function runGitViaSh(argv, cwd, timeout) {
       const [got, status] = os.waitpid(pid, os.WNOHANG);
       if (got < 0) throw new Error('waitpid failed: ' + got);
       if (got === pid) {
-        // Git's sh exits with the child status; Windows may expose a raw DWORD.
-        const signal = status & 0x7f;
-        exitCode = signal === 0 ? (status >> 8) & 0xff : (os.platform === 'win32' ? status : -signal);
+        // Cosmo 在 Windows 返回原始 DWORD（sh.exe 的 128 就是 128），
+        // 不能套用 POSIX status 编码，否则 128 会被算成 0。
+        if (os.platform === 'win32') exitCode = status;
+        else {
+          const signal = status & 0x7f;
+          exitCode = signal === 0 ? (status >> 8) & 0xff : -signal;
+        }
         break;
       }
       if (Date.now() - start >= timeout * 1000) {

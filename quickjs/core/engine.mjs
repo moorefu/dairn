@@ -145,9 +145,15 @@ function checkCwd(h,root,m,cfg) {
 function runStackCheck(h,stack,step,cwd,timeout) {
   if(stack==='go' && step==='lint') {
     const repo=h.run(['git','rev-parse','--is-inside-work-tree'],cwd,timeout);
-    let goFiles;
-    if(repo.code===0) goFiles=command(h,['git','ls-files','--cached','--others','--exclude-standard','-z','--','*.go'],cwd,timeout).split('\0').filter(Boolean);
-    else {goFiles=[];const walk=(d,prefix,depth)=>{if(depth>8)return;for(const name of h.list(d)){if(name.startsWith('.')||['vendor','node_modules','target','dist'].includes(name))continue;const abs=join(d,name),rel=prefix+name;if(h.isDirectory(abs))walk(abs,rel+'/',depth+1);else if(name.endsWith('.go'))goFiles.push(rel);}};walk(cwd,'',0);}
+    // `git rev-parse --is-inside-work-tree` 在仓库外也会以 0 退出并打印 false，
+    // 必须看输出；非 Git 项目回退到文件系统遍历。
+    const inRepo=repo.code===0 && /^true$/i.test(String(repo.output||'').trim());
+    let goFiles=[];
+    if(inRepo) goFiles=command(h,['git','ls-files','--cached','--others','--exclude-standard','-z','--','*.go'],cwd,timeout).split('\0').filter(Boolean);
+    if(!goFiles.length) {
+      const walk=(d,prefix,depth)=>{if(depth>8)return;for(const name of h.list(d)){if(name.startsWith('.')||['vendor','node_modules','target','dist'].includes(name))continue;const abs=join(d,name),rel=prefix+name;if(h.isDirectory(abs))walk(abs,rel+'/',depth+1);else if(name.endsWith('.go'))goFiles.push(rel);}};
+      walk(cwd,'',0);
+    }
     invariant(goFiles.length>0,'No Go files available for gofmt');
     const invalid=command(h,['gofmt','-l',...goFiles],cwd,timeout).trim();
     invariant(!invalid,'gofmt found unformatted files: '+invalid);

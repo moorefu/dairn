@@ -76,6 +76,12 @@ try {
     assert(sha256Bytes(read)==='3d804d24c5e0d6a98067c572e217c58c372be51996e187c389cfec2fdd3734ae','sha256 differs');
     os.remove(file);
   });
+  test('git non-zero exit propagates (Windows sh fallback)', () => {
+    const r=host.run(['git','rev-parse','--verify','refs/heads/dairn-definitely-missing-ref'],cwd,15);
+    assert(r.code!==0,'git nonzero status lost: '+JSON.stringify(r));
+    assert(/fatal|unknown revision|Needed a single revision/i.test(String(r.output||'')),
+           'git error output missing: '+JSON.stringify(r.output));
+  });
   test('ES2021/2022 features used by core are available', () => {
     assert('Ａ'.normalize('NFKC')==='A','String.normalize unavailable');
     assert([1,2,3].at(-1)===3,'Array.prototype.at unavailable');
