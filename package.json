@@ -1,5 +1,5 @@
 {
-  "name": "@moorefu/dairn",
+  "name": "dairn",
   "version": "0.1.0-rc.1",
   "description": "基于原生 QuickJS 的开发治理内核",
   "license": "UNLICENSED",
