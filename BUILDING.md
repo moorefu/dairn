@@ -78,13 +78,13 @@ npm view dairn version                                  # 404 表示未被占用
 curl -s -o /dev/null -w '%{http_code}\n' https://pypi.org/pypi/dairn/json
 ```
 
-两个名称当前都未被占用。工作流入口：Actions → **发布到 npm 与 PyPI** → Run workflow，填写已发布的标签（如 `v0.1.0-rc.1`），选择 `both`/`npm`/`pypi`。
+两个名称中 PyPI 的 `dairn` 已建立，npm 首次发布前仍需确认名称可用。工作流入口：Actions → **发布到 npm 与 PyPI** → Run workflow，填写已发布的标签（如 `v0.1.0-rc.1`），选择 `both`/`npm`/`pypi`。工作流会先检查目标版本是否已存在，已存在则跳过，因此发布成功后可以安全重跑 `both`；失败时会输出 `::error::` 注解和常见令牌问题提示，便于直接定位。
 
 ### npm（npmjs.com）
 
 1. 在 npmjs.com 注册账号，创建 Granular Access Token（Publish 权限，作用域限 `dairn` 或新包），存为仓库 Secret `NPM_TOKEN`。
-2. 发布命令与工作流等价：`npm publish incoming/dairn-0.1.0-rc.1.tgz --access public --tag next`。预发布版本（带 `-alpha`/`-beta`/`-rc`）必须用 `--tag next`，正式版才用 `--tag latest`，否则 `npm install dairn` 会装到预发布版。
-3. 版本不可覆盖：同一版本重复发布会失败，需先升版本（新标签）。
+2. 发布命令与工作流等价：`npm publish ./incoming/dairn-0.1.0-rc.1.tgz --access public --tag next`（tarball 路径必须带 `./` 或使用绝对路径，否则 npm 会按 GitHub `owner/repo` 简写解析）。预发布版本（带 `-alpha`/`-beta`/`-rc`）必须用 `--tag next`，正式版才用 `--tag latest`，否则 `npm install dairn` 会装到预发布版。
+3. 版本不可覆盖：同一版本重复发布会失败，需先升版本（新标签）；工作流已自动跳过已存在版本。若失败：`EOTP` 表示账号 2FA 要求一次性密码（改用 Automation token 或给 Granular token 勾选 Bypass 2FA）、`E401` 表示令牌无效或过期、`E403` 表示令牌缺少发布权限或作用域/包名不匹配。
 4. 可选升级：npmjs.com → 包 Settings → Trusted Publishing 配置 GitHub 仓库、工作流 `registry-publish.yml` 和环境 `npm`；随后可移除 `NPM_TOKEN`，由 OIDC 发布并附带 provenance（需 `package.json` 含 `repository` 字段并给 `npm publish` 加 `--provenance`）。
 
 ### PyPI（pypi.org）

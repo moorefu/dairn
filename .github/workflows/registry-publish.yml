@@ -39,15 +39,35 @@ jobs:
         run: |
           set -eu
           test -n "${NODE_AUTH_TOKEN:-}" || {
-            echo '缺少 NPM_TOKEN：创建 npm Granular Access Token（Publish 权限）并配置到仓库 Secrets'
+            echo '::error::缺少 NPM_TOKEN：创建 npm Granular Access Token（Publish 权限）并配置到仓库 Secrets'
             exit 1
           }
           # 绝对路径：npm 会把形如 owner/repo 的相对路径当成 GitHub 简写解析。
           tgz=$(ls "$PWD"/incoming/*.tgz)
-          version=$(python3 -c "import json,tarfile,sys; print(json.load(tarfile.open(sys.argv[1]).extractfile('package/package.json'))['version'])" "$tgz")
+          info=$(python3 -c "import json,tarfile,sys; p=json.load(tarfile.open(sys.argv[1]).extractfile('package/package.json')); print(p['name'], p['version'])" "$tgz")
+          name=${info% *}
+          version=${info#* }
           tag=latest
           case "$version" in *-*) tag=next ;; esac
-          npm publish "$tgz" --access public --tag "$tag"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version 已存在于 npm，跳过发布（版本不可覆盖）。"
+            exit 0
+          fi
+          set +e
+          output=$(npm publish "$tgz" --access public --tag "$tag" 2>&1)
+          code=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ "$code" -ne 0 ]; then
+            detail=$(printf '%s\n' "$output" | grep -m1 -i 'npm error' || printf '%s\n' "$output" | head -n 1)
+            echo "::error::npm publish 失败（$name@$version）：$detail"
+            case "$output" in
+              *EOTP*|*"one-time password"*) echo '提示：账号开启了 2FA，请改用 Automation token，或为 Granular token 勾选 Bypass 2FA。' ;;
+              *E401*|*uthenticat*) echo '提示：NPM_TOKEN 无效或已过期。' ;;
+              *E403*|*orbidden*) echo '提示：NPM_TOKEN 缺少发布权限，或作用域/包名不匹配。' ;;
+            esac
+            exit "$code"
+          fi
 
   pypi:
     name: 发布 ${{ inputs.tag }} 到 PyPI
@@ -72,8 +92,25 @@ jobs:
         run: |
           set -eu
           test -n "${TWINE_PASSWORD:-}" || {
-            echo '缺少 PYPI_TOKEN：创建 PyPI API token 并配置到仓库 Secrets'
+            echo '::error::缺少 PYPI_TOKEN：创建 PyPI API token 并配置到仓库 Secrets'
             exit 1
           }
+          wheel=$(ls "$PWD"/dist/*.whl)
+          info=$(python3 -c "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); m=[n for n in z.namelist() if n.endswith('.dist-info/METADATA')][0]; d=dict(l.split(': ',1) for l in z.read(m).decode().splitlines() if ': ' in l); print(d['Name'], d['Version'])" "$wheel")
+          name=${info% *}
+          version=${info#* }
+          if [ "$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/$name/$version/json")" = "200" ]; then
+            echo "$name $version 已存在于 PyPI，跳过上传（版本不可覆盖）。"
+            exit 0
+          fi
           python -m pip install --quiet --disable-pip-version-check twine
-          python -m twine upload --non-interactive dist/*.whl
+          set +e
+          output=$(python -m twine upload --non-interactive "$wheel" 2>&1)
+          code=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ "$code" -ne 0 ]; then
+            detail=$(printf '%s\n' "$output" | grep -m1 -iE 'error|HTTPError' || printf '%s\n' "$output" | head -n 1)
+            echo "::error::twine 上传失败（$name $version）：$detail"
+            exit "$code"
+          fi
