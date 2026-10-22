@@ -1,4 +1,4 @@
 @echo off
 setlocal
-"%~dp0dairn-embedded.com" /zip/quickjs/main.mjs %*
+"%~dp0runtime\dairn-embedded.com" /zip/quickjs/main.mjs %*
 exit /b %ERRORLEVEL%

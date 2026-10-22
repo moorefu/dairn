@@ -1,7 +1,7 @@
 {
   "format": 1,
   "product": "Dairn",
-  "version": "1.1.0rc9",
+  "version": "0.1.0-rc.1",
   "runtime": "quickjs-native-multilanguage-stubs-v1.4",
   "assets": [
     {
@@ -526,7 +526,7 @@
     },
     {
       "path": "quickjs/core/engine.mjs",
-      "sha256": "32895e7f59b0ad5f95316184f6f2c97065ba295ba54e28417aa2decd7a62f4dd"
+      "sha256": "c3f24a8bbe5bb2fb6e460fcee72f892f54e0b3b97300b790d4846a0d9b0bef4a"
     },
     {
       "path": "quickjs/core/facts.mjs",
@@ -546,7 +546,7 @@
     },
     {
       "path": "quickjs/core/project.mjs",
-      "sha256": "802067b6e6aa6c1c4c9a2a04866da83158e259129745260374edc6d672976a3e"
+      "sha256": "954973fc34946d2a42eed5cd1561eba76743a3c265502bf73e4be0895d7e01a7"
     },
     {
       "path": "quickjs/core/relations.mjs",

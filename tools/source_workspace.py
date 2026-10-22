@@ -5,6 +5,7 @@ import os
 from pathlib import Path, PurePosixPath
 import shutil
 import zipfile
+from release_config import load_release
 
 
 def zip_paths(root):
@@ -13,7 +14,7 @@ def zip_paths(root):
 
 
 def runtime_payload(root, archive):
-    release = json.loads((root / 'packaging/release.json').read_text(encoding='utf-8'))
+    release = load_release(root)
     prefix = f'{release["name"]}-{release["version"]}/'
     with zipfile.ZipFile(archive) as zipped:
         expected = {prefix + name for name in zip_paths(root)}
@@ -21,6 +22,9 @@ def runtime_payload(root, archive):
             raise ValueError('运行 ZIP 必须只包含启动器、runtime 和许可证，不得夹带源码')
         if zipped.testzip() is not None:
             raise ValueError('运行 ZIP 校验失败')
+        for launcher in ('dairn.sh', 'dairn.cmd'):
+            if zipped.read(prefix + launcher) != (root / launcher).read_bytes():
+                raise ValueError('ZIP 启动器必须与仓库唯一来源一致：' + launcher)
         binary = zipped.read(prefix + 'runtime/dairn-embedded.com')
         integrity = zipped.read(prefix + 'runtime/runtime-integrity.json')
     if json.loads(integrity)['sha256'] != hashlib.sha256(binary).hexdigest():
@@ -45,7 +49,7 @@ def checked_runtime_zip(root, artifacts):
 def prepare_workspace(root, destination, archive=None):
     """源码来自 checkout 白名单；APE 来自待测 ZIP，均不修改原件。"""
     root, destination = root.resolve(), destination.resolve()
-    release = json.loads((root / 'packaging/release.json').read_text(encoding='utf-8'))
+    release = load_release(root)
     excluded = {'dist', 'node_modules', '__pycache__', '.git', '.pytest_cache'}
     destination.mkdir(parents=True, exist_ok=False)
 
@@ -74,9 +78,11 @@ def prepare_workspace(root, destination, archive=None):
         copy(Path(name))
     if archive is not None:
         binary, integrity = runtime_payload(root, archive)
-        (destination / 'dairn-embedded.com').write_bytes(binary)
-        (destination / 'runtime-integrity.json').write_bytes(integrity)
-        # 原生编译可选择不同 QuickJS 版本，回归必须使用下载的 APE 和内嵌 manifest。
-        with zipfile.ZipFile(destination / 'dairn-embedded.com') as zipped:
+        (destination / 'runtime').mkdir(exist_ok=True)
+        (destination / 'runtime/dairn-embedded.com').write_bytes(binary)
+        (destination / 'runtime/dairn-embedded.com').chmod(0o755)
+        (destination / 'runtime/runtime-integrity.json').write_bytes(integrity)
+        # 回归使用本次发布的运行时及其内嵌 manifest。
+        with zipfile.ZipFile(destination / 'runtime/dairn-embedded.com') as zipped:
             (destination / 'quickjs/assets/manifest.json').write_bytes(zipped.read('quickjs/assets/manifest.json'))
     return destination

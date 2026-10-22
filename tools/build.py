@@ -1,4 +1,4 @@
-"""Python 构建入口：生成跨平台 Wheel 和运行 ZIP，不需要 Node。"""
+"""Python 构建入口：由 QuickJS 自举生成运行 ZIP，并打包跨平台 Wheel。"""
 import argparse
 from pathlib import Path
 import tempfile

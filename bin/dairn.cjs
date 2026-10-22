@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// 安装适配层：校验并启动同一份原生 APE，不实现治理规则或下载运行时。
+// 安装适配层：校验包内 QuickJS，POSIX 共用根目录 dairn.sh。
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
@@ -25,7 +25,7 @@ const windows = process.platform === 'win32';
 const command = windows ? binary : '/bin/sh';
 const args = windows
   ? ['/zip/quickjs/main.mjs', ...process.argv.slice(2)]
-  : [binary, '/zip/quickjs/main.mjs', ...process.argv.slice(2)];
+  : [path.join(base, 'dairn.sh'), ...process.argv.slice(2)];
 const child = spawn(command, args, {stdio: 'inherit', cwd: process.cwd(), windowsHide: true});
 let settled = false;
 child.once('error', err => {

@@ -1,6 +1,6 @@
 {
   "name": "dairn",
-  "version": "1.1.0-rc.9",
+  "version": "0.1.0-rc.1",
   "description": "基于原生 QuickJS 的开发治理内核",
   "license": "UNLICENSED",
   "type": "commonjs",
@@ -12,13 +12,14 @@
   },
   "files": [
     "bin/dairn.cjs",
+    "dairn.sh",
     "runtime/",
     "licenses/"
   ],
   "scripts": {
     "build": "node tools/build.cjs",
     "build:zip": "node tools/build.cjs --zip-only",
-    "test": "node --test npm/dairn/tests/npm-distribution.test.cjs",
+    "test": "node --test tools/tests/npm-distribution.test.cjs",
     "prepack": "node tools/build.cjs --stage-only"
   }
 }

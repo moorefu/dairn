@@ -16,12 +16,13 @@ import tempfile
 import venv
 import zipfile
 from source_workspace import prepare_workspace, runtime_payload, zip_paths
+from release_config import artifact_names, load_release
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE = json.loads((ROOT / 'packaging/release.json').read_text(encoding='utf-8'))
+RELEASE = load_release(ROOT)
 VERSION = RELEASE['version']
-NAMES = {'npm': f'dairn-{RELEASE["npm_version"]}.tgz',
-         'wheel': f'dairn-{VERSION}-py3-none-any.whl', 'zip': f'dairn-{VERSION}.zip'}
+WHEEL_VERSION = RELEASE['python_version']
+NAMES = artifact_names(RELEASE)
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--artifacts', type=Path, help='验收已有发布制品，不重新生成被安装的包')
 parser.add_argument('--package', choices=['all', 'npm', 'wheel', 'zip'], default='all')
@@ -44,7 +45,8 @@ summary = {'platform': platform.platform(), 'machine': platform.machine(), 'step
            'selected_packages': sorted(selected), 'artifact_mode': bool(args.artifacts),
            'mode': 'smoke' if args.smoke else 'full'}
 sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
-before = sha(ROOT / 'dairn-embedded.com')
+runtime_path = ROOT / 'runtime/dairn-embedded.com'
+before = sha(runtime_path) if runtime_path.exists() else None
 
 
 def extract_zip(archive, destination):
@@ -65,6 +67,7 @@ def verify():
         env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'PIP_NO_INDEX': '1',
                'PIP_DISABLE_PIP_VERSION_CHECK': '1', 'PIP_CACHE_DIR': str(tmp / 'pip-cache'),
                'npm_config_cache': str(tmp / 'npm-cache'), 'DAIRN_CACHE_HOME': str(tmp / 'runtime-cache')}
+        env['DAIRN_QUICKJS_CACHE'] = os.environ.get('DAIRN_QUICKJS_CACHE', str(ROOT / '.build/quickjs'))
         if os.name != 'nt':
             loader_cache = tmp / 'ape-loader'
             loader_cache.mkdir()
@@ -88,6 +91,7 @@ def verify():
             scaffold = ['--stack', 'python', '--ci', 'none'] if args.smoke else ['--stack', 'go', '--sample']
             run(kind + '-init', [*command, 'init', '--root', project, '--name', 'package_test', *scaffold], cwd=tmp)
             assert (project / 'AGENTS.md').is_file()
+            assert json.loads((project / '.dairn/lock.json').read_text(encoding='utf-8'))['version'] == VERSION
             run(kind + '-validate', [*command, 'validate', '--root', project], cwd=tmp)
 
         built = tmp / 'artifacts'
@@ -137,8 +141,10 @@ def verify():
 
         if 'npm' in selected:
             with tarfile.open(built / NAMES['npm']) as tar:
+                assert json.load(tar.extractfile('package/package.json'))['version'] == VERSION
                 assert tar.extractfile('package/runtime/dairn-embedded.com').read() == runtime.read_bytes()
-                allowed = {'package/package.json', 'package/README.md', 'package/bin/dairn.cjs',
+                assert tar.extractfile('package/dairn.sh').read() == (ROOT / 'dairn.sh').read_bytes()
+                allowed = {'package/package.json', 'package/README.md', 'package/bin/dairn.cjs', 'package/dairn.sh',
                            'package/runtime/dairn-embedded.com', 'package/runtime/runtime-integrity.json'}
                 assert all(e.name in allowed or e.name.startswith('package/licenses/') for e in tar.getmembers())
             installed = tmp / 'npm-installed'
@@ -149,18 +155,20 @@ def verify():
             package = installed / 'node_modules/dairn'
             cli_cases('npm', [node, package / 'bin/dairn.cjs'])
             if not args.smoke:
-                run('npm-tests', [node, '--test', ROOT / 'npm/dairn/tests/npm-distribution.test.cjs'],
+                run('npm-tests', [node, '--test', ROOT / 'tools/tests/npm-distribution.test.cjs'],
                     override={**env, 'DAIRN_NPM_PACKAGE': str(package)})
 
         if 'wheel' in selected:
             wheel = built / NAMES['wheel']
             with zipfile.ZipFile(wheel) as zipped:
-                assert all(name.startswith(('dairn/', f'dairn-{VERSION}.dist-info/')) for name in zipped.namelist())
+                assert all(name.startswith(('dairn/', f'dairn-{WHEEL_VERSION}.dist-info/')) for name in zipped.namelist())
                 assert {n for n in zipped.namelist() if n.startswith('dairn/')} == {
-                    'dairn/__init__.py', 'dairn/cli.py', 'dairn/runtime/dairn-embedded.com', 'dairn/runtime/runtime-integrity.json'}
+                    'dairn/__init__.py', 'dairn/cli.py', 'dairn/dairn.sh', 'dairn/runtime/dairn-embedded.com', 'dairn/runtime/runtime-integrity.json'}
+                assert zipped.read('dairn/dairn.sh') == (ROOT / 'dairn.sh').read_bytes()
                 assert zipped.read('dairn/runtime/dairn-embedded.com') == runtime.read_bytes()
-                assert b'Tag: py3-none-any' in zipped.read(f'dairn-{VERSION}.dist-info/WHEEL')
-                for name, digest, length in csv.reader(io.StringIO(zipped.read(f'dairn-{VERSION}.dist-info/RECORD').decode())):
+                assert b'Tag: py3-none-any' in zipped.read(f'dairn-{WHEEL_VERSION}.dist-info/WHEEL')
+                assert f'Version: {WHEEL_VERSION}' in zipped.read(f'dairn-{WHEEL_VERSION}.dist-info/METADATA').decode().splitlines()
+                for name, digest, length in csv.reader(io.StringIO(zipped.read(f'dairn-{WHEEL_VERSION}.dist-info/RECORD').decode())):
                     if digest:
                         data = zipped.read(name)
                         assert len(data) == int(length)
@@ -171,6 +179,8 @@ def verify():
             python = scripts / ('python.exe' if os.name == 'nt' else 'python')
             cli = scripts / ('dairn.exe' if os.name == 'nt' else 'dairn')
             run('wheel-install', [python, '-m', 'pip', 'install', '--no-index', wheel])
+            run('wheel-metadata', [python, '-c',
+                f'import dairn; assert dairn.__version__ == {WHEEL_VERSION!r}, dairn.__version__'])
             cli_cases('wheel', [cli])
             if not args.smoke:
                 destination = tmp / 'pep517'
@@ -186,7 +196,13 @@ def verify():
         if 'zip' in selected and not args.smoke:
             qjs = [str(runtime)] if os.name == 'nt' else ['/bin/sh', str(runtime)]
             # 启动器已在独立空缓存完成首次启动，再验证空 PATH 自举。
-            command = [source / 'build.cmd'] if os.name == 'nt' else ['/bin/sh', source / 'build.sh']
+            from dairn_build_backend import native_zip
+            # 先走正常获取入口填充缓存；再直接用已校验解释器在空 PATH 下自举。
+            native_zip(tmp / 'warmup')
+            lock = json.loads((ROOT / 'quickjs.lock.json').read_text(encoding='utf-8'))
+            bootstrap = Path(env['DAIRN_QUICKJS_CACHE']) / ('qjs-' + lock['binary_sha256'] + '.com')
+            command = ([bootstrap] if os.name == 'nt' else ['/bin/sh', bootstrap]) + [
+                source / 'tools/build-zip.mjs', '--root', source, '--qjs', bootstrap]
             bare = {**env, 'PATH': ''}
             run('zip-no-language-tools', [*cli, 'version'], cwd=tmp, override=bare)
             native_out = tmp / 'native'
@@ -213,9 +229,10 @@ def verify():
             dist.mkdir(exist_ok=True)
             for name in summary['artifacts']:
                 shutil.copyfile(built / name, dist / name)
-        summary.update(ape_sha256=runtime_hash, bootstrap_unchanged=sha(ROOT / 'dairn-embedded.com') == before,
-                       packages={name: 'passed' for name in sorted(selected)})
-        assert summary['bootstrap_unchanged']
+        summary.update(ape_sha256=runtime_hash, packages={name: 'passed' for name in sorted(selected)})
+        if args.artifacts and args.smoke:
+            summary['checkout_runtime_unchanged'] = (sha(runtime_path) if runtime_path.exists() else None) == before
+            assert summary['checkout_runtime_unchanged']
 
 
 try:

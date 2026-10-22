@@ -2,7 +2,7 @@
 # OUTSIDE of the untrusted MR checkout. Protected CI variables (not PR YAML):
 # DAIRN_EXPECTED_POLICY_SHA256, trusted Dairn binary digest, trusted base SHA.
 # The required job/stage must be enforced by protected SCM settings.
-# No AI model or BusyBox is required in CI; project build tools remain necessary.
+# Dairn 治理逻辑使用预置的 QuickJS 运行时。
 stages:
   - quality
 

@@ -1,4 +1,4 @@
 @echo off
 setlocal
-"%~dp0dairn-embedded.com" "%~dp0tools\build-zip.mjs" --root "%~dp0." %*
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\bootstrap.ps1" %*
 exit /b %ERRORLEVEL%

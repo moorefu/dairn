@@ -1,19 +1,19 @@
-"""无第三方构建依赖的 PEP 517 后端；使用自带 QuickJS 生成统一构建输入。"""
+"""PEP 517 后端；获取上游 QuickJS 后自举打包。"""
 import base64
 import gzip
 import hashlib
 import io
-import json
 from pathlib import Path
 import subprocess
 import sys
 import tarfile
 import tempfile
 import zipfile
+from release_config import load_release
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE = json.loads((ROOT / 'packaging/release.json').read_text(encoding='utf-8'))
-VERSION = RELEASE['version']
+RELEASE = load_release(ROOT)
+VERSION = RELEASE['python_version']
 DIST = RELEASE['python_name'].replace('-', '_')
 META = f'{DIST}-{VERSION}.dist-info'
 TAG = 'py3-none-any'
@@ -26,8 +26,11 @@ def get_requires_for_build_sdist(config_settings=None):
 
 def native_zip(destination, stage=None):
     destination = Path(destination).resolve()
-    binary = ROOT / 'dairn-embedded.com'
-    args = [str(ROOT / 'tools/build-zip.mjs'), '--root', str(ROOT), '--out', str(destination)]
+    fetch = (['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+              str(ROOT / 'tools/bootstrap.ps1'), '-FetchOnly'] if sys.platform == 'win32'
+             else ['/bin/sh', str(ROOT / 'tools/bootstrap.sh'), '--fetch-only'])
+    binary = subprocess.check_output(fetch, cwd=ROOT, text=True, encoding='utf-8').strip()
+    args = [str(ROOT / 'tools/build-zip.mjs'), '--root', str(ROOT), '--qjs', binary, '--out', str(destination)]
     if stage is not None:
         args.extend(['--stage', str(Path(stage).resolve())])
     if sys.platform == 'win32':
@@ -35,7 +38,7 @@ def native_zip(destination, stage=None):
     else:
         command = ['/bin/sh', str(binary), *args]
     subprocess.run(command, cwd=ROOT, check=True)
-    return destination / f"{RELEASE['name']}-{VERSION}.zip"
+    return destination / f"{RELEASE['name']}-{RELEASE['version']}.zip"
 
 def source_files(stage):
     """读取 QuickJS 的内部源码暂存区，发布 ZIP 不参与源码传递。"""
@@ -49,8 +52,9 @@ def metadata():
 
 def wheel_from_files(files, destination):
     entries = {
-        f'{DIST}/__init__.py': f'"""原生 Dairn 的 Python 安装入口。"""\n__version__ = {VERSION!r}\n'.encode('utf-8'),
-        f'{DIST}/cli.py': files['packaging/dairn/cli.py'],
+        f'{DIST}/__init__.py': files['src/dairn/__init__.py'],
+        f'{DIST}/cli.py': files['src/dairn/cli.py'],
+        f'{DIST}/dairn.sh': files['dairn.sh'],
         f'{DIST}/runtime/dairn-embedded.com': files['dairn-embedded.com'],
         f'{DIST}/runtime/runtime-integrity.json': files['runtime-integrity.json'],
         f'{META}/METADATA': metadata(),

@@ -1,6 +1,5 @@
 #!/bin/sh
-# Portable verifier entry for Unix runners with pre-provisioned official qjs.
-# BusyBox is NOT required (ordinary system shell is used only by this test helper).
+# 使用预置 qjs 的 Unix runner 验证入口。
 set -eu
 QJS=${QJS:-qjs}
 "$QJS" quickjs/tests/test_native.mjs

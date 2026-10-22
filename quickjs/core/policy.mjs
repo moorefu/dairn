@@ -1,4 +1,4 @@
-/* Dairn QuickJS portable governance policy: no Node/Python imports. */
+/* Dairn QuickJS 跨平台治理策略。 */
 export const levels = ['L0', 'L1', 'L2'];
 export const governance = ['G0', 'G1', 'G2', 'G3'];
 export const minimumChecks = {L0:['lint'], L1:['lint','unit'], L2:['lint','unit','integration','build']};

@@ -35,7 +35,7 @@ jobs:
       - name: Build without signing key
         env:
           DAIRN_CI_BIN: /opt/dairn/dairn.sh
-          DAIRN_CI_APE_PATH: /opt/dairn/dairn-embedded.com
+          DAIRN_CI_APE_PATH: /opt/dairn/runtime/dairn-embedded.com
           DAIRN_CI_REF_PROTECTED: ${{ github.ref_protected }}
           DAIRN_PROTECTED_BRANCH: main
           DAIRN_TRUSTED_BASE_REF: HEAD^
@@ -72,7 +72,7 @@ jobs:
       - name: Sign without running source tests or Stubs
         env:
           DAIRN_CI_BIN: /opt/dairn/dairn.sh
-          DAIRN_CI_APE_PATH: /opt/dairn/dairn-embedded.com
+          DAIRN_CI_APE_PATH: /opt/dairn/runtime/dairn-embedded.com
           DAIRN_CI_REF_PROTECTED: ${{ github.ref_protected }}
           DAIRN_PROTECTED_BRANCH: main
           DAIRN_TRUSTED_BASE_REF: HEAD^

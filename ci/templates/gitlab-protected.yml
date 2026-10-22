@@ -28,7 +28,7 @@ dairn:protected-build:
   variables:
     GIT_DEPTH: "0"
   script:
-    - export DAIRN_CI_BIN=/opt/dairn/dairn.sh DAIRN_CI_APE_PATH=/opt/dairn/dairn-embedded.com
+    - export DAIRN_CI_BIN=/opt/dairn/dairn.sh DAIRN_CI_APE_PATH=/opt/dairn/runtime/dairn-embedded.com
     - /opt/dairn/ci/protected/build-protected.sh "$DAIRN_TASK_ID" "$DAIRN_TRUSTED_BASE_REF"
   artifacts:
     when: on_success
@@ -50,7 +50,7 @@ dairn:sign:
   variables:
     GIT_DEPTH: "0"
   script:
-    - export DAIRN_CI_BIN=/opt/dairn/dairn.sh DAIRN_CI_APE_PATH=/opt/dairn/dairn-embedded.com
+    - export DAIRN_CI_BIN=/opt/dairn/dairn.sh DAIRN_CI_APE_PATH=/opt/dairn/runtime/dairn-embedded.com
     - export DAIRN_SIGNING_PRIVATE_KEY_PATH=/run/secrets/dairn-ci-ed25519.pem
     - export DAIRN_TRUSTED_CI_PUBLIC_KEY=/etc/dairn/ci-ed25519-public.pem
     - /opt/dairn/ci/protected/sign-protected.sh "$DAIRN_TASK_ID" "$DAIRN_TRUSTED_BASE_REF"

@@ -2,13 +2,10 @@ import {recommendWorkflow,workflowStageList} from './workflow.mjs';
 import {runWork} from './work.mjs';
 import {configuredStubs,stubInit,stubDoctor,stubTemplates} from './stubs.mjs';
 import {captureFacts,acceptFacts,factSnapshotPath} from './facts.mjs';
-/* Dairn native project lifecycle and distribution layer.
- * All project changes are planned before writing. No Python or Node dependencies.
- */
+/* Dairn QuickJS 项目生命周期与分发层；写入前规划全部项目变更。 */
 import {sha256} from './sha256.mjs';
 import {guidance} from './guidance.mjs';
 import {minimumChecks, policyValidate, invariant, relative} from './policy.mjs';
-const VERSION='1.1.0rc9';
 const ASSETS='/zip/quickjs/assets/';
 const BEGIN='<!-- Dairn:BEGIN managed navigation -->';
 const END='<!-- Dairn:END managed navigation -->';
@@ -28,6 +25,7 @@ const checkedRoot=(h,path,create)=>{
   return h.realpath(path);
 };
 const assetIndex=h=>JSON.parse(read(h,ASSETS+'manifest.json'));
+export const runtimeVersion=h=>assetIndex(h).version;
 export function runtimeIdentity(h){
   const raw=read(h,ASSETS+'manifest.json');
   const m=JSON.parse(raw);
@@ -331,7 +329,7 @@ function lockRead(h,root,required){
 }
 export function verifyRuntimeLock(h,root,required=false){
   const lock=lockRead(h,root,required);if(!lock)return null;
-  invariant(lock.version===VERSION,'Runtime version differs from project lock; run dairn upgrade --plan');
+  invariant(lock.version===runtimeVersion(h),'Runtime version differs from project lock; run dairn upgrade --plan');
   invariant(lock.runtime_sha256===runtimeIdentity(h),'Runtime assets differ from project lock; run dairn upgrade --plan');
   for(const [rel,expected] of Object.entries(lock.managed||{})){
     const path=j(root,rel);invariant(file(h,path),'Missing managed file: '+rel);
@@ -359,20 +357,20 @@ function provision(h,o){
   const plan=planFor(h,evaluationRoot,makeDesired(h,evaluationRoot,config,null),null);
   preflightLayout(h,evaluationRoot);
   if(o.plan){h.log(fmt({mode:o.cmd,root:evaluationRoot,modules:config.modules.map(x=>({name:x.name,path:x.path,profiles:x.profiles})),actions:plan.actions}));return plan.actions.some(x=>x.status==='conflict')?2:0;}
-  const lock={schema:2,version:VERSION,runtime_sha256:runtimeIdentity(h),config,managed:plan.managed};
+  const lock={schema:2,version:runtimeVersion(h),runtime_sha256:runtimeIdentity(h),config,managed:plan.managed};
   apply(h,evaluationRoot,plan,lock);layout(h,evaluationRoot);
   // Baseline only fresh initialized projects AFTER generated code and manifests exist.
   // Adopted projects must review and accept observed facts themselves.
   if(o.cmd==='init'&&!h.exists(factSnapshotPath(evaluationRoot)))acceptFacts(h,evaluationRoot,captureFacts(h,evaluationRoot,config));
-  h.log('Dairn '+VERSION+' '+o.cmd+' complete: '+config.modules.length+' module(s), '+plan.actions.length+' resources; no Python/Node governance dependency.');
+  h.log('Dairn '+runtimeVersion(h)+' '+o.cmd+' 完成：'+config.modules.length+' 个模块，'+plan.actions.length+' 项资源。');
   h.log('Next: dairn guide plan; dairn work start <task> --id <id>; dairn doctor; dairn check --all');return 0;
 }
 function upgrade(h,o){
   const root=checkedRoot(h,o.root==='.'?h.cwd():o.root,false), lock=lockRead(h,root,true);
   const config={...lock.config,sample:false};const plan=planFor(h,root,makeDesired(h,root,config,lock),lock);
   preflightLayout(h,root);
-  const next={schema:2,version:VERSION,runtime_sha256:runtimeIdentity(h),config,managed:plan.managed};
-  h.log(fmt({mode:o.apply?'apply':'plan',installed:VERSION,recorded:lock.version,actions:plan.actions.filter(x=>o.diff||x.status!=='unchanged')}));
+  const next={schema:2,version:runtimeVersion(h),runtime_sha256:runtimeIdentity(h),config,managed:plan.managed};
+  h.log(fmt({mode:o.apply?'apply':'plan',installed:runtimeVersion(h),recorded:lock.version,actions:plan.actions.filter(x=>o.diff||x.status!=='unchanged')}));
   if(o.diff){for(const a of plan.actions.filter(x=>x.status==='update'))h.log('~ '+a.path+' (managed content changed; diff with git for exact lines)');}
   if(!o.apply)return plan.actions.some(x=>x.status==='conflict')?2:0;
   apply(h,root,plan,next);layout(h,root);h.log('Upgrade applied; project-owned policy and Notes untouched.');return 0;
@@ -413,7 +411,7 @@ function doctor(h,root){
     try{const result=h.run(argv,root,10);tools[argv[0]]=result.code===0?'available':'missing-or-error';}
     catch(e){tools[argv[0]]='unavailable: '+e.message;}
   }
-  const status=problems.length?'unready':'ready';h.log(fmt({product:'Dairn',engine:'Cosmopolitan QuickJS',version:VERSION,status,root,runtime_sha256:lock.runtime_sha256,modules,tools,problems}));
+  const status=problems.length?'unready':'ready';h.log(fmt({product:'Dairn',engine:'Cosmopolitan QuickJS',version:runtimeVersion(h),status,root,runtime_sha256:lock.runtime_sha256,modules,tools,problems}));
   return problems.length?1:0;
 }
 
@@ -421,7 +419,7 @@ export function isProjectCommand(args){return ['init','adopt','detect','upgrade'
 export function dispatch(h,args){
   try{
     const o=argsParse(args),root=o.root==='.'?h.cwd():o.root;
-    if(o.cmd==='version'||o.cmd==='--version'){h.log('Dairn '+VERSION+' — Cosmopolitan QuickJS');return 0;}
+    if(o.cmd==='version'||o.cmd==='--version'){h.log('Dairn '+runtimeVersion(h)+' — Cosmopolitan QuickJS');return 0;}
     if(o.cmd==='init'||o.cmd==='adopt')return provision(h,o);
     if(o.cmd==='detect'){const r=checkedRoot(h,root,false);h.log(fmt(detect(h,r)));return 0;}
     if(o.cmd==='upgrade')return upgrade(h,o);
@@ -454,4 +452,4 @@ export function dispatch(h,args){
     return doctor(h,checkedRoot(h,root,false));
   }catch(e){h.error('Dairn ERROR: '+(e?.message||e));return 2;}
 }
-export {VERSION,doctor};
+export {doctor};

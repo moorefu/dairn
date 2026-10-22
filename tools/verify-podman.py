@@ -28,7 +28,7 @@ if args.artifacts:
     args.runtime_zip = checked_runtime_zip(root, args.artifacts)
 cid = subprocess.check_output([
     'podman', 'create', '--network', 'none', '--entrypoint', '/bin/sh', args.image,
-    '-c', 'cd /work && chmod +x dairn.sh dairn-embedded.com build.sh && ' + runner,
+    '-c', 'cd /work && chmod +x dairn.sh build.sh && if [ -f runtime/dairn-embedded.com ]; then chmod +x runtime/dairn-embedded.com; fi && ' + runner,
 ], text=True).strip()
 try:
     if args.artifacts:

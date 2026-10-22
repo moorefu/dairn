@@ -13,7 +13,7 @@ root = Path(__file__).resolve().parent.parent
 out = Path(sys.argv[1]).resolve()
 out.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(root))
-binary = root / 'dairn-embedded.com'
+binary = root / 'runtime/dairn-embedded.com'
 before = hashlib.sha256(binary.read_bytes()).hexdigest()
 results = {}
 # 不自动下载新工具链或依赖；race 必须使用容器提供的 CGO 编译环境。

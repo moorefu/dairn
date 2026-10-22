@@ -1,10 +1,10 @@
-/* Pure governance orchestration. No Node, Python or shell dependencies. */
+/* 基于 QuickJS 的治理编排。 */
 import { classify, moduleSelection, manifestValidate, policyValidate, invariant, relative, requiresManifest } from './policy.mjs';
 import {sha256} from './sha256.mjs';
 import {validateAll,archiveValidate} from './validators.mjs';
 import {docsValidate} from './docs-validator.mjs';
 import {lifecycleValidate} from './lifecycle-validator.mjs';
-import {verifyRuntimeLock} from './project.mjs';
+import {verifyRuntimeLock,runtimeVersion} from './project.mjs';
 import {prepareCheckTask,attachCheckRun} from './work.mjs';
 import {captureFacts} from './facts.mjs';
 import {readRelations} from './relations.mjs';
@@ -165,7 +165,7 @@ function checks(h,root,opts,st,raw,validation) {
     invariant(after===started.head&&after===st.head,'Git HEAD changed during check; evidence cannot be attached');
     report.run_id='run-'+Date.now()+'-'+sha256(opts.task+'|'+st.head+'|'+h.now()+'|'+Math.random()).slice(0,14);
     report.task_id=opts.task;report.base_commit=st.base;report.commit=st.head;report.modules=mods.map(m=>m.name);report.required_checks=[...required];
-    report.status=failed?'failed':'passed';report.trust='local-unattested';report.ci=null;report.runtime={version:'1.1.0rc9',runtime_sha256:opts.runtimeHash};
+    report.status=failed?'failed':'passed';report.trust='local-unattested';report.ci=null;report.runtime={version:runtimeVersion(h),runtime_sha256:opts.runtimeHash};
   }
   const dir=join(root,'.dairn/governance/evidence');h.mkdirs(dir);
   const name=opts.task?report.run_id+'-checks.json':(opts.all?'all':st.head.slice(0,12))+'-qjs-checks.json';
@@ -179,7 +179,7 @@ function checks(h,root,opts,st,raw,validation) {
 export function main(h,args) {
   try {
     const opts=parseArgs(args);
-    if(opts.cmd==='help') {h.log('Dairn 1.1.0rc9 — AI-Native Software Engineering Toolkit\n  dairn init|adopt [--root PATH] [--stack go|python|rust|vue|java|spring-boot|openresty] [--ci none|github|gitlab|both] [--sample] [--plan]\n  dairn detect|doctor|validate [--root PATH]\n  dairn scope|check --base SHA [--root PATH]\n  dairn check --all (baseline L2 checks)\n  dairn upgrade --plan|--apply [--root PATH]\n  dairn work start|next|record|advance|verify|finish [--require-ci-attestation]\n  dairn work attest-prepare|attest-attach TASK [PAYLOAD SIG]\n  dairn guide impact --base SHA [--precision PROJECT-STUB-ID]\n  dairn stubs [list|templates|doctor|init --template LANGUAGE --id NAME [--apply]] [--root PATH]\n  dairn skills catalog|list|add NAME [--apply]\n  dairn docs find QUERY|show SPEC-ID');return 0;}
+    if(opts.cmd==='help') {h.log('Dairn '+runtimeVersion(h)+' — AI-Native Software Engineering Toolkit\n  dairn init|adopt [--root PATH] [--stack go|python|rust|vue|java|spring-boot|openresty] [--ci none|github|gitlab|both] [--sample] [--plan]\n  dairn detect|doctor|validate [--root PATH]\n  dairn scope|check --base SHA [--root PATH]\n  dairn check --all (baseline L2 checks)\n  dairn upgrade --plan|--apply [--root PATH]\n  dairn work start|next|record|advance|verify|finish [--require-ci-attestation]\n  dairn work attest-prepare|attest-attach TASK [PAYLOAD SIG]\n  dairn guide impact --base SHA [--precision PROJECT-STUB-ID]\n  dairn stubs [list|templates|doctor|init --template LANGUAGE --id NAME [--apply]] [--root PATH]\n  dairn skills catalog|list|add NAME [--apply]\n  dairn docs find QUERY|show SPEC-ID');return 0;}
     const root=h.realpath(opts.root??h.cwd());
     verifyRuntimeLock(h,root,false);
     const st=staticChecks(h,root);

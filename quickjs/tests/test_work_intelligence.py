@@ -1,4 +1,4 @@
-"""原生 QuickJS 工作和影响分析集成测试；不依赖 Node 运行时。"""
+"""原生 QuickJS 工作和影响分析集成测试。"""
 from pathlib import Path
 import json, os, subprocess, tempfile, unittest
 

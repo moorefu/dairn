@@ -1,6 +1,5 @@
 #!/bin/sh
-# Independent native QuickJS acceptance. No Python, Node.js or BusyBox required.
-# The shell, curl/unzip and sha256sum are bootstrap tools only and are not used by Dairn JS gates.
+# 原生 QuickJS 验收入口，支持指定 qjs 或获取上游归档。
 set -eu
 
 usage() {

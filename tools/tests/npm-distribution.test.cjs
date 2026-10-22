@@ -8,19 +8,21 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 
-const repo = path.resolve(__dirname,'../../..');
+const repo = path.resolve(__dirname,'../..');
 const fixture = process.env.DAIRN_NPM_PACKAGE ? null : fs.mkdtempSync(path.join(os.tmpdir(), 'dairn-npm-fixture-'));
 const source = process.env.DAIRN_NPM_PACKAGE || fixture;
 if (fixture) {
   fs.mkdirSync(path.join(fixture,'runtime'));
   fs.cpSync(path.join(repo,'bin'),path.join(fixture,'bin'),{recursive:true});
   fs.copyFileSync(path.join(repo,'package.json'),path.join(fixture,'package.json'));
-  for (const name of ['dairn-embedded.com','runtime-integrity.json']) fs.copyFileSync(path.join(repo,name),path.join(fixture,'runtime',name));
+  fs.copyFileSync(path.join(repo,'dairn.sh'),path.join(fixture,'dairn.sh'));
+  for (const name of ['dairn-embedded.com','runtime-integrity.json']) fs.copyFileSync(path.join(repo,'runtime',name),path.join(fixture,'runtime',name));
   if (process.platform !== 'win32') fs.chmodSync(path.join(fixture,'runtime','dairn-embedded.com'),0o755);
   after(() => fs.rmSync(fixture,{recursive:true,force:true}));
 }
 const launcher = path.join(source,'bin','dairn.cjs');
 const ape = path.join(source,'runtime','dairn-embedded.com');
+const version = JSON.parse(fs.readFileSync(path.join(source,'package.json'),'utf8')).version;
 const hash = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
 function run(args=[], options={}) {
   return spawnSync(process.execPath,[launcher,...args],{
@@ -31,20 +33,45 @@ function run(args=[], options={}) {
 test('运行时 SHA256 与包内 APE 一致', () => {
   const meta = JSON.parse(fs.readFileSync(path.join(source,'runtime','runtime-integrity.json')));
   assert.equal(hash(ape),meta.sha256);
-  assert.equal(meta.engine_version,'1.1.0rc9');
+  assert.equal(meta.engine_version,version);
 });
 
 test('版本和参数透传不修改源二进制', () => {
   const before=hash(ape);
   const p=run(['version']);
   assert.equal(p.status,0,p.stderr);
-  assert.match(p.stdout,/Dairn 1\.1\.0rc9/);
+  assert.ok(p.stdout.startsWith('Dairn '+version+' —'),p.stdout);
   assert.equal(hash(ape),before);
 });
 
 test('CLI 非零退出码传递至 npm 启动器', () => {
   const p=run(['invalid-command-for-test']);
   assert.equal(p.status,2,p.stderr);
+});
+
+test('POSIX npm 与 shell 共用快速运行时缓存并保留退出码', {skip:process.platform === 'win32'}, t => {
+  if (spawnSync('/bin/sh',['-c','command -v sha256sum'],{stdio:'ignore'}).status !== 0) {
+    t.skip('当前环境使用默认 APE 启动路径');
+    return;
+  }
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'dairn 共享缓存 '));
+  try {
+    const before=hash(ape);
+    const env={...process.env,DAIRN_FAST_RUNTIME:'1',DAIRN_CACHE_HOME:tmp};
+    const p=run(['version'],{env,cwd:tmp});
+    assert.equal(p.status,0,p.stderr);
+    const cache=path.join(tmp,'native-'+before);
+    const native=path.join(cache,'dairn-native');
+    assert.ok(fs.statSync(native).isFile());
+    const cached=hash(native);
+    const shell=spawnSync('/bin/sh',[path.join(source,'dairn.sh'),'version'],{env,cwd:tmp,encoding:'utf8',timeout:20000});
+    assert.equal(shell.status,0,shell.stderr);
+    assert.equal(shell.stdout,p.stdout);
+    assert.equal(run(['invalid-command-for-test'],{env,cwd:tmp}).status,2);
+    assert.equal(hash(native),cached);
+    assert.deepEqual(fs.readdirSync(cache),['dairn-native']);
+    assert.equal(hash(ape),before);
+  } finally { fs.rmSync(tmp,{recursive:true,force:true}); }
 });
 
 test('空格路径完整传递且项目检查通过', () => {
@@ -65,6 +92,7 @@ test('拒绝执行已损坏的包内运行时', () => {
   try {
     fs.cpSync(path.join(source,'bin'),path.join(temp,'bin'),{recursive:true});
     fs.cpSync(path.join(source,'runtime'),path.join(temp,'runtime'),{recursive:true});
+    fs.copyFileSync(path.join(source,'dairn.sh'),path.join(temp,'dairn.sh'));
     fs.appendFileSync(path.join(temp,'runtime','dairn-embedded.com'),Buffer.from([0x00]));
     const p=spawnSync(process.execPath,[path.join(temp,'bin','dairn.cjs'),'version'],{encoding:'utf8',timeout:10000});
     assert.equal(p.status,2);

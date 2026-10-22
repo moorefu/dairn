@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// npm 构建入口：QuickJS 生成 ZIP 和暂存源码，npm 生成 tarball；不调用 Python。
+// npm 构建入口：QuickJS 生成 ZIP 和暂存源码，npm 生成 tarball。
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -20,8 +20,14 @@ function run(command, args) {
 }
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'dairn-npm-build-'));
 try {
-  const binary = path.join(root, 'dairn-embedded.com');
-  const args = [path.join(root, 'tools/build-zip.mjs'), '--root', root, '--out', stageOnly ? temp : out];
+  const fetch = process.platform === 'win32'
+    ? ['powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'tools/bootstrap.ps1'), '-FetchOnly']]
+    : ['/bin/sh', [path.join(root, 'tools/bootstrap.sh'), '--fetch-only']];
+  const fetched = spawnSync(fetch[0], fetch[1], {cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true});
+  if (fetched.error) throw fetched.error;
+  if (fetched.status !== 0) throw Error('获取 QuickJS 失败');
+  const binary = fetched.stdout.trim();
+  const args = [path.join(root, 'tools/build-zip.mjs'), '--root', root, '--qjs', binary, '--out', stageOnly ? temp : out];
   const stage = path.join(temp, 'source');
   if (!zipOnly) args.push('--stage', stage);
   if (process.platform === 'win32') run(binary, args);
@@ -32,10 +38,10 @@ try {
     for (const name of ['dairn-embedded.com', 'runtime-integrity.json']) {
       fs.copyFileSync(path.join(stage, name), path.join(target, 'runtime', name));
     }
-    if (process.platform !== 'win32') fs.chmodSync(path.join(target, 'runtime', 'dairn-embedded.com'), 0o755);
     if (!stageOnly) {
       for (const name of ['bin', 'licenses']) fs.cpSync(path.join(stage, name), path.join(target, name), {recursive: true});
       fs.copyFileSync(path.join(stage, 'README.md'), path.join(target, 'README.md'));
+      fs.copyFileSync(path.join(stage, 'dairn.sh'), path.join(target, 'dairn.sh'));
       const pkg = JSON.parse(fs.readFileSync(path.join(stage, 'package.json'), 'utf8'));
       delete pkg.scripts;
       fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');

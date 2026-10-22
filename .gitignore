@@ -2,6 +2,9 @@
 /dist/
 /runtime/
 /node_modules/
+# 解释器和嵌入运行时均为下载或构建产物
+*.com
+/runtime-integrity.json
 # 本地验证产物、日志和工具缓存
 /validation/
 __pycache__/

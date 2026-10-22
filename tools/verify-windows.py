@@ -9,8 +9,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from release_config import artifact_names, load_release
 
 ROOT = Path(__file__).resolve().parent.parent
+NAMES = artifact_names(load_release(ROOT))
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--go-bin', type=Path, default=Path(r'C:\Program Files\Go\bin'))
 args = parser.parse_args()
@@ -18,7 +20,7 @@ if os.name != 'nt':
     parser.error('此脚本必须在 Windows 原生环境运行')
 OUT = ROOT / 'validation/windows'
 OUT.mkdir(parents=True, exist_ok=True)
-APE = ROOT / 'dairn-embedded.com'
+APE = ROOT / 'runtime/dairn-embedded.com'
 digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
 env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'DAIRN_QJS_BIN': str(APE),
        'PATH': str(args.go_bin) + os.pathsep + os.environ['PATH']}
@@ -51,14 +53,14 @@ run('cli', [sys.executable, '-B', '-X', 'utf8', '-m', 'unittest',
             'quickjs.tests.test_windows', '-v'])
 run('host', [APE, ROOT / 'quickjs/tests/test_host_native.mjs'])
 run('policy', [APE, ROOT / 'quickjs/tests/test_native.mjs'])
-run('npm', ['node', '--test', 'npm/dairn/tests/npm-distribution.test.cjs'])
+run('npm', ['node', '--test', 'tools/tests/npm-distribution.test.cjs'])
 with tempfile.TemporaryDirectory(prefix='dairn Windows 安装 ') as temp:
     tmp = Path(temp)
     isolated = {**env, 'DAIRN_CACHE_HOME': str(tmp / 'runtime-cache'),
                 'npm_config_cache': str(tmp / 'npm-cache')}
     venv = tmp / 'venv'
     subprocess.run([sys.executable, '-m', 'venv', str(venv)], check=True, env=env)
-    wheel = ROOT / 'dist/dairn-1.1.0rc9-py3-none-any.whl'
+    wheel = ROOT / 'dist' / NAMES['wheel']
     summary['wheel_sha256'] = digest(wheel)
     run('wheel-install', [venv / 'Scripts/python.exe', '-m', 'pip', 'install',
                           '--no-index', '--disable-pip-version-check', wheel], run_env=isolated)
@@ -76,7 +78,7 @@ with tempfile.TemporaryDirectory(prefix='dairn Windows 安装 ') as temp:
     summary['tests']['wheel']['passed'] = all(c['passed'] for c in wheel_cases)
     (OUT / 'wheel.json').write_text(json.dumps(wheel_cases, indent=2) + '\n', encoding='utf-8')
     run('npm-pack', ['npm.cmd', 'run', 'build'], run_env=isolated)
-    tgz = ROOT / 'dist/dairn-1.1.0-rc.9.tgz'
+    tgz = ROOT / 'dist' / NAMES['npm']
     summary['npm_tarball_sha256'] = digest(tgz)
     install = tmp / 'npm 项目'
     install.mkdir()

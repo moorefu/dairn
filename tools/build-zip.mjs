@@ -1,4 +1,4 @@
-/* 由自带 QuickJS 构建运行 ZIP；完整源码仅用于内部暂存。 */
+/* 由上游 QuickJS 自举生成嵌入运行时及 ZIP；完整源码仅用于内部暂存。 */
 import * as std from 'std';
 import * as os from 'os';
 import {host} from '../quickjs/host/qjs.mjs';
@@ -8,15 +8,21 @@ import {utf8,readBytes,writeBytes,zip,readZip} from './zip.mjs';
 try {
   const options={root:host.cwd()};
   for(let i=1;i<scriptArgs.length;i+=2){
-    const key=scriptArgs[i];if(!['--root','--out','--stage'].includes(key)||!scriptArgs[i+1])throw Error('用法：build --out 输出目录 [--stage 全新暂存目录]');
+    const key=scriptArgs[i];if(!['--root','--out','--stage','--qjs'].includes(key)||!scriptArgs[i+1])throw Error('用法：build --qjs 已校验解释器 --out 输出目录 [--stage 全新暂存目录]');
     options[key.slice(2)]=scriptArgs[i+1];
   }
   const root=host.realpath(options.root);
   const absolute=p=>/^(?:[A-Za-z]:[\\/]|\/)/.test(p)?p:host.cwd()+'/'+p;
   const out=absolute(options.out||root+'/dist');host.mkdirs(out);
-  const release=JSON.parse(host.read(root+'/packaging/release.json'));
+  if(!options.qjs)throw Error('缺少 --qjs，请通过 build.cmd、build.sh、Python 或 npm 入口获取 QuickJS');
+  const quickjs=JSON.parse(host.read(root+'/quickjs.lock.json'));
+  const input=readBytes(absolute(options.qjs));
+  if(sha256Bytes(input)!==quickjs.binary_sha256)throw Error('QuickJS SHA256 与下载锁不一致');
+  const release=JSON.parse(host.read(root+'/tools/release.json'));
   const pkg=JSON.parse(host.read(root+'/package.json'));
-  if(pkg.version!==release.npm_version)throw Error('npm 版本与发布配置不一致');
+  if(['version','npm_version','python_version'].some(key=>key in release))throw Error('版本只允许定义在 package.json 的 version 字段');
+  if(!/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(alpha|beta|rc)\.(?:0|[1-9][0-9]*))?$/.test(pkg.version))throw Error('package.json 发布版本格式无效');
+  release.version=pkg.version;
   const excluded=new Set(['dist','node_modules','__pycache__','.git','.pytest_cache']);
   const files=new Map();
   function walk(relative){
@@ -31,12 +37,12 @@ try {
   }
   for(const p of release.source_paths){if(p.includes('..')||p.startsWith('/'))throw Error('非法构建路径');walk(p);}
   const manifest=JSON.parse(host.read(root+'/quickjs/assets/manifest.json'));
-  if(manifest.version!==release.version)throw Error('内核版本与发布配置不一致');
+  manifest.version=release.version;
   const sources=[...files.keys()].filter(p=>p==='quickjs/main.mjs'||/^quickjs\/(core|host)\/[^/]+\.mjs$/.test(p)).sort();
   manifest.engine_sources=sources.map(path=>({path,sha256:sha256Bytes(files.get(path))}));
   for(const asset of manifest.assets){const data=files.get('quickjs/assets/'+asset.type+'/'+asset.path);if(!data)throw Error('缺少资源：'+asset.path);asset.sha256=sha256Bytes(data);}
   files.set('quickjs/assets/manifest.json',utf8(JSON.stringify(manifest,null,2)+'\n'));
-  const original=readZip(files.get('dairn-embedded.com'));
+  const original=readZip(input);
   const embedded=sources.concat([...files.keys()].filter(p=>p.startsWith('quickjs/assets/'))).sort();
   const runtime=zip([
     ...original.entries.filter(e=>!e.name.startsWith('quickjs/')),
@@ -44,9 +50,9 @@ try {
   ],original.prefix);
   const runtimeHash=sha256Bytes(runtime);
   files.set('dairn-embedded.com',runtime);
-  files.set('runtime-integrity.json',utf8(JSON.stringify({schema:1,binary:'dairn-embedded.com',sha256:runtimeHash,engine_version:release.version},null,2)+'\n'));
-  files.set('packaging/runtime-build.json',utf8(JSON.stringify({
-    description:'QuickJS 自举打包记录；原生解释器编译来源见 quickjs-build.json',
+  files.set('runtime-integrity.json',utf8(JSON.stringify({schema:1,binary:'dairn-embedded.com',sha256:runtimeHash,engine_version:release.version,quickjs},null,2)+'\n'));
+  files.set('runtime/runtime-build.json',utf8(JSON.stringify({
+    description:'上游成品 QuickJS 自举嵌入与打包记录；本仓库不编译或打补丁',quickjs,
     ape_sha256:runtimeHash,native_prefix_sha256:sha256Bytes(original.prefix),
     manifest_sha256:sha256Bytes(files.get('quickjs/assets/manifest.json')),
     builder_sha256:sha256Bytes(files.get('tools/build-zip.mjs')),
@@ -55,14 +61,17 @@ try {
   const mode=name=>/\.(sh|com)$/.test(name)||name==='bin/dairn.cjs'?0o100755:0o100644;
   const names=[...files.keys()].sort(),prefix=release.name+'-'+release.version+'/';
   const distribution=new Map([
-    ['dairn.cmd',files.get('packaging/zip/dairn.cmd')],
-    ['dairn.sh',files.get('packaging/zip/dairn.sh')],
+    ['dairn.cmd',files.get('dairn.cmd')],
+    ['dairn.sh',files.get('dairn.sh')],
     ['runtime/dairn-embedded.com',runtime],
     ['runtime/runtime-integrity.json',files.get('runtime-integrity.json')],
     ...[...files].filter(([name])=>name.startsWith('licenses/'))
   ]);
   const artifact=out+'/'+release.name+'-'+release.version+'.zip';
   writeBytes(artifact,zip([...distribution.keys()].sort().map(name=>({name:prefix+name,data:distribution.get(name),mode:mode(name)}))));
+  host.mkdirs(root+'/runtime');
+  writeBytes(root+'/runtime/dairn-embedded.com',runtime);
+  writeBytes(root+'/runtime/runtime-integrity.json',files.get('runtime-integrity.json'));
   if(options.stage){
     const stage=absolute(options.stage);if(host.exists(stage))throw Error('暂存目录必须尚不存在：'+stage);
     host.mkdirs(stage);

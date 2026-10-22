@@ -1,4 +1,4 @@
-/* These checks are intended to run with official qjs; no Node imports. */
+/* 使用 qjs 执行原生运行时检查。 */
 import {sha256} from '../core/sha256.mjs';
 import {classify,policyValidate,manifestValidate} from '../core/policy.mjs';
 import * as std from 'std';

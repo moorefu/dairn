@@ -93,11 +93,12 @@ class StubCIReview(unittest.TestCase):
   self.assertTrue(res['stub_analysis']['changes'])
  def test_ape_fast_cache_does_not_mutate_source(self):
   import hashlib
-  original=hashlib.sha256((ROOT/'dairn-embedded.com').read_bytes()).hexdigest()
+  original=hashlib.sha256((ROOT/'runtime/dairn-embedded.com').read_bytes()).hexdigest()
   env={'DAIRN_FAST_RUNTIME':'1','DAIRN_CACHE_HOME':str(self.dir/'runtime-cache')}
   p=self.call('version',env=env,ok=True)
-  self.assertIn('1.1.0rc9',p.stdout)
-  self.assertEqual(hashlib.sha256((ROOT/'dairn-embedded.com').read_bytes()).hexdigest(),original)
+  version=json.loads((ROOT/'package.json').read_text(encoding='utf-8'))['version']
+  self.assertIn('Dairn '+version+' —',p.stdout)
+  self.assertEqual(hashlib.sha256((ROOT/'runtime/dairn-embedded.com').read_bytes()).hexdigest(),original)
   self.assertTrue(list((self.dir/'runtime-cache').rglob('dairn-native')))
  def test_adopt_existing_claude_instructions_preserved(self):
   other=self.dir/'existing';other.mkdir();(other/'CLAUDE.md').write_text('Custom team Claude instructions.\n')

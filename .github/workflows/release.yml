@@ -1,4 +1,4 @@
-name: 源码构建与跨平台制品验证
+name: 自举打包与跨平台制品验证
 
 on:
   push:
@@ -6,30 +6,13 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
-    inputs:
-      quickjs_version:
-        description: QuickJS 官方源码版本
-        default: '2026-06-04'
-        type: string
-      source_sha256:
-        description: 新版本必填的源码 SHA256（锁文件已有版本可留空）
-        default: ''
-        type: string
-      source_url:
-        description: 可选源码 URL（默认 Bellard 对应版本的 tar.xz）
-        default: ''
-        type: string
-      cosmocc_version:
-        description: 补丁匹配的 Cosmopolitan 工具链版本
-        default: '4.0.2'
-        type: string
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: 从官方源码构建同一套制品
+    name: 获取现成 QuickJS 并自举三类制品
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -40,20 +23,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: 下载、校验、补丁、编译和嵌入
-        shell: bash
-        env:
-          QJS_VERSION: ${{ inputs.quickjs_version || '2026-06-04' }}
-          QJS_SHA256: ${{ inputs.source_sha256 }}
-          QJS_URL: ${{ inputs.source_url }}
-          COSMO_VERSION: ${{ inputs.cosmocc_version || '4.0.2' }}
-        run: >-
-          python tools/build-runtime.py
-          --quickjs-version "$QJS_VERSION"
-          --source-sha256 "$QJS_SHA256"
-          --source-url "$QJS_URL"
-          --cosmocc-version "$COSMO_VERSION"
-      - name: 构建 npm、Wheel 和运行 ZIP
+      - uses: actions/cache@v4
+        with:
+          path: .build/quickjs
+          key: quickjs-${{ runner.os }}-${{ hashFiles('quickjs.lock.json') }}
+      - name: 下载校验 QuickJS、自举嵌入并打包
         run: |
           python tools/build.py
           npm run build
@@ -118,3 +92,28 @@ jobs:
           BUILD_RESULT: ${{ needs.build.result }}
           TEST_RESULT: ${{ needs.test.result }}
         run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success
+
+  publish:
+    name: 发布版本与 latest 三类制品
+    needs: [build, test, accepted]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: dairn-release-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: dairn-packages
+          path: incoming
+      - name: 校验制品并发布版本与 latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python tools/publish-release.py --artifacts incoming

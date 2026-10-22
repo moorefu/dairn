@@ -1,4 +1,4 @@
-/* Thin host backed only by official QuickJS std/os, no BusyBox. */
+/* 基于 QuickJS std/os 的宿主适配层。 */
 import * as std from 'std';
 import * as os from 'os';
 const SEP = '/';
