@@ -1,0 +1,3 @@
+interface:
+  display_name: "dairn-agent-workflow"
+  short_description: "Agent calls Dairn for stage contracts, real checks and evidence"

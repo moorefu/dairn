@@ -1,0 +1,584 @@
+{
+  "format": 1,
+  "product": "Dairn",
+  "version": "1.1.0rc9",
+  "runtime": "quickjs-native-multilanguage-stubs-v1.4",
+  "assets": [
+    {
+      "type": "skills",
+      "path": "dairn-agent-notes/SKILL.md",
+      "sha256": "0c33296b3342ed0e0c93f8ba76e8084824601aa2e85c95c83022341e41bc36aa"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-agent-notes/agents/openai.yaml",
+      "sha256": "b19f265a85ff20a003e5ec962a42d287b5596f36ec5267a0d4fdab878f028488"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-agent-workflow/SKILL.md",
+      "sha256": "03512226148314e0363dc0b2fa2a16ec8cc99329fcc4a0fb0150539f6a1d7013"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-agent-workflow/agents/openai.yaml",
+      "sha256": "69170b7de0bc1e5cd540eb701a80ef1d60ad65fded0fa5d9998fc257fc39150d"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-bugfix/SKILL.md",
+      "sha256": "29825fbbf0592fde7ccc82a1ded7ecbcc013b495930d35edccd0402d25f7aa65"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-bugfix/agents/openai.yaml",
+      "sha256": "4da45d1ca712ffa55a612fa30faaab3033516c516efadaa70c1eaa933485a20f"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-change-plan/SKILL.md",
+      "sha256": "45617fd827717f202f28d2adbeb5db5b7a22096b652d68671f6bd2fadbcdd2df"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-change-plan/agents/openai.yaml",
+      "sha256": "99c57c6800993482d9b40a92979da0ae1e372ad4ae986b3ef0929714ee6d0ae9"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-code-review/SKILL.md",
+      "sha256": "8effabca4fb8c9e70da6f53bc627c918092d04be09517d22ade82035d58afd9a"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-code-review/agents/openai.yaml",
+      "sha256": "ed224d7d7b13b82b2d5754667791e8b4d87f66ceb155fb6cc19216ea790d9786"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-design-review/SKILL.md",
+      "sha256": "c0f3cca011579b558b08f7a81570954fb64635ee22baff6a4a862a07a7fb7740"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-design-review/agents/openai.yaml",
+      "sha256": "1d450424ef3849295593f7006dde0acf10e24661d03d7af1f5e90a316854d4f6"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-domain-model/SKILL.md",
+      "sha256": "3be0594901fa7730c879d2b6a51afc23cf2316c6fe3f05906c8a7da8b7677ac1"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-domain-model/agents/openai.yaml",
+      "sha256": "513ea69ea580e0f8ea26ddac7208ef71dcb644514b4e33dfb5e046315c670a1d"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-governance/SKILL.md",
+      "sha256": "00ad842fc64d5110fdc3462f94296fc975fa1183d4a67f251c3ffbb388c78811"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-governance/agents/openai.yaml",
+      "sha256": "5073805e40ed17a1ec582021845db7c6dbb9f9b98a2b945bb244e880cd344a44"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-implementation/SKILL.md",
+      "sha256": "9ebad731a297399a8a33e26f328fd3f61ac956636e497334cdde534cad6e7206"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-implementation/agents/openai.yaml",
+      "sha256": "f02bae0fc49d3b0fa6b77a06e5220cb4f539396c6ff68a8d18fd32a3ab0bca2f"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-incident-response/SKILL.md",
+      "sha256": "f5fdb6aca34ef5024609ac9e88dd9007cc00a635b7a183f86447fa52e8b24451"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-incident-response/agents/openai.yaml",
+      "sha256": "f2c25608cd0558b81812eaecc13d5dda3327ca84f9c6d391e641e4a1c1bf6252"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-operational-feedback/SKILL.md",
+      "sha256": "51567c2e5ecd66d793e09493e2a613af6d126684baffef293ff4e5be63b58209"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-operational-feedback/agents/openai.yaml",
+      "sha256": "b27a6171314e1d0c721c82e2b2d188cc12166591e2ce38eb2c8f77b8c84b8e31"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-postmortem/SKILL.md",
+      "sha256": "d50723e5a44badc67d6f6b8da9816c5387b9ec5f542f8a68c4761876c95e75cf"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-postmortem/agents/openai.yaml",
+      "sha256": "547747fbaf8e604f030f85d0f508187a08ce539fe2cb9d83b2decc0570092e34"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-project-guidance/SKILL.md",
+      "sha256": "c07768c6a8a75eee4fe585bb7411308d3498b40162d4bd53f527097c3bd0f382"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-project-guidance/agents/openai.yaml",
+      "sha256": "c8fa4a5eaf48af5d3d6f33e3bebcf0065aa232a7274be93cf2f28bca1ea17faf"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-release-readiness/SKILL.md",
+      "sha256": "88d25b192a80855f2bb92224a4980b2ed3505a570550097bf9f7f9ccadf5934b"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-release-readiness/agents/openai.yaml",
+      "sha256": "a3c530706bffdd36b09c155e6e033fbf366d562aae0a86b5d6dfeabe0a893550"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-retro/SKILL.md",
+      "sha256": "197c867428ab42c1ce2ac0487622a5a30447e264bcf79a58c401bde9d9f4764c"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-retro/agents/openai.yaml",
+      "sha256": "2159b5e53c266fcc1d06350f78806f8af8c8fadaa1e53e953e7c16074072fbb5"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-skill-maintenance/SKILL.md",
+      "sha256": "036c0f36b597e000b3f9feeeef7dba30b7243a53bd25388838d5f9e5c5ffa355"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-skill-maintenance/agents/openai.yaml",
+      "sha256": "86b964af80e6efb6b895991161139ee29caf1888f5bba7dac2d1d6565a681774"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-spec-discovery/SKILL.md",
+      "sha256": "2556b1d861aaa4729dae0d461215d63ca69d12dfe93bc7724914f0b3d7226d71"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-spec-discovery/agents/openai.yaml",
+      "sha256": "37fe1cf5cd2b27ab884a4c4e3da5655eafca8cc6f6f6fc55c02b5e93b0d60209"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-go/SKILL.md",
+      "sha256": "85360b60c9cab1dc51eb26fb2e678faf0f51ba3001fefbbd9c8e2e0a5032e7d3"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-go/agents/openai.yaml",
+      "sha256": "eef49f557b8fb83c842bb6e70833465f13d55f307ee7164ee7319e086790aebb"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-java/SKILL.md",
+      "sha256": "3677e414de415d428e087bd3780f850fd89e114f28c5b151e3946c07de801098"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-java/agents/openai.yaml",
+      "sha256": "e20c7e9dc776df9e8818f6d78c3111788c6dcf73a6a84b5e169984fbc2b2c5bc"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-openresty/SKILL.md",
+      "sha256": "c6bcd8c184a8cd62c8a8beb787086dc0886e925abc32e56eef9061c0c85a92cb"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-openresty/agents/openai.yaml",
+      "sha256": "5dbe9e7773dc8682b1ed2017102bf2ba6ee03dc7f11d8134df34b53bd5635839"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-python/SKILL.md",
+      "sha256": "d7ae9b9cd108316a928211a770c3b9a0e8d76ccab10d7eb4c9b58780be7dd957"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-python/agents/openai.yaml",
+      "sha256": "16b752d859ac6267f1d8846a47dbe5acc633eee7f76054905b21ef1e0841e293"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-rust/SKILL.md",
+      "sha256": "27f411d2aa50367c1371cf38bff206dbfdbeeecdc7606bbf630a13b8a23731a7"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-rust/agents/openai.yaml",
+      "sha256": "d1b8077f8274b85e9f374bf4bfda9fcdc7a4b56f5515ab1b67f44cd1cda9db2d"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-spring-boot/SKILL.md",
+      "sha256": "23b9aea739f5d13a4cf5bab8eb39e65a138e930ca26841a35f1113f32a2bf06a"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-spring-boot/agents/openai.yaml",
+      "sha256": "d2d9cf050790bd67855dd2f31c9c1fbce5570ba63a3e50afa78d9fe077154c37"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-vue/SKILL.md",
+      "sha256": "0b61123d92de0bb44d849ab201ffcb580271cc01e14db71f98646e79185b016c"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-stack-vue/agents/openai.yaml",
+      "sha256": "15d34d01972fc5717bbf6ff64a8c315f55c72acf7e15e2c207f475516e2f79b2"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-tdd/SKILL.md",
+      "sha256": "d76bef49a27ccf60058bbdbbce2cf0befa0ff6dd64e348f311f18f75eb63827b"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-tdd/agents/openai.yaml",
+      "sha256": "559037ad8fbc3d3ec42d08126313c297036e7142ef5d85c29431751d06c69ad1"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-tracer-tasks/SKILL.md",
+      "sha256": "9e0f4ffe4d64a1c1f01f783f75ed99d29f6636c309888b12ebe478655ee57fa3"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-tracer-tasks/agents/openai.yaml",
+      "sha256": "56113f6802417a3a3ae9ddeab286c8f0eff46ab0b5115aca845cb1d53c83f44d"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-workflow-router/SKILL.md",
+      "sha256": "e8224ccac71b9818045872bf81838f5f07bb41b8a147bdd7f57f19679f016feb"
+    },
+    {
+      "type": "skills",
+      "path": "dairn-workflow-router/agents/openai.yaml",
+      "sha256": "0429fc8709831573b26b695fd8b46e1fdc5f37b53a6b47bd6941ef94ebec1561"
+    },
+    {
+      "type": "specs",
+      "path": "ci/gates.md",
+      "sha256": "f51f2bd9bcfa6c8e0cd09a9da58c2826493247dd641ac297682c2c009046caf1"
+    },
+    {
+      "type": "specs",
+      "path": "ci/protected-attestation.md",
+      "sha256": "89fbfd4c62c31dfdf865a9127c5c68495ce2e508bea7bb6a465143b6c5e0d199"
+    },
+    {
+      "type": "specs",
+      "path": "ci/provider.md",
+      "sha256": "4b7659cd59e85383fcec97fedfe1799d7d0ab013b40799c142cc9c78e20e8942"
+    },
+    {
+      "type": "specs",
+      "path": "engineering/agent-execution-protocol.md",
+      "sha256": "c72855247007ab84f000271daacfd8f8e64fef42c38d06d268f65eeb53e75692"
+    },
+    {
+      "type": "specs",
+      "path": "engineering/agent-workflow.md",
+      "sha256": "0db4fda59a65de7f56a819a504b7079a1533c7ec50f6451011a427bf9b67bd07"
+    },
+    {
+      "type": "specs",
+      "path": "engineering/feedback.md",
+      "sha256": "dd8c4d9f4653d63a774a6fef96c3732106754603754dc907a7e58433bce2c532"
+    },
+    {
+      "type": "specs",
+      "path": "engineering/impact-analysis.md",
+      "sha256": "ace6014fa026495ee72546215cfe1e61042595825d2d928000ecaaa2f41ef1be"
+    },
+    {
+      "type": "specs",
+      "path": "engineering/portable-stubs.md",
+      "sha256": "705101f2bcb925a7d40ed4ce595e6f4e6ebb776301d2477bfe51456b794d6233"
+    },
+    {
+      "type": "specs",
+      "path": "engineering/project-guidance.md",
+      "sha256": "6790e1e6fbc7bf7f8fc2723cddf3cc675c8d3d460d5f1ebc61a3f330efa1ccf9"
+    },
+    {
+      "type": "specs",
+      "path": "engineering/relation-index.md",
+      "sha256": "ee070f18849355928fb7af098aa82dfeb0ff08bb64483c7edc655efacb57f677"
+    },
+    {
+      "type": "specs",
+      "path": "engineering/retro.md",
+      "sha256": "20d6dd2243799066f02f99a1be6095559c627f30eae630e1998bbc71d49e9c92"
+    },
+    {
+      "type": "specs",
+      "path": "engineering/review.md",
+      "sha256": "957cbaabed9fb46c27dbd0166ada41511e2641c5fb8d9030e68afe8a2704ba4e"
+    },
+    {
+      "type": "specs",
+      "path": "engineering/stub-attestation.md",
+      "sha256": "2cdc8f2bf9939fbe336058db298cdead10ff5d71ef748460d192b45e55013361"
+    },
+    {
+      "type": "specs",
+      "path": "engineering/tasks.md",
+      "sha256": "eed52d27bc711d1def92532822499b7f129ff7704d7d4b08aed962bb2ef9d7bb"
+    },
+    {
+      "type": "specs",
+      "path": "engineering/work-execution.md",
+      "sha256": "b64696d278e10692a248a3ef209f399e74d5fc93c3a3479026309c5f943cd3e6"
+    },
+    {
+      "type": "specs",
+      "path": "governance/authority.md",
+      "sha256": "4e4aab8f96854e9f3ca278a976206ae13fceb17b42244c0a1be489af4b3f6d3d"
+    },
+    {
+      "type": "specs",
+      "path": "governance/core.md",
+      "sha256": "83a540ce0b1db66805fa75ec1c363a747284176c6cbcb1c3bba8f42ce7f61fc3"
+    },
+    {
+      "type": "specs",
+      "path": "governance/distribution.md",
+      "sha256": "84e4fd927f305668ce817154f08abe2fa1f6247711deb39a1d55c949896bf2b8"
+    },
+    {
+      "type": "specs",
+      "path": "governance/identity.md",
+      "sha256": "753d6824f4effcbaa6559666b221fa25096a8ed36c4e8f211d76b0d9a6eb94e8"
+    },
+    {
+      "type": "specs",
+      "path": "governance/lifecycle.md",
+      "sha256": "432d8a00cd6189e67515b9c75acab95efb50a2d6988939da75fc5a9b5652cfc3"
+    },
+    {
+      "type": "specs",
+      "path": "governance/modes.md",
+      "sha256": "30823a0fdc6761d1c5526a942bda840faa8ee238f9fbc93365763bd3e39ce756"
+    },
+    {
+      "type": "specs",
+      "path": "governance/risk.md",
+      "sha256": "74b6345ebb8595ed2438bc445ab01b524ae3aed0a523e67139cd3dcfce87c033"
+    },
+    {
+      "type": "specs",
+      "path": "knowledge/discovery.md",
+      "sha256": "8affacc2d455ced73cf8ac12fba417205a60fe676a921ce7cb1b7771045897ba"
+    },
+    {
+      "type": "specs",
+      "path": "knowledge/glossary.md",
+      "sha256": "5a6e822e45eb14bab17e02a03af4f1a2213edc55e36eaff5b083232388a5b263"
+    },
+    {
+      "type": "specs",
+      "path": "knowledge/maintenance.md",
+      "sha256": "77b88c049aa4fbb32e72c071c77f1f88ddf41fc6f518d07c38f19245bef286d0"
+    },
+    {
+      "type": "specs",
+      "path": "notes/format.md",
+      "sha256": "1f050fdbff91475947f12be9e84254350c777ffd22f388d2da7aa526b57e1e6a"
+    },
+    {
+      "type": "specs",
+      "path": "notes/lifecycle.md",
+      "sha256": "8c008f8e6bd3f9dbd3f218d3805d34a485fee12e536d7f76cbafcaf22af9cf10"
+    },
+    {
+      "type": "specs",
+      "path": "operations/defect.md",
+      "sha256": "916d0d8e0e41afbfadaf754435505739daf8e28aabe1bfeecede711a87ead8df"
+    },
+    {
+      "type": "specs",
+      "path": "operations/feedback.md",
+      "sha256": "442e73a01b35e7ff0834c15c2a6e0216ef13fb4fcb9f614c451b74a9134067f1"
+    },
+    {
+      "type": "specs",
+      "path": "operations/incident.md",
+      "sha256": "ba86a16073276f254b3de803f0b5b245c88db90ffdec6dd055be7fcd4ce46fb9"
+    },
+    {
+      "type": "specs",
+      "path": "operations/release.md",
+      "sha256": "2bd0c69ea2bd4256ead13f8958deddecc064ea01a4aeed3f35ef1a099fbc1472"
+    },
+    {
+      "type": "specs",
+      "path": "operations/traceability.md",
+      "sha256": "add2687a95edd0a606a12b1159dccdbc8814493a65c9ee4a9b09b66497335e23"
+    },
+    {
+      "type": "specs",
+      "path": "skills/lifecycle.md",
+      "sha256": "f7aa42575eef0d609806fceb4400c1f76df186b95adb6940f682c5160428a916"
+    },
+    {
+      "type": "stub-templates",
+      "path": "csharp-surface/.gitignore",
+      "sha256": "6c5082c7e6de3e350189c67a1aacf757485ecc26e0a3cf96683528565f3e5f12"
+    },
+    {
+      "type": "stub-templates",
+      "path": "csharp-surface/Program.cs",
+      "sha256": "864a18d85785dc12b478b73054a1cee349d3d7f9a8da68a98c991d163e078162"
+    },
+    {
+      "type": "stub-templates",
+      "path": "csharp-surface/Surface.csproj",
+      "sha256": "031da6a6f6d810b9f23ffe7818f3acefb7b0ff54b0eb8c6752735ad58d254904"
+    },
+    {
+      "type": "stub-templates",
+      "path": "go-surface/main.go",
+      "sha256": "f595832c75fb61a60d760ece500e89a23385f446e1d8cc0764a57e1b097b5c59"
+    },
+    {
+      "type": "stub-templates",
+      "path": "java-surface/Main.java",
+      "sha256": "e09d3147185e5f7e9d1c2c61ec95c1bd9652b6b0346127e3b2940a8c186149f2"
+    },
+    {
+      "type": "stub-templates",
+      "path": "javascript-surface/main.mjs",
+      "sha256": "653a2f960e30800d15267d2711cb5a1e0c5de556b18156f77ae76f9596dd2198"
+    },
+    {
+      "type": "stub-templates",
+      "path": "lua-surface/main.lua",
+      "sha256": "ec228efd3949b19e4b6cd06e9b78c17b23baa0cbbd56873e9b6663bf9b38eb87"
+    },
+    {
+      "type": "stub-templates",
+      "path": "php-surface/main.php",
+      "sha256": "af94fb4db43b6e235f57976568e418b0732abf0d40fbe75aaecddb68122bdbf2"
+    },
+    {
+      "type": "stub-templates",
+      "path": "python-surface/main.py",
+      "sha256": "091a7788f0d8b2f4320a3bf791689c66660d2632cd0bf0bb4e1d5d720d4227ae"
+    },
+    {
+      "type": "stub-templates",
+      "path": "ruby-surface/main.rb",
+      "sha256": "21b7a33732b8799cdbc7b16faf658de5aee87e0874b9cfd4f0b42136a10d51f3"
+    },
+    {
+      "type": "stub-templates",
+      "path": "rust-surface/.gitignore",
+      "sha256": "b53ee26e6ff1da219b0563333a76d2c9ec19eec713d6ee54e11a1edacb0e9f3d"
+    },
+    {
+      "type": "stub-templates",
+      "path": "rust-surface/Cargo.toml",
+      "sha256": "ddf461ae8d2722dabd57e31e6b343fd15f7ab0eb92015e6c6fac68f8c7597239"
+    },
+    {
+      "type": "stub-templates",
+      "path": "rust-surface/main.rs",
+      "sha256": "188c599990ee201cf07c6174e82a8ec34a4beffc907fcad0b75fe2ee3050922d"
+    },
+    {
+      "type": "stub-templates",
+      "path": "shell-surface/main.sh",
+      "sha256": "edc601037d951f17dd346dad63faa7b293c6344db04fc13c6bdbae6db452b60e"
+    },
+    {
+      "type": "stub-templates",
+      "path": "typescript-surface/main.mjs",
+      "sha256": "158b57cdd2b009c068d209843989f9b9496cd4213c0875ce5d17005151d611a4"
+    }
+  ],
+  "engine_sources": [
+    {
+      "path": "quickjs/core/attestation.mjs",
+      "sha256": "0d74871dd5359f30156cf461bcf9d24b195588af9dc59ced8c4a93f742a09383"
+    },
+    {
+      "path": "quickjs/core/docs-validator.mjs",
+      "sha256": "912d0c5a01dc386b12814f31dd49f7ba854daadc21d891130ee3012298481d08"
+    },
+    {
+      "path": "quickjs/core/engine.mjs",
+      "sha256": "32895e7f59b0ad5f95316184f6f2c97065ba295ba54e28417aa2decd7a62f4dd"
+    },
+    {
+      "path": "quickjs/core/facts.mjs",
+      "sha256": "c703ea5c22f6db799b755f41937b2d2c87008503eb446b60815f558e14164416"
+    },
+    {
+      "path": "quickjs/core/guidance.mjs",
+      "sha256": "fd2ce5ac4c3f878c521af389f23900e4c42f2eac197abd8d33e5f9d35746d8bb"
+    },
+    {
+      "path": "quickjs/core/lifecycle-validator.mjs",
+      "sha256": "f656d6c28db84afeaa6e82cde3ffcb6198bfa3a2bceff9b7afdf6f5e8bb24fb4"
+    },
+    {
+      "path": "quickjs/core/policy.mjs",
+      "sha256": "85ed87a515e04563f3518cceee0e04538ec94f9cc2cc57bdad57b0a781f515a8"
+    },
+    {
+      "path": "quickjs/core/project.mjs",
+      "sha256": "802067b6e6aa6c1c4c9a2a04866da83158e259129745260374edc6d672976a3e"
+    },
+    {
+      "path": "quickjs/core/relations.mjs",
+      "sha256": "bbbc9d5111eabdf415f83c2624cf778d8c2519718430ce5b5b18608a6714e504"
+    },
+    {
+      "path": "quickjs/core/sha256.mjs",
+      "sha256": "cd312f93c56c18fbbb2c3f54248f259ef4fb6119a369148058c51522126dc591"
+    },
+    {
+      "path": "quickjs/core/stubs.mjs",
+      "sha256": "aa7069042b375b300021a6006bd479c798acf0e7f0aeeb934c2a487ccdae0db1"
+    },
+    {
+      "path": "quickjs/core/validators.mjs",
+      "sha256": "63534c769010fea87271bf55a870a9e95f72bdb10edf9c72e9c745a53e0d790b"
+    },
+    {
+      "path": "quickjs/core/work.mjs",
+      "sha256": "b720541d012751e0fdf4c36f82923197afce80176af00982b6e37fcabe4f4215"
+    },
+    {
+      "path": "quickjs/core/workflow.mjs",
+      "sha256": "6a1c9b3de5e07837bcd222496e05375768cd39f5bf3d9f595a4dfeaeba40f01a"
+    },
+    {
+      "path": "quickjs/host/qjs.mjs",
+      "sha256": "068bfee5e4030f1741dc6ed7dd0cba698590b75a4a3a87e920f9242ef7e1e92e"
+    },
+    {
+      "path": "quickjs/main.mjs",
+      "sha256": "d1db09c1da7ff8565f68f6d673cb6e777efd865e21ddd14f4c1dad9447f0a3e6"
+    }
+  ]
+}

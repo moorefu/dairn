@@ -1,0 +1,19 @@
+{
+  "quickjs_version": "2026-06-04",
+  "cosmocc_version": "4.0.2",
+  "patch_profile": "windows-cosmo-v1",
+  "quickjs": {
+    "2026-06-04": {
+      "url": "https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz",
+      "sha256": "b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a",
+      "upstream_binary_url": "https://bellard.org/quickjs/binary_releases/quickjs-cosmo-2026-06-04.zip"
+    }
+  },
+  "cosmocc": {
+    "4.0.2": {
+      "url": "https://github.com/jart/cosmopolitan/releases/download/4.0.2/cosmocc-4.0.2.zip",
+      "asset_api": "https://api.github.com/repos/jart/cosmopolitan/releases/assets/218248524",
+      "sha256": "85b8c37a406d862e656ad4ec14be9f6ce474c1b436b9615e91a55208aced3f44"
+    }
+  }
+}

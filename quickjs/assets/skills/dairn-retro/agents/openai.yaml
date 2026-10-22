@@ -1,0 +1,5 @@
+interface:
+  display_name: "dairn-retro"
+  short_description: "Dairn governed engineering skill"
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,5 @@
+interface:
+  display_name: "dairn-skill-maintenance"
+  short_description: "Dairn governed engineering skill"
+policy:
+  allow_implicit_invocation: false

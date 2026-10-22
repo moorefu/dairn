@@ -1,0 +1,14 @@
+[build-system]
+requires = []
+build-backend = "dairn_build_backend"
+backend-path = ["tools"]
+
+[project]
+name = "dairn"
+dynamic = ["version"]
+description = "基于原生 QuickJS 的开发治理内核"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+dairn = "dairn.cli:main"

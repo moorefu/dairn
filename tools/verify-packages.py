@@ -1,0 +1,218 @@
+"""独立或联合验收 npm、Wheel、ZIP；各平台使用同一套发布制品。"""
+import argparse
+import base64
+import csv
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import platform
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import venv
+import zipfile
+from source_workspace import prepare_workspace, runtime_payload, zip_paths
+
+ROOT = Path(__file__).resolve().parent.parent
+RELEASE = json.loads((ROOT / 'packaging/release.json').read_text(encoding='utf-8'))
+VERSION = RELEASE['version']
+NAMES = {'npm': f'dairn-{RELEASE["npm_version"]}.tgz',
+         'wheel': f'dairn-{VERSION}-py3-none-any.whl', 'zip': f'dairn-{VERSION}.zip'}
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--artifacts', type=Path, help='验收已有发布制品，不重新生成被安装的包')
+parser.add_argument('--package', choices=['all', 'npm', 'wheel', 'zip'], default='all')
+parser.add_argument('--skip-npm', action='store_true', help='仅供本地 Python 环境，CI 不使用此选项')
+parser.add_argument('--out', type=Path, default=ROOT / 'validation/build')
+args = parser.parse_args()
+if args.package != 'all' and not args.artifacts:
+    parser.error('独立制品验收需要 --artifacts，确保验证同一套构建产物')
+if args.skip_npm and args.package != 'all':
+    parser.error('--skip-npm 不能与独立制品验收合用')
+selected = set(NAMES) if args.package == 'all' else {args.package}
+if args.skip_npm:
+    selected.remove('npm')
+OUT = args.out.resolve()
+OUT.mkdir(parents=True, exist_ok=True)
+summary = {'platform': platform.platform(), 'machine': platform.machine(), 'steps': {},
+           'selected_packages': sorted(selected), 'artifact_mode': bool(args.artifacts)}
+sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+before = sha(ROOT / 'dairn-embedded.com')
+
+
+def extract_zip(archive, destination):
+    with zipfile.ZipFile(archive) as zipped:
+        assert zipped.testzip() is None
+        for entry in zipped.infolist():
+            target = (destination / entry.filename).resolve()
+            assert target.is_relative_to(destination.resolve())
+            zipped.extract(entry, destination)
+            if os.name != 'nt':
+                target.chmod((entry.external_attr >> 16) & 0o777)
+    return destination / ('dairn-' + VERSION)
+
+
+def verify():
+    with tempfile.TemporaryDirectory(prefix='dairn 构建验收 ') as temp:
+        tmp = Path(temp)
+        env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'PIP_NO_INDEX': '1',
+               'PIP_DISABLE_PIP_VERSION_CHECK': '1', 'PIP_CACHE_DIR': str(tmp / 'pip-cache'),
+               'npm_config_cache': str(tmp / 'npm-cache'), 'DAIRN_CACHE_HOME': str(tmp / 'runtime-cache')}
+        if os.name != 'nt':
+            loader_cache = tmp / 'ape-loader'
+            loader_cache.mkdir()
+            env['TMPDIR'] = str(loader_cache)
+
+        def run(name, command, cwd=ROOT, expected=0, override=None, timeout=240):
+            result = subprocess.run(list(map(str, command)), cwd=cwd, env=override or env,
+                                    capture_output=True, timeout=timeout)
+            (OUT / (name + '.log')).write_bytes(result.stdout + result.stderr)
+            summary['steps'][name] = {'returncode': result.returncode, 'expected': expected}
+            print(name, result.returncode, flush=True)
+            assert result.returncode == expected, (name, (result.stdout + result.stderr).decode('utf-8', errors='replace')[-3000:])
+            return result
+
+        def cli_cases(kind, command):
+            result = run(kind + '-version', [*command, 'version'], cwd=tmp)
+            assert ('Dairn ' + VERSION).encode() in result.stdout
+            run(kind + '-failure', [*command, 'invalid-command'], expected=2, cwd=tmp)
+            project = tmp / ('中文 ' + kind + ' 项目')
+            run(kind + '-init', [*command, 'init', '--root', project, '--name', 'package_test', '--stack', 'go', '--sample'], cwd=tmp)
+            assert (project / 'AGENTS.md').is_file()
+            run(kind + '-validate', [*command, 'validate', '--root', project], cwd=tmp)
+
+        built = tmp / 'artifacts'
+        if args.artifacts:
+            built.mkdir()
+            checksums = json.loads((args.artifacts / 'checksums.json').read_text(encoding='utf-8'))
+            assert set(checksums['artifacts']) == set(NAMES.values()), '发布清单必须且只能包含 npm、Wheel、ZIP'
+            for name, expected in checksums['artifacts'].items():
+                artifact = args.artifacts / name
+                assert sha(artifact) == expected, name + ' 校验失败'
+                shutil.copyfile(artifact, built / name)
+            summary['input_checksums'] = checksums
+        else:
+            run('python-build', [sys.executable, '-B', ROOT / 'tools/build.py', '--out', built])
+        archive = built / NAMES['zip']
+        original_zip_hash = sha(archive)
+        if 'npm' in selected:
+            npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
+            node = shutil.which('node')
+            assert npm and node, 'npm 或 Node 未安装'
+            if not args.artifacts:
+                run('npm-build', [npm, 'run', 'build', '--', '--out', built])
+                assert sha(archive) == original_zip_hash, 'Python/npm 生成的 ZIP 不一致'
+        runtime_payload(ROOT, archive)
+        summary['zip_files'] = sorted(zip_paths(ROOT))
+        extracted = extract_zip(archive, tmp / 'extracted')
+        runtime = extracted / 'runtime/dairn-embedded.com'
+        runtime_hash = sha(runtime)
+        if args.artifacts:
+            assert runtime_hash == checksums['ape_sha256']
+        assert json.loads((extracted / 'runtime/runtime-integrity.json').read_text(encoding='utf-8'))['sha256'] == runtime_hash
+        with zipfile.ZipFile(runtime) as zipped:
+            assert zipped.testzip() is None
+            assert len(zipped.namelist()) == len(set(zipped.namelist()))
+            for name in zipped.namelist():
+                if name.startswith('quickjs/') and name != 'quickjs/assets/manifest.json':
+                    assert zipped.read(name) == (ROOT / name).read_bytes(), name
+            manifest = json.loads(zipped.read('quickjs/assets/manifest.json'))
+            for entry in manifest['engine_sources']:
+                assert hashlib.sha256(zipped.read(entry['path'])).hexdigest() == entry['sha256']
+            for entry in manifest['assets']:
+                name = 'quickjs/assets/' + entry['type'] + '/' + entry['path']
+                assert hashlib.sha256(zipped.read(name)).hexdigest() == entry['sha256']
+        if selected & {'wheel', 'zip'}:
+            source = prepare_workspace(ROOT, tmp / 'source', archive)
+
+        if 'npm' in selected:
+            with tarfile.open(built / NAMES['npm']) as tar:
+                assert tar.extractfile('package/runtime/dairn-embedded.com').read() == runtime.read_bytes()
+                allowed = {'package/package.json', 'package/README.md', 'package/bin/dairn.cjs',
+                           'package/runtime/dairn-embedded.com', 'package/runtime/runtime-integrity.json'}
+                assert all(e.name in allowed or e.name.startswith('package/licenses/') for e in tar.getmembers())
+            installed = tmp / 'npm-installed'
+            installed.mkdir()
+            (installed / 'package.json').write_text('{"private":true,"name":"dairn-test"}')
+            run('npm-install', [npm, 'install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund',
+                                built / NAMES['npm']], cwd=installed)
+            package = installed / 'node_modules/dairn'
+            cli_cases('npm', [node, package / 'bin/dairn.cjs'])
+            run('npm-tests', [node, '--test', ROOT / 'npm/dairn/tests/npm-distribution.test.cjs'],
+                override={**env, 'DAIRN_NPM_PACKAGE': str(package)})
+
+        if 'wheel' in selected:
+            wheel = built / NAMES['wheel']
+            with zipfile.ZipFile(wheel) as zipped:
+                assert all(name.startswith(('dairn/', f'dairn-{VERSION}.dist-info/')) for name in zipped.namelist())
+                assert {n for n in zipped.namelist() if n.startswith('dairn/')} == {
+                    'dairn/__init__.py', 'dairn/cli.py', 'dairn/runtime/dairn-embedded.com', 'dairn/runtime/runtime-integrity.json'}
+                assert zipped.read('dairn/runtime/dairn-embedded.com') == runtime.read_bytes()
+                assert b'Tag: py3-none-any' in zipped.read(f'dairn-{VERSION}.dist-info/WHEEL')
+                for name, digest, length in csv.reader(io.StringIO(zipped.read(f'dairn-{VERSION}.dist-info/RECORD').decode())):
+                    if digest:
+                        data = zipped.read(name)
+                        assert len(data) == int(length)
+                        assert digest == 'sha256=' + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip('=')
+            virtual = tmp / 'venv'
+            venv.EnvBuilder(with_pip=True).create(virtual)
+            scripts = virtual / ('Scripts' if os.name == 'nt' else 'bin')
+            python = scripts / ('python.exe' if os.name == 'nt' else 'python')
+            cli = scripts / ('dairn.exe' if os.name == 'nt' else 'dairn')
+            run('wheel-install', [python, '-m', 'pip', 'install', '--no-index', wheel])
+            cli_cases('wheel', [cli])
+            destination = tmp / 'pep517'
+            run('pep517-checkout-source', [python, '-m', 'pip', 'wheel', '--no-deps', '--no-index', '--wheel-dir', destination, source])
+            assert sha(destination / wheel.name) == sha(wheel), '从仓库源码和发布 APE 重建的 Wheel 不一致'
+            summary['pep517_reproducible'] = True
+
+        if 'zip' in selected:
+            qjs = [str(runtime)] if os.name == 'nt' else ['/bin/sh', str(runtime)]
+            # 首次启动允许 APE 使用系统工具初始化 loader，再验证空 PATH 自举。
+            run('ape-cold-start', [*qjs, '/zip/quickjs/main.mjs', 'version'], cwd=extracted)
+            cli = [extracted / 'dairn.cmd'] if os.name == 'nt' else ['/bin/sh', extracted / 'dairn.sh']
+            cli_cases('zip', cli)
+            command = [source / 'build.cmd'] if os.name == 'nt' else ['/bin/sh', source / 'build.sh']
+            bare = {**env, 'PATH': ''}
+            run('zip-no-language-tools', [*cli, 'version'], cwd=tmp, override=bare)
+            native_out = tmp / 'native'
+            run('native-bootstrap', [*command, '--out', native_out], cwd=source, override=bare)
+            assert sha(native_out / archive.name) == original_zip_hash, '自举 ZIP 字节不一致'
+            run('native-policy', [*qjs, source / 'quickjs/tests/test_native.mjs'], cwd=source)
+            run('native-host', [*qjs, source / 'quickjs/tests/test_host_native.mjs'], cwd=source,
+                override={**env, 'DAIRN_QJS_BIN': str(runtime)})
+            engine = source / 'quickjs/core/engine.mjs'
+            engine.write_bytes(engine.read_bytes() + '\n// 源码重建验收标记\n'.encode('utf-8'))
+            changed = tmp / 'changed'
+            run('source-rebuild', [*command, '--out', changed], cwd=source, override=bare)
+            runtime_payload(ROOT, changed / archive.name)
+            changed_root = extract_zip(changed / archive.name, tmp / 'changed-extracted')
+            assert sha(changed_root / 'runtime/dairn-embedded.com') != runtime_hash
+            with zipfile.ZipFile(changed_root / 'runtime/dairn-embedded.com') as zipped:
+                assert zipped.read('quickjs/core/engine.mjs') == engine.read_bytes()
+            summary.update(identical_zip=True, source_rebuilt=True, zip_source_free=True)
+
+        assert sha(runtime) == runtime_hash, '验收不得修改分发 APE'
+        summary['artifacts'] = {p.name: sha(p) for p in built.iterdir() if p.is_file()}
+        if not args.artifacts:
+            dist = ROOT / 'dist'
+            dist.mkdir(exist_ok=True)
+            for name in summary['artifacts']:
+                shutil.copyfile(built / name, dist / name)
+        summary.update(ape_sha256=runtime_hash, bootstrap_unchanged=sha(ROOT / 'dairn-embedded.com') == before,
+                       packages={name: 'passed' for name in sorted(selected)})
+        assert summary['bootstrap_unchanged']
+
+
+try:
+    verify()
+    summary['status'] = 'passed'
+except Exception as error:
+    summary.update(status='failed', error=str(error))
+    raise
+finally:
+    (OUT / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+print(json.dumps(summary, ensure_ascii=False, indent=2))

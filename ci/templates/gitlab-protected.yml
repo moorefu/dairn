@@ -1,0 +1,61 @@
+# REVIEWED TEMPLATE: Requires pinned /opt/dairn runtime, two separated runner groups.
+# Merge requests use an unprivileged quality job; ONLY protected push jobs can sign.
+stages: [quality, attestation]
+
+# GitLab PR jobs usually cannot access protected variables: read policy pins from
+# provisioned *public, read-only runner configuration* rather than PR files.
+dairn:pr-quality:
+  stage: quality
+  tags: [dairn-unprivileged]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - when: never
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - export DAIRN_EXPECTED_POLICY_SHA256="$(cat /etc/dairn/trusted-policy.sha256)"
+    - test -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - /opt/dairn/dairn.sh validate --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - /opt/dairn/dairn.sh check --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+
+# No signing key on this runner, despite operating on a protected commit.
+dairn:protected-build:
+  stage: quality
+  tags: [dairn-protected-build]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+    - when: never
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - export DAIRN_CI_BIN=/opt/dairn/dairn.sh DAIRN_CI_APE_PATH=/opt/dairn/dairn-embedded.com
+    - /opt/dairn/ci/protected/build-protected.sh "$DAIRN_TASK_ID" "$DAIRN_TRUSTED_BASE_REF"
+  artifacts:
+    when: on_success
+    paths:
+      - .dairn/governance/evidence/
+      - .dairn/work/
+
+# Separate protected signing runner; key mounted ONLY here, not as a protected
+# pipeline-wide variable. Never execute project tests or project Stubs here.
+dairn:sign:
+  stage: attestation
+  tags: [dairn-protected-sign]
+  needs:
+    - job: dairn:protected-build
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+    - when: never
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - export DAIRN_CI_BIN=/opt/dairn/dairn.sh DAIRN_CI_APE_PATH=/opt/dairn/dairn-embedded.com
+    - export DAIRN_SIGNING_PRIVATE_KEY_PATH=/run/secrets/dairn-ci-ed25519.pem
+    - export DAIRN_TRUSTED_CI_PUBLIC_KEY=/etc/dairn/ci-ed25519-public.pem
+    - /opt/dairn/ci/protected/sign-protected.sh "$DAIRN_TASK_ID" "$DAIRN_TRUSTED_BASE_REF"
+  artifacts:
+    when: on_success
+    paths:
+      - .dairn/governance/evidence/
+      - .dairn/work/

@@ -1,0 +1,35 @@
+{
+  "说明": "官方源码校验、Windows 补丁、Cosmopolitan 双架构 APE 编译和资源嵌入记录。",
+  "quickjs": {
+    "version": "2026-06-04",
+    "url": "https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz",
+    "sha256": "b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a",
+    "upstream_binary_url": "https://bellard.org/quickjs/binary_releases/quickjs-cosmo-2026-06-04.zip"
+  },
+  "cosmocc": {
+    "version": "4.0.2",
+    "url": "https://github.com/jart/cosmopolitan/releases/download/4.0.2/cosmocc-4.0.2.zip",
+    "asset_api": "https://api.github.com/repos/jart/cosmopolitan/releases/assets/218248524",
+    "sha256": "85b8c37a406d862e656ad4ec14be9f6ce474c1b436b9615e91a55208aced3f44"
+  },
+  "patch_profile": "windows-cosmo-v1",
+  "build_environment": "Linux-7.1.3-200.fc44.x86_64-x86_64-with-glibc2.36",
+  "inputs": {
+    "tools/build-runtime.py": "e4d7e0e8ef95bd44fa5c743b6524679fc7354ed48304680f9e1e333862b665f9",
+    "tools/patch-quickjs-windows.py": "2609281be8cad59e275014a484bef21d2fa01cbf313a98ffee900b7cc3cd59ac",
+    "tools/quickjs-windows-redirect.h": "df05ec4b145729fc504d0193fe7fef722e85d38cc8ea2a2245545577882e6b26",
+    "tools/build-quickjs-cosmo.sh": "d5c134a154e416121903dce71677a234f2cfa4d52de61615350e1bb02d01a98b",
+    "tools/embed-runtime.py": "3507b43ef3308faf5e1e14efa99349d7b19728ab59717cec818cffaa2513efd4",
+    "packaging/quickjs-sources.json": "06d71446d2d15f83ee090add0ea164e62e047e7b16d2215a329541a0badf63bf"
+  },
+  "patched_quickjs_libc_sha256": "d44a5482f5489828a5e12f5122ad0e2c3cd120db164c95871973fa1ed1dc9e09",
+  "qjs_ape_sha256": "638cbae3c6a2d32313e80a094326bf7208054ab506b1e341e7ea273b461d554b",
+  "dairn_ape_sha256": "d6cb3f8c18f3229a07100d891276b8dab2c321c1da8ebc2952e1e06ff7112e3f",
+  "manifest_sha256": "9d52b6bfcc9e6a6f8d69b3aef4cefeb7edd525ed9b40ef74a81f68829ee3def0",
+  "upstream_tests": [
+    "test_language.js",
+    "test_builtin.js",
+    "test_loop.js",
+    "test_std.js"
+  ]
+}

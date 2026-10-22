@@ -1,0 +1,80 @@
+'use strict';
+const test = require('node:test');
+const {after} = test;
+const assert = require('node:assert/strict');
+const {spawnSync} = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
+
+const repo = path.resolve(__dirname,'../../..');
+const fixture = process.env.DAIRN_NPM_PACKAGE ? null : fs.mkdtempSync(path.join(os.tmpdir(), 'dairn-npm-fixture-'));
+const source = process.env.DAIRN_NPM_PACKAGE || fixture;
+if (fixture) {
+  fs.mkdirSync(path.join(fixture,'runtime'));
+  fs.cpSync(path.join(repo,'bin'),path.join(fixture,'bin'),{recursive:true});
+  fs.copyFileSync(path.join(repo,'package.json'),path.join(fixture,'package.json'));
+  for (const name of ['dairn-embedded.com','runtime-integrity.json']) fs.copyFileSync(path.join(repo,name),path.join(fixture,'runtime',name));
+  if (process.platform !== 'win32') fs.chmodSync(path.join(fixture,'runtime','dairn-embedded.com'),0o755);
+  after(() => fs.rmSync(fixture,{recursive:true,force:true}));
+}
+const launcher = path.join(source,'bin','dairn.cjs');
+const ape = path.join(source,'runtime','dairn-embedded.com');
+const hash = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+function run(args=[], options={}) {
+  return spawnSync(process.execPath,[launcher,...args],{
+    encoding:'utf8', timeout:20000, ...options,
+  });
+}
+
+test('运行时 SHA256 与包内 APE 一致', () => {
+  const meta = JSON.parse(fs.readFileSync(path.join(source,'runtime','runtime-integrity.json')));
+  assert.equal(hash(ape),meta.sha256);
+  assert.equal(meta.engine_version,'1.1.0rc9');
+});
+
+test('版本和参数透传不修改源二进制', () => {
+  const before=hash(ape);
+  const p=run(['version']);
+  assert.equal(p.status,0,p.stderr);
+  assert.match(p.stdout,/Dairn 1\.1\.0rc9/);
+  assert.equal(hash(ape),before);
+});
+
+test('CLI 非零退出码传递至 npm 启动器', () => {
+  const p=run(['invalid-command-for-test']);
+  assert.equal(p.status,2,p.stderr);
+});
+
+test('空格路径完整传递且项目检查通过', () => {
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'dairn npm spaces '));
+  try {
+    const target=path.join(tmp,'demo project');
+    const init=run(['init','--path',target,'--stack','go','--sample']);
+    assert.equal(init.status,0,init.stderr+'\n'+init.stdout);
+    assert.ok(fs.existsSync(path.join(target,'AGENTS.md')));
+    const check=run(['validate','--root',target],{cwd:tmp});
+    assert.equal(check.status,0,check.stderr+'\n'+check.stdout);
+    assert.match(check.stdout,/stubs: PASS/);
+  } finally { fs.rmSync(tmp,{recursive:true,force:true}); }
+});
+
+test('拒绝执行已损坏的包内运行时', () => {
+  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'dairn npm corrupted '));
+  try {
+    fs.cpSync(path.join(source,'bin'),path.join(temp,'bin'),{recursive:true});
+    fs.cpSync(path.join(source,'runtime'),path.join(temp,'runtime'),{recursive:true});
+    fs.appendFileSync(path.join(temp,'runtime','dairn-embedded.com'),Buffer.from([0x00]));
+    const p=spawnSync(process.execPath,[path.join(temp,'bin','dairn.cjs'),'version'],{encoding:'utf8',timeout:10000});
+    assert.equal(p.status,2);
+    assert.match(p.stderr,/checksum mismatch/);
+  } finally { fs.rmSync(temp,{recursive:true,force:true}); }
+});
+
+test('安装不需要生命周期脚本或外部依赖', () => {
+  const pkg=JSON.parse(fs.readFileSync(path.join(source,'package.json')));
+  assert.deepEqual(Object.keys(pkg.dependencies||{}),[]);
+  for(const name of ['preinstall','install','postinstall','prepare']) assert.ok(!pkg.scripts?.[name],name);
+  assert.equal(pkg.bin.dairn,'./bin/dairn.cjs');
+});

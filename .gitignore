@@ -1,0 +1,8 @@
+/.build/
+/dist/
+/runtime/
+/node_modules/
+# 本地验证产物、日志和工具缓存
+/validation/
+__pycache__/
+*.pyc

@@ -1,0 +1,127 @@
+"""Official Cosmo QuickJS integration: project stubs and external Ed25519 CI evidence."""
+import json,os,subprocess,tempfile,unittest
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[2]
+CLI=ROOT/'dairn.sh'
+class StubCIReview(unittest.TestCase):
+ def setUp(self):
+  self.t=tempfile.TemporaryDirectory(prefix='dairn-v12-');self.addCleanup(self.t.cleanup)
+  self.dir=Path(self.t.name);self.project=self.dir/'project'
+  self.call('init','--path',self.project,'--stack','go','--sample',ok=True)
+  self.git('init','-q');self.git('config','user.email','tester@example.test');self.git('config','user.name','tester')
+ def call(self,*args,env=None,ok=False):
+  proc=subprocess.run([str(CLI),*map(str,args)],cwd=self.dir,env={**os.environ,**(env or {})},capture_output=True,text=True,timeout=150)
+  if ok:self.assertEqual(proc.returncode,0,proc.stdout+'\n'+proc.stderr)
+  return proc
+ def obj(self,*args,env=None):return json.loads(self.call(*args,'--root',self.project,env=env,ok=True).stdout)
+ def git(self,*args):return subprocess.run(['git',*args],cwd=self.project,capture_output=True,text=True,check=True).stdout.strip()
+ def base(self):self.git('add','.');self.git('commit','-qm','baseline');return self.git('rev-parse','HEAD')
+ def task(self):
+  self.obj('work','start','Implement authentication feature','--id','auth')
+  for i in range(3):
+   self.obj('work','record','auth','README.md','--kind','note')
+   self.obj('work','advance','auth')
+ def change(self):
+  f=self.project/'auth.go';f.write_text('package hello\n\nfunc VerifyToken(s string) bool {\n\treturn len(s) > 0\n}\n');self.git('add','auth.go');self.git('commit','-qm','new auth')
+ def signkeys(self):
+  priv=self.dir/'ci-key.pem';pub=self.dir/'ci-pub.pem';wrong=self.dir/'wrong-pub.pem';p2=self.dir/'wrong.pem'
+  subprocess.run(['openssl','genpkey','-algorithm','ED25519','-out',str(priv)],check=True,capture_output=True)
+  subprocess.run(['openssl','pkey','-in',str(priv),'-pubout','-out',str(pub)],check=True,capture_output=True)
+  subprocess.run(['openssl','genpkey','-algorithm','ED25519','-out',str(p2)],check=True,capture_output=True)
+  subprocess.run(['openssl','pkey','-in',str(p2),'-pubout','-out',str(wrong)],check=True,capture_output=True)
+  return priv,pub,wrong
+ def test_new_project_agent_compat_and_gitignore(self):
+  self.assertTrue((self.project/'CLAUDE.md').exists());self.assertTrue((self.project/'AGENTS.md').exists());self.assertTrue((self.project/'.agents/skills/dairn-agent-workflow/SKILL.md').exists());self.assertTrue((self.project/'.dairn/stubs.json').exists())
+  self.assertIn('.dairn/cache/',(self.project/'.gitignore').read_text())
+  self.call('validate','--root',self.project,ok=True)
+ def test_stub_fail_closed_without_config(self):
+  self.assertNotEqual(self.call('guide','impact','--precision','surface','--root',self.project).returncode,0)
+ def test_stub_go_ast_and_dirty_cache(self):
+  source=ROOT/'examples/stubs/go-surface/main.go'
+  f=self.project/'.dairn/stubs.json';f.write_text(json.dumps({'schema':1,'stubs':[{'id':'surface','kind':'surface-analysis','argv':['go','run',str(source)],'cwd':'.','timeout_seconds':120}]})+'\n')
+  base=self.base();self.change()
+  res=self.obj('guide','impact','--base',base,'--precision','surface')
+  self.assertEqual(res['stub_analysis']['source'],'project-stub');self.assertTrue(any(x['symbol']=='func:VerifyToken' for x in res['stub_analysis']['changes']))
+  again=self.obj('guide','impact','--base',base,'--precision','surface')
+  self.assertEqual(again['stub_analysis']['source'],'local-cache')
+  (self.project/'README.md').write_text('uncommitted edit\n')
+  changed=self.obj('guide','impact','--base',base,'--precision','surface');self.assertEqual(changed['stub_analysis']['source'],'project-stub')
+  self.assertEqual(list((self.project/'.dairn/cache/stubs').glob('req-*')),[])
+ def test_stub_error_returns_nonzero(self):
+  f=self.project/'.dairn/stubs.json';f.write_text(json.dumps({'schema':1,'stubs':[{'id':'surface','kind':'surface-analysis','argv':['git','does-not-exist'],'cwd':'.'}]}))
+  self.base()
+  self.assertNotEqual(self.call('guide','impact','--precision','surface','--root',self.project).returncode,0)
+ def test_external_signed_attestation_review_and_synchronize(self):
+  self.task();base=self.base();self.change();head=self.git('rev-parse','HEAD')
+  self.call('check','--base',base,'--task','auth','--root',self.project,ok=True)
+  self.obj('work','advance','auth')
+  # Unsigned/local evidence does not satisfy protected CI requirement.
+  fail=self.call('work','verify','auth','--require-ci-attestation','--root',self.project)
+  self.assertNotEqual(fail.returncode,0)
+  env={'DAIRN_CI_PROVIDER':'gitlab','DAIRN_CI_JOB_ID':'trusted-job-100'}
+  prep=self.obj('work','attest-prepare','auth',env=env)
+  payload=self.project/prep['payload'];sig=self.project/(prep['payload']+'.sig')
+  priv,pub,wrong=self.signkeys()
+  subprocess.run(['openssl','pkeyutl','-sign','-inkey',str(priv),'-rawin','-in',str(payload),'-out',str(sig)],check=True,capture_output=True)
+  self.assertNotEqual(self.call('work','attest-attach','auth',prep['payload'],str(sig.relative_to(self.project)),'--root',self.project,env={'DAIRN_TRUSTED_CI_PUBLIC_KEY':str(wrong)}).returncode,0)
+  trust={'DAIRN_TRUSTED_CI_PUBLIC_KEY':str(pub),'DAIRN_TRUSTED_CI_PROVIDER':'gitlab'}
+  attach=self.obj('work','attest-attach','auth',prep['payload'],str(sig.relative_to(self.project)),env=trust)
+  self.assertEqual(attach['status'],'signature-verified')
+  self.call('work','verify','auth','--require-ci-attestation','--root',self.project,env=trust,ok=True)
+  # Review requires explicit, current-head two-axis decision.
+  review=self.project/'review.json'
+  review.write_text(json.dumps({'standards':'pass','spec_fidelity':'not-applicable','head':'0'*40}))
+  self.assertNotEqual(self.call('work','record','auth','review.json','--kind','review','--root',self.project,env=trust).returncode,0)
+  review.write_text(json.dumps({'standards':'pass','spec_fidelity':'not-applicable','head':head}))
+  self.obj('work','record','auth','review.json','--kind','review',env=trust)
+  self.call('work','advance','auth','--require-ci-attestation','--root',self.project,env=trust,ok=True)
+  self.assertEqual(self.obj('work','next','auth',env=trust)['current_stage'],'synchronize')
+  sync=self.project/'sync.json';sync.write_text(json.dumps({'status':'no-change','head':head,'reviewed_docs':['README.md'],'reason':'No user-facing documentation or published interface guidance changed in this patch.'}))
+  self.obj('work','record','auth','sync.json','--kind','document',env=trust)
+  self.call('work','finish','auth','--require-ci-attestation','--root',self.project,env=trust,ok=True)
+  # Tamper signed payload even if linkage already exists -> refuse verification.
+  payload.write_text(payload.read_text().replace('trusted-job-100','fake-job'))
+  self.assertNotEqual(self.call('work','verify','auth','--require-ci-attestation','--root',self.project,env=trust).returncode,0)
+ def test_ci_stub_requires_external_hash(self):
+  f=self.project/'.dairn/stubs.json';source=ROOT/'examples/stubs/go-surface/main.go'
+  f.write_text(json.dumps({'schema':1,'stubs':[{'id':'surface','kind':'surface-analysis','argv':['go','run',str(source)],'cwd':'.'}]}))
+  base=self.base();self.change();env={'GITLAB_CI':'true'}
+  self.assertNotEqual(self.call('guide','impact','--base',base,'--precision','surface','--root',self.project,env=env).returncode,0)
+  import hashlib
+  env['DAIRN_EXPECTED_STUBS_SHA256']=hashlib.sha256(f.read_bytes()).hexdigest()
+  res=self.obj('guide','impact','--base',base,'--precision','surface',env=env)
+  self.assertTrue(res['stub_analysis']['changes'])
+ def test_ape_fast_cache_does_not_mutate_source(self):
+  import hashlib
+  original=hashlib.sha256((ROOT/'dairn-embedded.com').read_bytes()).hexdigest()
+  env={'DAIRN_FAST_RUNTIME':'1','DAIRN_CACHE_HOME':str(self.dir/'runtime-cache')}
+  p=self.call('version',env=env,ok=True)
+  self.assertIn('1.1.0rc9',p.stdout)
+  self.assertEqual(hashlib.sha256((ROOT/'dairn-embedded.com').read_bytes()).hexdigest(),original)
+  self.assertTrue(list((self.dir/'runtime-cache').rglob('dairn-native')))
+ def test_adopt_existing_claude_instructions_preserved(self):
+  other=self.dir/'existing';other.mkdir();(other/'CLAUDE.md').write_text('Custom team Claude instructions.\n')
+  (other/'go.mod').write_text('module example.com/test\n\ngo 1.20\n')
+  self.call('adopt','--root',other,ok=True)
+  self.assertEqual((other/'CLAUDE.md').read_text(),'Custom team Claude instructions.\n')
+ def test_review_decision_rejected_after_new_head(self):
+  self.obj('work','start','Review existing changes','--id','inspect')
+  head=self.base()
+  self.obj('work','record','inspect','README.md','--kind','note')
+  self.obj('work','advance','inspect')
+  review=self.project/'review.json';review.write_text(json.dumps({'standards':'pass','spec_fidelity':'not-applicable','head':head}))
+  self.obj('work','record','inspect','review.json','--kind','review')
+  (self.project/'new.md').write_text('new commit\n');self.git('add','new.md');self.git('commit','-qm','head moved')
+  self.assertNotEqual(self.call('work','verify','inspect','--root',self.project).returncode,0)
+  self.assertNotEqual(self.call('work','advance','inspect','--root',self.project).returncode,0)
+ def test_malformed_stub_blocks_governance(self):
+  (self.project/'.dairn/stubs.json').write_text('\u007b"schema":1,"stubs":[{"id":"foo","kind":"missing","argv":["true"]}]}')
+  self.assertNotEqual(self.call('validate','--root',self.project).returncode,0)
+ def test_review_missing_and_synchronize_unstructured(self):
+  self.task();base=self.base();self.change();self.call('check','--base',base,'--task','auth','--root',self.project,ok=True);self.obj('work','advance','auth')
+  self.assertNotEqual(self.call('work','advance','auth','--root',self.project).returncode,0)
+  head=self.git('rev-parse','HEAD');p=self.project/'review.json';p.write_text(json.dumps({'standards':'pass','spec_fidelity':'not-applicable','head':head}))
+  self.obj('work','record','auth','review.json','--kind','review');self.obj('work','advance','auth')
+  self.assertNotEqual(self.call('work','record','auth','README.md','--kind','document','--root',self.project).returncode,0)
+  self.assertNotEqual(self.call('work','finish','auth','--root',self.project).returncode,0)
+if __name__=='__main__':unittest.main(verbosity=2)
