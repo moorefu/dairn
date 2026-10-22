@@ -42,7 +42,8 @@ jobs:
             echo '缺少 NPM_TOKEN：创建 npm Granular Access Token（Publish 权限）并配置到仓库 Secrets'
             exit 1
           }
-          tgz=$(ls incoming/*.tgz)
+          # 绝对路径：npm 会把形如 owner/repo 的相对路径当成 GitHub 简写解析。
+          tgz=$(ls "$PWD"/incoming/*.tgz)
           version=$(python3 -c "import json,tarfile,sys; print(json.load(tarfile.open(sys.argv[1]).extractfile('package/package.json'))['version'])" "$tgz")
           tag=latest
           case "$version" in *-*) tag=next ;; esac
