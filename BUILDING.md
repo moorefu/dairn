@@ -84,7 +84,7 @@ npm 使用 scoped 包名 `@moorefu/dairn`（`moorefu` scope 须属于你的账�
 
 1. 在 npmjs.com 创建/使用 `@moorefu` scope，创建 Granular Access Token（Read and write + **All packages**——新包还无法在令牌里单独勾选；账号开启 2FA 时勾选 Bypass 2FA），存为仓库 Secret `NPM_TOKEN`。
 2. 发布命令与工作流等价：`npm publish ./incoming/moorefu-dairn-0.1.0-rc.2.tgz --access public --tag next`（tarball 路径必须带 `./` 或使用绝对路径，否则 npm 会按 GitHub `owner/repo` 简写解析）。预发布版本（带 `-alpha`/`-beta`/`-rc`）必须用 `--tag next`，正式版才用 `--tag latest`，否则 `npm install @moorefu/dairn` 会装到预发布版。
-3. 版本不可覆盖：同一版本重复发布会失败，需先升版本（新标签）；工作流已自动跳过已存在版本。若失败：`EOTP` 表示账号 2FA 要求一次性密码（改用 Automation token 或给 Granular token 勾选 Bypass 2FA）、`E401` 表示令牌无效或过期、`E403` 表示令牌缺少发布权限或 scope/包名不匹配。
+3. 版本不可覆盖：同一版本重复发布会失败，需先升版本（新标签）；工作流已自动跳过已存在版本。若报 `403 ... Two-factor authentication or granular access token with bypass 2fa enabled is required`，说明账号开启了 2FA 但令牌没有启用 Bypass 2FA：编辑或新建 Granular token 并勾选 **Bypass two-factor authentication**，或改用 Classic Automation token；`E401` 表示令牌无效、被撤销或过期；`E403` 还可能是 scope/包名不匹配（Granular token 选 Read and write + All packages）。
 4. 可选升级：npmjs.com → 包 Settings → Trusted Publishing 配置 GitHub 仓库、工作流 `registry-publish.yml` 和环境 `npm`；随后可移除 `NPM_TOKEN`，由 OIDC 发布并附带 provenance（需 `package.json` 含 `repository` 字段并给 `npm publish` 加 `--provenance`）。
 
 ### PyPI（pypi.org）

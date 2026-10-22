@@ -69,11 +69,12 @@ jobs:
             [ -n "$detail" ] || detail=$(printf '%s\n' "$output" | head -n 1)
             echo "::error::npm publish 失败（$name@$version）：$detail"
             case "$output" in
-              *EOTP*|*"one-time password"*) echo '提示：账号开启了 2FA，请改用 Automation token，或为 Granular token 勾选 Bypass 2FA。' ;;
-              *E401*|*uthenticat*) echo '提示：NPM_TOKEN 无效或已过期。' ;;
+              *"bypass 2fa"*|*"Bypass 2FA"*|*"Two-factor authentication"*|*EOTP*|*"one-time password"*)
+                echo '提示：npm 要求 2FA 或启用 Bypass 2FA 的 Granular token。请编辑/新建 Granular token 并勾选 Bypass two-factor authentication，或改用 Classic Automation token。' ;;
+              *E401*|*uthenticat*) echo '提示：NPM_TOKEN 无效、已撤销或已过期。' ;;
               *erify*mail*|*mail*erif*) echo '提示：先在 npm 账号完成邮箱验证。' ;;
               *"too similar"*) echo '提示：包名被 npm 判定与现有包过于相似，需要换名。' ;;
-              *E403*|*orbidden*) echo '提示：令牌没有发布权限。Granular token 选 Read and write + All packages（新包还无法单独勾选）并勾选 Bypass 2FA；或改用 Classic Automation token。' ;;
+              *E403*|*orbidden*) echo '提示：令牌缺少 @moorefu scope 的 Read and write 权限；Granular token 选 All packages。' ;;
             esac
             exit "$code"
           fi
