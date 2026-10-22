@@ -21,6 +21,6 @@ Maven Wrapper `./mvnw -B -ntp test`、`./mvnw -B -ntp verify`；Gradle Wrapper `
 
 跨模块接口/数据模型修改及高影响并发状态机默认 L2，明确版本升级与回滚影响。
 
-## Dairn v1.2 最佳实践检查表
+## Dairn 当前发行版最佳实践检查表
 
-在修改代码、编写测试和 PR review 时阅读 [`docs/best-practices/java.md`](../../../docs/best-practices/java.md)；引用其中的规则 ID，区分可机械验证项与必须人工评审的语义检查。没有执行相应测试不得宣称满足规则。
+在修改代码、编写测试和 PR review 时阅读项目自有的 `docs/best-practices/java.md`（若存在）；引用其中的规则 ID，区分可机械验证项与必须人工评审的语义检查。没有执行相应测试不得宣称满足规则。

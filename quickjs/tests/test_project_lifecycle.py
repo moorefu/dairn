@@ -89,10 +89,10 @@ class Lifecycle(unittest.TestCase):
         self.ok('validate','--root',self.root)
     def test_skills_add_plan_and_apply(self):
         self.initgo()
-        skill=self.root/'.agents/skills/dairn-tdd/SKILL.md'
-        self.ok('skills','add','dairn-tdd','--root',self.root,'--plan')
+        skill=self.root/'.agents/skills/dairn-domain-model/SKILL.md'
+        self.ok('skills','add','dairn-domain-model','--root',self.root,'--plan')
         self.assertFalse(skill.exists())
-        self.ok('skills','add','dairn-tdd','--root',self.root,'--apply')
+        self.ok('skills','add','dairn-domain-model','--root',self.root,'--apply')
         self.assertTrue(skill.exists())
         self.ok('validate','--root',self.root)
     def test_ci_policy_pin_fails_closed(self):

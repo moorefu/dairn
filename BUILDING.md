@@ -34,6 +34,29 @@ python tools/checksums.py      # 校验发布目录仅有三类制品并写入�
 
 POSIX 首次启动 APE 需要 `uname`、`mkdir`、`dd`、`gzip`、`chmod`、`mv` 初始化加载器缓存；macOS ARM64 还需要系统 `cc`。取得 QuickJS 后，嵌入和 ZIP 写入由它自身完成。
 
+## 项目内 launcher 与 CI 测试运行时
+
+`dairn init` / `dairn adopt` 会在目标项目生成 launcher 文件（`.dairn/bin/dairn`、`.dairn/bin/dairn.cmd`、`.dairn/.gitattributes`，以及项目自有的 `.dairn/launcher.json`），模板来自嵌入运行时。它们只影响目标项目，不改变发布制品的字节；发布构建与 6 平台矩阵安装 npm/Wheel/ZIP 后仍使用包内运行时，并执行 `docs check`，不依赖目标项目的 launcher。
+
+本仓库的 `runtime/` 是构建产物（`.gitignore` 中 `/runtime/`）：fresh checkout 不能直接运行 `./dairn.sh`，需先 `python tools/build.py` 或 `npm run build` 生成。发布工作流的 `test-python` job 不重新下载 QuickJS，而是从已构建的发布 ZIP 中提取 `<prefix>/runtime/dairn-embedded.com` 与 `<prefix>/runtime/runtime-integrity.json` 到仓库 `runtime/`，再运行 `tools/verify-linux.py`（完整 Python 套件 + native 测试，需要 Go/git/gcc）；本地等价做法是先构建，再运行同一脚本。
+
+### Windows 实机验收
+
+在 Windows x64 + Git for Windows 上先 `python tools/build.py`，再运行 `python tools/verify-windows.py`（需要 node/git/npm/go；Go 默认从 `C:\Program Files\Go\bin` 查找，也可用 `--go-bin` 指定）。**没有 Go 工具链时加 `--skip-go`**：跳过 `go-env/go-init/go-checks`，CLI、launcher、native host/policy、npm、wheel 步骤照常执行并参与总体验收（`go_skipped=true`，`acceptance_passed` 不含 Go）。
+
+其中 `quickjs.tests.test_windows` 覆盖普通生命周期、junction 边界、真实子进程门禁，以及项目 launcher 文件、vendored 运行时离线执行、缺失运行时 127 报错、`core.autocrlf=true` 克隆后的受管哈希稳定性；`test_host_native.mjs` 用构建缓存中的原生 `qjs-*.com` 运行（没有缓存时回退 APE），覆盖 `host.readBytes` + 内建 SHA256。Go 步骤使用临时 `GOCACHE/GOTMPDIR/GOMODCACHE`，避免宿主机全局 Go 缓存 ACL 影响结果。
+
+本机实测（`go1.27.3 windows/amd64`，无 C 编译器）：
+
+- `cli/host/policy/npm/wheel-install/wheel/npm-pack/npm-install/npm-installed/go-env/go-init` 全部按预期通过，`acceptance_passed=true`、`original_unchanged=true`。
+- `go-checks`：`lint`/`unit`/`build` 通过；`integration`（`go test -race`）因 `CGO_ENABLED=0` 且无 `gcc` 失败。Go 门禁结果独立记录，不参与总体验收，避免在缺少 C 工具链时把“无法证明”伪装成“通过”。安装 MinGW-w64 等 C 编译器后该 gate 才可全绿。
+
+Windows 相关实现约束：
+
+- **Git 捕获回退**：Git for Windows 子进程在 Cosmo 传递的文件句柄下可能以 Windows 异常码退出。`host.run` 检测到该情况时改用 Git 自带的 `sh.exe` 做文件重定向捕获（成功只取 stdout，失败附 stderr）；`DAIRN_GIT_SH` 可覆盖 sh 路径。Git 是 Dairn 的必需依赖，`sh.exe` 随 Git for Windows 安装。
+- **二进制摘要**：vendored 运行时 SHA256 使用 `host.readBytes` + 内建 `sha256Bytes`，不依赖 `certutil`（其输出在部分 Windows 版本/重定向下不可捕获）；外部工具仅作回退。
+- **fresh clone**：`.dairn/cache/`、`.dairn/tmp/` 被忽略；空的 `operations/*` 目录不会被 Git 记录，校验按“暂无记录”处理；`dairn validate` / `dairn doctor` 在 fresh clone 中应通过。
+
 ## 获取 QuickJS
 
 上游为 [moorefu/quickjs-cosmo](https://github.com/moorefu/quickjs-cosmo/releases)，已包含 Windows 补丁。构建获取现成解释器，再嵌入 Dairn 资源。`quickjs.lock.json` 锁定版本、Release ZIP 地址、归档 SHA256、解释器条目及其 SHA256。升级解释器时更新该锁文件。
@@ -59,7 +82,7 @@ Linux 可在 `python:3.12-bookworm` 容器中执行该脚本。Windows Podman �
 | macOS | x64 | `macos-15-intel` |
 | macOS | ARM64 | `macos-15` |
 
-构建任务先获取并校验 QuickJS，自举嵌入后生成同一套三类制品；标签推送时制品版本取自标签，没有标签时取 `package.json`。矩阵统一使用 `--smoke` 最小验证：校验制品指纹，安装 npm/Wheel 或解压 ZIP，再执行 `version`、初始化和 `validate`。初始化使用 Python 模板，仅验证内嵌资源和项目结构，不执行项目工具链。测试 runner 不下载 QuickJS、不安装 Go，不跑 Go race、npm 深度测试或自举回归。
+构建任务先获取并校验 QuickJS，自举嵌入后生成同一套三类制品，并在打包后执行 `sh ./dairn.sh docs check` 与 `python -m unittest quickjs.tests.test_assets_lint` 作为分发资产一致性门禁；标签推送时制品版本取自标签，没有标签时取 `package.json`。矩阵统一使用 `--smoke` 最小验证：校验制品指纹，安装 npm/Wheel 或解压 ZIP，再执行 `version`、初始化、`validate` 与 `docs check`。初始化使用 Python 模板，仅验证内嵌资源和项目结构，不执行项目工具链。测试 runner 不下载 QuickJS、不安装 Go，不跑 Go race、npm 深度测试或自举回归。
 
 各任务独立保存结果，不跳过失败；6 个任务全部成功后汇总才通过。Windows ARM64 由系统兼容层执行 APE 的 Windows x64 入口。流程支持 push、PR 和手动运行，上游版本统一从锁文件读取；发布只由标签触发。
 

@@ -28,8 +28,12 @@ class AgentProtocol(unittest.TestCase):
         self.git('add','auth.go');self.git('commit','-qm','add verification');return self.git('rev-parse','HEAD')
     def implement(self):
         self.work('start','Implement authentication feature','--id','auth')
-        for _ in range(3):
-            self.work('record','auth','README.md','--kind','note')
+        (self.root/'grill.json').write_text(json.dumps({'schema':1,'task_id':'auth','questions':[
+            {'id':'q1','prompt':'How should the authentication token be validated?',
+             'recommendation':'Use a short-lived signed token','status':'resolved',
+             'decision':'Short-lived signed token, verified on every request'}]}))
+        for path,kind in [('README.md','note'),('grill.json','grill'),('README.md','spec'),('README.md','note')]:
+            self.work('record','auth',path,'--kind',kind)
             self.work('advance','auth')
         self.assertEqual(self.work('next','auth','--json')['current_stage'],'implement')
     def test_contract_is_structured_and_ai_is_external(self):
@@ -58,7 +62,7 @@ class AgentProtocol(unittest.TestCase):
         passed=self.cmd('check','--root',self.root,'--base',base,'--task','auth',ok=True)
         self.assertIn('Attached task run',passed.stdout)
         task=json.loads((self.root/'.dairn/work/auth.json').read_text())
-        runs=task['stages'][3]['machine_runs'];self.assertEqual([x['status'] for x in runs],['failed','passed'])
+        runs=task['stages'][4]['machine_runs'];self.assertEqual([x['status'] for x in runs],['failed','passed'])
         raw=json.loads((self.root/runs[-1]['path']).read_text())
         self.assertEqual(raw['task_id'],'auth');self.assertEqual(raw['head'],self.git('rev-parse','HEAD'))
         self.assertEqual(raw['base_commit'],base);self.assertEqual(raw['trust'],'local-unattested')
@@ -69,7 +73,7 @@ class AgentProtocol(unittest.TestCase):
         self.implement();base=self.commit_base();self.go_change()
         self.cmd('check','--base',base,'--task','auth','--root',self.root,ok=True)
         task=json.loads((self.root/'.dairn/work/auth.json').read_text())
-        file=self.root/task['stages'][3]['machine_runs'][0]['path']
+        file=self.root/task['stages'][4]['machine_runs'][0]['path']
         file.write_text(file.read_text().replace('local-unattested','trusted-ci'))
         self.assertNotEqual(self.cmd('work','verify','auth','--root',self.root).returncode,0)
         self.assertNotEqual(self.cmd('work','advance','auth','--root',self.root).returncode,0)

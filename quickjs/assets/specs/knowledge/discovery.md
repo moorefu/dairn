@@ -7,7 +7,7 @@ module: knowledge
 keywords: ["文档索引", "检索", "Spec拆分", "渐进加载", "context", "metadata", "semantic"]
 aliases: ["SDCL", "Spec Discovery", "文档查找"]
 related: ["dairn.docs.maintenance", "dairn.governance.authority", "dairn.governance.core"]
-symbols: ["make docs-find", "make docs-show", "make docs-context"]
+symbols: ["dairn docs find", "dairn docs show", "dairn docs context"]
 ---
 
 # 规格文档索引与渐进加载
@@ -28,14 +28,14 @@ symbols: ["make docs-find", "make docs-show", "make docs-context"]
 
 每个 Spec 在文件顶端维护轻量 YAML Frontmatter：`id`（永久逻辑身份）、`title`、`summary`、`kind`、`module`、`keywords`、`aliases`、`related`，可选 `symbols`。`id` 对路径迁移保持稳定，别名帮助兼容旧搜索词。正文只有当前事实，不维护全量目录副本。
 
-索引基于文件自身元数据自动生成到 `.dairn/governance/cache/`，它可丢弃、可重建、不能作为权威源。每次查询直接检查真实源文件，保证索引不会因缓存陈旧而误导。
+`dairn docs find` 每次查询都直接读取源文档 frontmatter 并现算匹配，不产生需要提交的持久索引；因此不存在“缓存陈旧”的权威风险。查询结果只是元数据与候选，正文必须按稳定 ID 用 `dairn docs show` 加载。
 
 ## 渐进查找协议
 
-1. 用 `make docs-find Q='关键词或规范ID'` **只返回元数据**和相关性解释。
+1. 用 `dairn docs find <query>` **只返回元数据**和相关性解释。
 2. 如果有多个高分候选，先选择 ID/模块，不强行加载一个错误结果。
-3. 用 `make docs-show ID=dairn....` 加载确切正文；长文档选择 `SECTION=...` 进一步限制上下文。
-4. 需要快捷路由用 `make docs-context Q='...'`；歧义时只列候选，单篇超出预算时报错并提供可选择章节，**不静默截断规范内容**。
+3. 用 `dairn docs show <spec-id>` 加载确切正文；长文档可先用 `dairn docs context <spec-id>` 获取截断到 8000 字符的低分辨率上下文，再 `dairn docs show` 读取权威正文。
+4. `dairn docs context` 只接受精确的 spec ID；未知 ID 会失败，不做模糊候选。输出超过 8000 字符时附带显式截断标记，不静默伪装成全文。
 5. `related` 只提供关联 ID，不自动递归加载；实现/测试/历史理由按需另查。
 
 ## 当前限制

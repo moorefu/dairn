@@ -7,14 +7,14 @@ module: operations
 keywords: ["运营留痕", "证据链", "事件记录", "审计", "append-only", "状态历史", "工单关联", "trace"]
 aliases: ["运行证据链", "Lifecycle Ledger", "闭环记录格式"]
 related: ["dairn.governance.lifecycle", "dairn.governance.modes", "dairn.operations.feedback", "dairn.operations.incident", "dairn.operations.defect", "dairn.operations.release"]
-symbols: ["make lifecycle-check", "make lifecycle-trace", "scripts/lifecycle.py"]
+symbols: ["dairn validate --base", "dairn check --base"]
 ---
 
 # 运行闭环留痕与证据链
 
 ## 记录创建触发
 
-本地实体属于可选承载形式。优先选择现有 Issue、Incident 平台或 CD 作为主记录；不要求普通 PR 额外创建五种 JSON。已经采用本地格式的记录仍接受完整状态与历史校验。外部链接只作为线索，脚本尚不能验证其内容真实性，因此不能用随意填写的 URL 绕过本地已建立记录的终态条件。
+本地实体属于可选承载形式。优先选择现有 Issue、Incident 平台或 CD 作为主记录；不要求普通 PR 额外创建五种 JSON。已经采用本地格式的记录仍接受完整状态与历史校验。外部链接只作为线索，CLI 尚不能验证其内容真实性，因此不能用随意填写的 URL 绕过本地已建立记录的终态条件。
 
 ## ID 与实体位置
 
@@ -30,7 +30,7 @@ symbols: ["make lifecycle-check", "make lifecycle-trace", "scripts/lifecycle.py"
 
 ## 校验与命令
 
-`make lifecycle-check [BASE=<trusted-ref>]` 检查文件格式、状态历史、跨实体 ID 链接、终态关闭条件（发布需同时有 CI、部署及运行信号；生产 Bug 需关联已接受的发布）；存在 `BASE` 时额外检查旧事件前缀、记录 ID/类型不可改写。`make validate/gate/ci` 自动调用同一校验。`make lifecycle-trace RECORD_ID=...` 返回该记录及反向引用，不加载全部日志。状态变更通过 `make lifecycle-transition`，保留 actor、原因和已登记的证据。
+`dairn validate --base <trusted-ref>` 检查文件格式、状态历史、跨实体 ID 链接、终态关闭条件（发布需同时有 CI、部署及运行信号；生产 Bug 需关联已接受的发布）；存在基线时额外检查旧事件前缀、记录 ID/类型不可改写。`dairn validate` 与 `dairn check --base <ref>` 自动调用同一校验。记录查询、反向引用与状态变更没有等价的 CLI 子命令：按规范手动编辑对应实体 JSON，保留 actor、原因和已登记的证据，再运行 `dairn validate`。
 
 ## 保留和信任边界
 

@@ -64,6 +64,20 @@ class WorkIntelligence(unittest.TestCase):
         sync=self.repo/'sync.json';sync.write_text(json.dumps({'status':'no-change','head':head,'reviewed_docs':['README.md'],'reason':'Reviewed changed files and confirmed published guidance is still accurate.'}))
         self.w('record','login','sync.json','--kind','document');self.w('finish','login')
         self.assertEqual(self.w('status','login')['status'],'recorded-complete')
+    def test_failed_review_is_recorded_but_blocks_advance(self):
+        self.start('Review login change')
+        self.w('record','login','README.md','--kind','document');self.w('advance','login')
+        head=self.commit()
+        review=self.repo/'review-fail.json'
+        review.write_text(json.dumps({'standards':'fail','spec_fidelity':'not-applicable','head':head}))
+        self.w('record','login','review-fail.json','--kind','review')
+        blocked=self.call('work','advance','login','--root',self.repo)
+        self.assertNotEqual(blocked.returncode,0)
+        self.assertIn('standards or spec fidelity failed',blocked.stderr)
+        fixed=self.repo/'review-pass.json'
+        fixed.write_text(json.dumps({'standards':'pass','spec_fidelity':'not-applicable','head':head}))
+        self.w('record','login','review-pass.json','--kind','review')
+        self.assertEqual(self.w('advance','login')['next']['id'],'synchronize')
     def test_review_with_spec_requires_real_document(self):
         self.start('Review login change')
         self.w('record','login','README.md','--kind','document');self.w('advance','login')

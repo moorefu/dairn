@@ -133,6 +133,7 @@ class PreviewCases(unittest.TestCase):
         self.assertEqual(p.returncode,0,p.stderr)
         evidence=json.loads((self.root/'.dairn/governance/evidence/all-qjs-checks.json').read_text())
         self.assertEqual(evidence['mode'],'baseline-all')
+    @unittest.skipUnless(OLD.exists(), 'legacy differential oracle is not shipped')
     def test_legacy_classifier_differential(self):
         spec=importlib.util.spec_from_file_location('oldgov',OLD)
         mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)

@@ -7,7 +7,7 @@ module: knowledge
 keywords: ["文档", "迁移", "重命名", "断链", "维护", "索引"]
 aliases: ["docs-maintenance", "文档拆分"]
 related: ["dairn.docs.discovery"]
-symbols: ["docs-check", "docs-index"]
+symbols: ["dairn docs check", "dairn validate"]
 ---
 
 # 文档维护、迁移与完整性检查
@@ -22,9 +22,9 @@ symbols: ["docs-check", "docs-index"]
 
 ## CI 校验
 
-`make docs-check` 拒绝缺失元数据、重复 ID、重复别名、未知关联 ID、非法模块或章节定位冲突。`make validate` 和 `make gate` 会执行相同的发现层检查。变更主题/路径应附 `make docs-find` 的检索结果，证明新文档可被准确发现。
+`dairn docs check` 校验分发资产（内嵌 specs/skills）的 frontmatter 必填字段、稳定 ID 唯一性、module 与路径一致、related 引用、相对链接与命令面；项目 `docs/specs/` 的重复别名、章节定位与 `.dairn/governance/docs/query-routes.json` 查询回归由 `dairn validate` 的 docs 校验器负责。变更主题/路径应附 `dairn docs find <query>` 的检索结果，证明新文档可被准确发现。
 
-`make docs-index` 仅生成缓存供工具使用，不应要求在 PR 提交缓存；`make docs-find` 即使缓存被删也能工作。大文档警告与上下文预算分开：单篇不能被上下文工具偷偷裁断。
+检索索引由 `dairn docs find` 内部生成、供工具使用，不应要求在 PR 提交缓存；即使缓存被删，`dairn docs find` 也能从源文档工作。大文档警告与上下文预算分开：单篇不能被上下文工具偷偷裁断。
 
 ## 验证的边界
 

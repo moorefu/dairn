@@ -7,7 +7,7 @@ module: governance
 keywords: ["轻量化治理", "治理裁剪", "按需治理", "G0", "G1", "G2", "G3", "流程瘦身", "强制升级"]
 aliases: ["adaptive-governance", "轻量化评审", "治理模式", "G0/G1/G2/G3"]
 related: ["dairn.governance.risk", "dairn.governance.lifecycle", "dairn.notes.lifecycle", "dairn.ci.gates", "dairn.operations.traceability"]
-symbols: ["make scope", "make gate", "scripts/governance.py"]
+symbols: ["dairn scope --base", "dairn check --base", "dairn validate --base"]
 ---
 
 # 轻量化治理模式与触发条件
@@ -29,8 +29,8 @@ symbols: ["make scope", "make gate", "scripts/governance.py"]
 
 ## 绝不允许裁剪
 
-风险对应的强制技术检查、当前 SHA 绑定、真实人工审查、生产部署与观察事实、应急授权、重大事故复盘与行动项、已经提交的不可改写历史均不可删除。治理脚本对规则自身的修改不能提供独立的授权保证：组织还需使用受保护分支、代码所有者审查、可信 Runner 和最小权限配置。任何“跳过测试”“自行审批”“未部署即关闭生产 Bug”等情况都必须拒绝。
+风险对应的强制技术检查、当前 SHA 绑定、真实人工审查、生产部署与观察事实、应急授权、重大事故复盘与行动项、已经提交的不可改写历史均不可删除。治理 CLI 对规则自身的修改不能提供独立的授权保证：组织还需使用受保护分支、代码所有者审查、可信 Runner 和最小权限配置。任何“跳过测试”“自行审批”“未部署即关闭生产 Bug”等情况都必须拒绝。
 
 ## 使用方式与局限
 
-运行 `make scope BASE=<verified-ref>` 得到 `risk`、`governance_mode`、原因、适用门禁与条件性记录；`make gate` 实际执行完整必需命令。单项 `make lint/unit` 仍不能代替完整门禁。仅有运行账本或文档变化而不命中业务代码模块时，仅执行适用静态与终态门禁，不虚构不存在的技术栈测试。静态路径识别不能理解任意代码的业务语义；人工 Reviewer 有义务在发现更高风险时升级。当前版本没有连接外部 Issue/CD 系统去校验真实性：跳过重复本地记录是基于组织级记录系统的事实和审查，不是自动验证了外部链接。
+运行 `dairn scope --base <verified-ref>` 得到 `risk`、`governance_mode`、原因、适用门禁与条件性记录；`dairn check --base <verified-ref>` 实际执行完整必需命令。`.dairn/governance/project.json` 中配置的单项 lint/unit argv 仍不能代替完整门禁。仅有运行账本或文档变化而不命中业务代码模块时，仅执行适用静态与终态门禁，不虚构不存在的技术栈测试。静态路径识别不能理解任意代码的业务语义；人工 Reviewer 有义务在发现更高风险时升级。当前版本没有连接外部 Issue/CD 系统去校验真实性：跳过重复本地记录是基于组织级记录系统的事实和审查，不是自动验证了外部链接。

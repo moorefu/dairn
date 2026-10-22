@@ -11,4 +11,4 @@ disable-model-invocation: true
 
 新实验能力标记 `dairn-stage: experimental`，默认 route 不推荐；已有稳定能力标记 stable；弃用标记 deprecated 且注明替代技能，不删除历史使用者仍需要的引用。
 
-通过 `make skills-check` 检查每个客户端权限声明一致，再做定向行为测试、Skill 文档和 PR Review。不要因添加技能数量好看而新增 Skill。
+通过 `dairn docs check` 检查分发资产中每个客户端权限声明一致，再用 `dairn validate` 检查项目内已安装 Skill；之后做定向行为测试、Skill 文档和 PR Review。不要因添加技能数量好看而新增 Skill。

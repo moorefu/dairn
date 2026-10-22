@@ -1,5 +1,10 @@
 import {recommendWorkflow,workflowStageList} from './workflow.mjs';
 import {runWork} from './work.mjs';
+import {installHooks} from './hooks.mjs';
+import {lintAssets} from './assets-lint.mjs';
+import {tasksReport,tasksReady} from './tasks.mjs';
+import {sealArchive} from './notes.mjs';
+import {LAUNCHER_POSIX,LAUNCHER_WINDOWS,LAUNCHER_CONFIG,RUNTIME_DIR,launcherScripts,defaultLauncherConfig,readLauncherConfig,launcherInfo,vendorRuntime,verifyLauncher} from './launcher.mjs';
 import {configuredStubs,stubInit,stubDoctor,stubTemplates} from './stubs.mjs';
 import {captureFacts,acceptFacts,factSnapshotPath} from './facts.mjs';
 /* Dairn QuickJS 项目生命周期与分发层；写入前规划全部项目变更。 */
@@ -9,7 +14,7 @@ import {minimumChecks, policyValidate, invariant, relative} from './policy.mjs';
 const ASSETS='/zip/quickjs/assets/';
 const BEGIN='<!-- Dairn:BEGIN managed navigation -->';
 const END='<!-- Dairn:END managed navigation -->';
-const SKILLS=['dairn-agent-workflow','dairn-workflow-router','dairn-governance','dairn-spec-discovery','dairn-code-review','dairn-bugfix','dairn-project-guidance'];
+const SKILLS=['dairn-agent-workflow','dairn-workflow-router','dairn-governance','dairn-spec-discovery','dairn-code-review','dairn-bugfix','dairn-project-guidance','dairn-grill','dairn-change-plan','dairn-tracer-tasks','dairn-tdd','dairn-retro'];
 const STACKS=['go','rust','python','java','spring-boot','vue','openresty'];
 const NOTE_KINDS=['feature','bug-fix','simplification','architecture','process','testing','security'];
 const EXCLUDE=new Set(['.git','.dairn','.agents','node_modules','.venv','venv','vendor','target','dist','build','__pycache__','docs','tests']);
@@ -33,12 +38,15 @@ export function runtimeIdentity(h){
   for(const x of m.assets||[]) invariant(sha256(read(h,ASSETS+x.type+'/'+x.path))===x.sha256,'Embedded asset checksum mismatch: '+x.path);
   return sha256(raw);
 }
+const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--ci','--base','--timeout','--id','--kind','--precision','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor'];
+const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--require-machine-gates':'require_machine_gates','--require-ci-attestation':'require_ci_attestation','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
 function argsParse(args){
   const out={cmd:args[0]||'help',pos:[],root:'.',stack:'auto',ci:'none',timeout:120};
   for(let i=1;i<args.length;i++){
-    let a=args[i];if(['--root','--path','--name','--stack','--module','--ci','--base','--timeout','--id','--kind','--precision','--template'].includes(a)){
-      invariant(i+1<args.length,'Missing value for '+a);const v=args[++i];out[a==='--path'?'root':a.slice(2)]=v;
-    } else if(['--plan','--dry-run','--apply','--diff','--sample','--all','--json','--strict','--require-machine-gates','--require-ci-attestation'].includes(a)) out[a==='--dry-run'?'plan':a==='--require-machine-gates'?'require_machine_gates':a==='--require-ci-attestation'?'require_ci_attestation':a.slice(2)]=true;
+    const a=args[i];
+    if(VALUE_OPTIONS.includes(a)){
+      invariant(i+1<args.length,'Missing value for '+a);out[a==='--path'?'root':a.slice(2).replace(/-/g,'_')]=args[++i];
+    } else if(Object.prototype.hasOwnProperty.call(FLAG_OPTIONS,a)) out[FLAG_OPTIONS[a]]=true;
     else if(a.startsWith('-')) throw Error('Unknown option: '+a);else out.pos.push(a);
   }
   return out;
@@ -97,11 +105,13 @@ function moduleConfig(h,root,o){
   });
 }
 function navigation(){return BEGIN+'\nDairn — AI-Native Software Engineering Toolkit.\n'+
+  'Project launcher: `./.dairn/bin/dairn` (Windows: `.dairn\\bin\\dairn.cmd`); `dairn` below is shorthand for this launcher. Never install Dairn during a task; if the launcher is missing, stop and report.\n'+
   'Run `dairn doctor`, `dairn validate`, or `dairn check --base <trusted-ref>` before PR/MR.\n'+
   'Discover shared guidance with `dairn docs find <topic>`; additional Skills via `dairn skills add <name> --apply`.\n'+
   'Project governance policy: `.dairn/governance/project.json`; decisions: `.agents/notes/`.\n'+
   'Project-specific context: `README.md` and `docs/PROJECT_GUIDE.md`; run `dairn guide plan` to enrich with observed facts.\n'+
   'For task continuity use `dairn work start <task> --id <id>` and `dairn work next --id <id>`; inspect impact using `dairn guide impact`.\n'+
+  'Task slices: `dairn tasks check` / `dairn tasks ready`; release asset consistency: `dairn docs check`; local hooks: `dairn hooks install --apply`.\n'+
   'For language-specific analysis run `dairn stubs templates` then `dairn stubs init --template LANGUAGE --id NAME --apply` and `dairn guide impact --precision <stub-id>`.\n'+
   'AI Agents call Dairn; Dairn does not invoke a model. Codex and DeepSeek Harness use AGENTS.md; Claude Code follows CLAUDE.md.\n'+END;}
 function ciTemplate(provider){
@@ -116,19 +126,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # CI administrators must provision a trusted version-pinned Dairn runtime.
+      # CI administrators provision a trusted Dairn launcher/runtime via DAIRN_CI_BIN.
       - name: Validate and check
         env:
           DAIRN_EXPECTED_POLICY_SHA256: \${{ vars.DAIRN_EXPECTED_POLICY_SHA256 }}
           BASE_SHA: \${{ github.event.pull_request.base.sha }}
           DAIRN_ENFORCE_DOC_DRIFT: \${{ vars.DAIRN_ENFORCE_DOC_DRIFT }}
+          DAIRN_CI_BIN: \${{ vars.DAIRN_CI_BIN }}
         run: |
           test -n "$DAIRN_EXPECTED_POLICY_SHA256" && test -n "$BASE_SHA"
-          dairn guide drift --base "$BASE_SHA"
-          dairn guide impact --base "$BASE_SHA"
-          if [ "\${DAIRN_ENFORCE_DOC_DRIFT:-false}" = "true" ]; then dairn guide drift --base "$BASE_SHA" --strict; fi
-          dairn validate --base "$BASE_SHA"
-          dairn check --base "$BASE_SHA"
+          DAIRN_BIN_VALUE="\${DAIRN_CI_BIN:-./.dairn/bin/dairn}"
+          sh "$DAIRN_BIN_VALUE" guide drift --base "$BASE_SHA"
+          sh "$DAIRN_BIN_VALUE" guide impact --base "$BASE_SHA"
+          if [ "\${DAIRN_ENFORCE_DOC_DRIFT:-false}" = "true" ]; then sh "$DAIRN_BIN_VALUE" guide drift --base "$BASE_SHA" --strict; fi
+          sh "$DAIRN_BIN_VALUE" validate --base "$BASE_SHA"
+          sh "$DAIRN_BIN_VALUE" check --base "$BASE_SHA"
 `;
   return `stages: [quality]
 variables:
@@ -137,11 +149,12 @@ dairn:quality:
   stage: quality
   script:
     - test -n "$DAIRN_EXPECTED_POLICY_SHA256" && test -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - dairn guide drift --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - dairn guide impact --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - if [ "\${DAIRN_ENFORCE_DOC_DRIFT:-false}" = "true" ]; then dairn guide drift --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --strict; fi
-    - dairn validate --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - dairn check --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - DAIRN_BIN_VALUE="\${DAIRN_CI_BIN:-./.dairn/bin/dairn}"
+    - sh "$DAIRN_BIN_VALUE" guide drift --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - sh "$DAIRN_BIN_VALUE" guide impact --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - if [ "\${DAIRN_ENFORCE_DOC_DRIFT:-false}" = "true" ]; then sh "$DAIRN_BIN_VALUE" guide drift --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --strict; fi
+    - sh "$DAIRN_BIN_VALUE" validate --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - sh "$DAIRN_BIN_VALUE" check --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
   artifacts:
     when: always
     paths: [.dairn/governance/evidence/]
@@ -199,9 +212,7 @@ function makeDesired(h,root,config,prior){
     entries['.agents/notes/archived/sha256.json']='{}\n';
     if(!file(h,j(root,'.gitignore')))entries['.gitignore']='# Dairn transient analyzer and runtime cache\n.dairn/cache/\n.dairn/tmp/\n';
     entries['.dairn/stubs.json']=fmt({schema:1,stubs:[]});
-    entries['.dairn/cache/.gitignore']='*\n!.gitignore\n';
-    entries['.dairn/tmp/.gitignore']='*\n!.gitignore\n';
-    if(!file(h,j(root,'CLAUDE.md')))entries['CLAUDE.md']='# Claude Code\n\nSee [AGENTS.md](AGENTS.md) for the authoritative, provider-neutral Dairn instructions.\nUse the `dairn-agent-workflow` Skill in `.agents/skills/` and invoke the `dairn` CLI for deterministic checks.\n';
+    if(!file(h,j(root,'CLAUDE.md')))entries['CLAUDE.md']='# Claude Code\n\nSee [AGENTS.md](AGENTS.md) for the authoritative, provider-neutral Dairn instructions.\nUse the project launcher `./.dairn/bin/dairn` (Windows: `.dairn\\bin\\dairn.cmd`) instead of a globally installed `dairn`; do not install Dairn, and use the `dairn-agent-workflow` Skill in `.agents/skills/` for deterministic checks.\n';
     if(config.sample){
       invariant(config.modules.length===1&&JSON.stringify(config.modules[0].profiles)==='["go"]','--sample requires a Go-only project');
       const prefix=config.modules[0].path==='.'?'':config.modules[0].path+'/';
@@ -215,12 +226,17 @@ function makeDesired(h,root,config,prior){
     if(!file(h,j(root,'README.md')))entries['README.md']=projectReadme(config);
     if(!file(h,j(root,'docs/PROJECT_GUIDE.md')))entries['docs/PROJECT_GUIDE.md']=projectGuide(config);
   }
-  // Stable, managed cache ignore markers persist across same-namespace upgrades.
-  entries['.dairn/cache/.gitignore']='*\n!.gitignore\n';
-  entries['.dairn/tmp/.gitignore']='*\n!.gitignore\n';
+  // .dairn/cache 与 .dairn/tmp 是临时目录（.gitignore 整目录忽略），
+  // 不生成受管 marker：否则 fresh clone 缺少这些文件会让 verifyRuntimeLock 失败。
   entries['docs/GOVERNANCE_SPEC.md']='# Dairn\n\nAI-Native Software Engineering Toolkit.\n\n'+
     'Project policy: `.dairn/governance/project.json`; authoritative reference specs: `dairn docs find <topic>`.\n';
-  entries['.dairn/Makefile']='.PHONY: doctor validate check\ndoctor:\n\t@dairn doctor\nvalidate:\n\t@dairn validate\ncheck:\n\t@dairn check\n';
+  entries['.dairn/Makefile']='.PHONY: doctor validate check\nDAIRN ?= ./.dairn/bin/dairn\ndoctor:\n\t@$(DAIRN) doctor\nvalidate:\n\t@$(DAIRN) validate\ncheck:\n\t@$(DAIRN) check\n';
+  // 项目内 launcher 是受管入口；launcher.json 是项目自有配置（见 planFor 排除列表）。
+  const launchers=launcherScripts();
+  entries[LAUNCHER_POSIX]=launchers.posix;
+  entries[LAUNCHER_WINDOWS]=launchers.windows;
+  entries['.dairn/.gitattributes']='bin/dairn text eol=lf\nbin/dairn.cmd text eol=crlf\nruntime/*.com binary\nruntime/runtime-integrity.json text eol=lf\n';
+  if(!prior||!file(h,j(root,LAUNCHER_CONFIG)))entries[LAUNCHER_CONFIG]=fmt(defaultLauncherConfig(runtimeVersion(h)));
   if(['github','both'].includes(config.ci))entries['.github/workflows/dairn.yml']=ciTemplate('github');
   if(['gitlab','both'].includes(config.ci))entries['.gitlab-ci.yml']=ciTemplate('gitlab');
   return entries;
@@ -249,7 +265,7 @@ function planFor(h,root,entries,lock){
       next[rel]=sha256(navigation());
     }else{
       status=unsafe?'conflict':old===null?'create':old===content?'unchanged':!before[rel]||sha256(old)!==before[rel]?'conflict':'update';
-      if(!['.dairn/governance/project.json','.dairn/stubs.json','.gitignore','CLAUDE.md','.agents/notes/archived/sha256.json','README.md','docs/PROJECT_GUIDE.md'].includes(rel) &&
+      if(!['.dairn/governance/project.json','.dairn/stubs.json','.gitignore','CLAUDE.md','.agents/notes/archived/sha256.json','README.md','docs/PROJECT_GUIDE.md',LAUNCHER_CONFIG].includes(rel) &&
         // Sample source code and build manifests become project-owned immediately.
         !(rel==='go.mod'||rel==='hello.go'||rel==='hello_test.go'||/^[^/]+\/(?:go\.mod|hello(?:_test)?\.go)$/.test(rel))) next[rel]=sha256(content);
     }
@@ -263,6 +279,50 @@ function planFor(h,root,entries,lock){
   const kept={...next};
   return {actions,full,managed:kept};
 }
+/* 组装要写入 .dairn/launcher.json 的 config；vendor 模式先做只读校验。 */
+function launcherConfigFor(h,root,o){
+  if(!o.vendor_runtime)return null;
+  const version=runtimeVersion(h);
+  const vendored=vendorRuntime(h,root,o.vendor_runtime,{version});
+  return {...defaultLauncherConfig(version),mode:'vendored',runtime:vendored.runtime};
+}
+/* plan/摘要输出用；--plan 下缺失运行时时降级为 pending，不做写入。 */
+function launcherSummary(h,root,o,vendorConfig=null){
+  if(vendorConfig)return {mode:'vendored',runtime:vendorConfig.runtime};
+  if(o.vendor_runtime){
+    if(!h.exists(j(root,RUNTIME_DIR))){
+      return {mode:'vendored',pending:true,source:o.vendor_runtime,note:'place the official dairn-embedded.com and runtime-integrity.json in .dairn/runtime first'};
+    }
+    const vendored=vendorRuntime(h,root,o.vendor_runtime,{version:runtimeVersion(h)});
+    return {mode:'vendored',runtime:vendored.runtime};
+  }
+  const configPath=j(root,LAUNCHER_CONFIG);
+  if(file(h,configPath)){const config=readLauncherConfig(h,root);return {mode:config.mode,runtime:config.runtime};}
+  return {mode:'external',runtime:null};
+}
+/* apply 后的项目自有 launcher 配置与执行位；managed launcher 文件由 makeDesired 写入。 */
+function ensureLauncher(h,root,o,vendorConfig=null){
+  const configPath=j(root,LAUNCHER_CONFIG);
+  let config=vendorConfig;
+  if(!config&&!file(h,configPath))config=defaultLauncherConfig(runtimeVersion(h));
+  if(config){
+    invariant(!h.isSymlink(configPath),'Refuse symlinked launcher config: '+LAUNCHER_CONFIG);
+    h.mkdirs(configPath.slice(0,configPath.lastIndexOf('/')));
+    const tmp=configPath+'.dairn-tmp-'+Date.now();
+    try{h.write(tmp,fmt(config));h.rename(tmp,configPath);}finally{if(h.exists(tmp))h.remove(tmp);}
+  }
+  const launcherPath=j(root,LAUNCHER_POSIX);
+  if(file(h,launcherPath)&&!h.isSymlink(launcherPath)){
+    try{h.chmod(launcherPath,0o755);}catch(e){h.log('WARN: cannot make launcher executable: '+(e&&e.message||e));}
+  }
+  // APE 的 sh 加载器需要执行位；注册 vendored runtime 时尽量补上（Windows 无操作）。
+  if(config&&config.mode==='vendored'&&config.runtime&&typeof config.runtime.path==='string'){
+    const runtimePath=j(root,config.runtime.path);
+    if(file(h,runtimePath)&&!h.isSymlink(runtimePath)){
+      try{h.chmod(runtimePath,0o755);}catch(e){h.log('WARN: cannot make vendored runtime executable: '+(e&&e.message||e));}
+    }
+  }
+}
 function layoutDirs(root){
   const dirs=[];
   for(const state of ['proposed','implemented','rejected','archived'])for(const kind of NOTE_KINDS)
@@ -270,6 +330,8 @@ function layoutDirs(root){
   for(const kind of ['feedback','incident','bug','release','action'])dirs.push(j(root,'.dairn/governance/operations/'+kind));
   for(const kind of ['engineering','tasks','changes','evidence'])dirs.push(j(root,'.dairn/governance/'+kind));
   dirs.push(j(root,'.dairn/work'));
+  dirs.push(j(root,'.dairn/bin'));
+  dirs.push(j(root,'.dairn/runtime'));
   dirs.push(j(root,'.dairn/cache'));
   dirs.push(j(root,'.dairn/cache/stubs'));
   dirs.push(j(root,'.dairn/tmp'));
@@ -295,6 +357,8 @@ function layout(h,root){
   for(const kind of ['feedback','incident','bug','release','action'])h.mkdirs(j(root,'.dairn/governance/operations/'+kind));
   for(const kind of ['engineering','tasks','changes','evidence'])h.mkdirs(j(root,'.dairn/governance/'+kind));
   h.mkdirs(j(root,'.dairn/work'));
+  h.mkdirs(j(root,'.dairn/bin'));
+  h.mkdirs(j(root,'.dairn/runtime'));
   h.mkdirs(j(root,'.dairn/cache/stubs'));
   h.mkdirs(j(root,'.dairn/tmp'));
 }
@@ -334,7 +398,10 @@ export function verifyRuntimeLock(h,root,required=false){
   for(const [rel,expected] of Object.entries(lock.managed||{})){
     const path=j(root,rel);invariant(file(h,path),'Missing managed file: '+rel);
     const original=read(h,path);const block=rel==='AGENTS.md'?managedBlock(original):null;
-    const actual=rel==='AGENTS.md'?(block?sha256(block.raw):''):sha256(original);
+    // 受管文本在 autocrlf=true 的 Windows checkout 上可能被转成 CRLF；
+    // 除有意使用 CRLF 的 .cmd 外，哈希前统一换行，避免“看起来被编辑”。
+    const normalize=text=>rel.endsWith('.cmd')?text:String(text).replace(/\r\n/g,'\n');
+    const actual=rel==='AGENTS.md'?(block?sha256(normalize(block.raw)):''):sha256(normalize(original));
     invariant(actual===expected,'Managed resource was edited: '+rel+' (use upgrade plan; restore controlled content)');
   }
   return lock;
@@ -356,24 +423,43 @@ function provision(h,o){
   invariant(['none','github','gitlab','both'].includes(config.ci),'Invalid --ci value');
   const plan=planFor(h,evaluationRoot,makeDesired(h,evaluationRoot,config,null),null);
   preflightLayout(h,evaluationRoot);
-  if(o.plan){h.log(fmt({mode:o.cmd,root:evaluationRoot,modules:config.modules.map(x=>({name:x.name,path:x.path,profiles:x.profiles})),actions:plan.actions}));return plan.actions.some(x=>x.status==='conflict')?2:0;}
+  if(o.plan){h.log(fmt({mode:o.cmd,root:evaluationRoot,modules:config.modules.map(x=>({name:x.name,path:x.path,profiles:x.profiles})),actions:plan.actions,launcher:launcherSummary(h,evaluationRoot,o)}));return plan.actions.some(x=>x.status==='conflict')?2:0;}
+  // Validate an explicitly requested vendored runtime BEFORE the first write (fail closed).
+  const vendorConfig=launcherConfigFor(h,evaluationRoot,o);
   const lock={schema:2,version:runtimeVersion(h),runtime_sha256:runtimeIdentity(h),config,managed:plan.managed};
   apply(h,evaluationRoot,plan,lock);layout(h,evaluationRoot);
+  ensureLauncher(h,evaluationRoot,o,vendorConfig);
   // Baseline only fresh initialized projects AFTER generated code and manifests exist.
   // Adopted projects must review and accept observed facts themselves.
   if(o.cmd==='init'&&!h.exists(factSnapshotPath(evaluationRoot)))acceptFacts(h,evaluationRoot,captureFacts(h,evaluationRoot,config));
   h.log('Dairn '+runtimeVersion(h)+' '+o.cmd+' 完成：'+config.modules.length+' 个模块，'+plan.actions.length+' 项资源。');
-  h.log('Next: dairn guide plan; dairn work start <task> --id <id>; dairn doctor; dairn check --all');return 0;
+  h.log('Launcher: '+LAUNCHER_POSIX+' (Windows: '+LAUNCHER_WINDOWS+')'+(vendorConfig?' — vendored runtime registered':' — external runtime resolution'));
+  h.log('Next: dairn guide plan; dairn work start <task> --id <id>; dairn hooks install --apply; dairn doctor; dairn check --all');
+  h.log('Offline runtime: put the official APE + runtime-integrity.json in .dairn/runtime, then run dairn upgrade --vendor-runtime .dairn/runtime --apply (adopt also accepts --vendor-runtime)');return 0;
 }
 function upgrade(h,o){
   const root=checkedRoot(h,o.root==='.'?h.cwd():o.root,false), lock=lockRead(h,root,true);
   const config={...lock.config,sample:false};const plan=planFor(h,root,makeDesired(h,root,config,lock),lock);
   preflightLayout(h,root);
-  const next={schema:2,version:runtimeVersion(h),runtime_sha256:runtimeIdentity(h),config,managed:plan.managed};
-  h.log(fmt({mode:o.apply?'apply':'plan',installed:runtimeVersion(h),recorded:lock.version,actions:plan.actions.filter(x=>o.diff||x.status!=='unchanged')}));
+  const installed=runtimeVersion(h);
+  let existingLauncher=null;
+  try{existingLauncher=readLauncherConfig(h,root);}catch(_){existingLauncher=null;}
+  const staleVendored=!!(existingLauncher&&existingLauncher.mode==='vendored'&&!o.vendor_runtime&&
+    existingLauncher.runtime&&existingLauncher.runtime.version&&existingLauncher.runtime.version!==installed);
+  if(staleVendored){
+    const message='Project launcher vendors Dairn '+existingLauncher.runtime.version+' but this CLI is '+installed+
+      '; replace .dairn/runtime with the matching release and run dairn upgrade --vendor-runtime .dairn/runtime --apply';
+    if(o.apply)throw Error(message);
+    h.error('WARNING: '+message);
+  }
+  const next={schema:2,version:installed,runtime_sha256:runtimeIdentity(h),config,managed:plan.managed};
+  // A requested vendored runtime must validate before any managed file is written.
+  const vendorConfig=o.vendor_runtime&&o.apply?launcherConfigFor(h,root,o):null;
+  h.log(fmt({mode:o.apply?'apply':'plan',installed:runtimeVersion(h),recorded:lock.version,actions:plan.actions.filter(x=>o.diff||x.status!=='unchanged'),launcher:launcherSummary(h,root,o,vendorConfig)}));
   if(o.diff){for(const a of plan.actions.filter(x=>x.status==='update'))h.log('~ '+a.path+' (managed content changed; diff with git for exact lines)');}
   if(!o.apply)return plan.actions.some(x=>x.status==='conflict')?2:0;
-  apply(h,root,plan,next);layout(h,root);h.log('Upgrade applied; project-owned policy and Notes untouched.');return 0;
+  apply(h,root,plan,next);layout(h,root);ensureLauncher(h,root,o,vendorConfig);
+  h.log('Upgrade applied; project-owned policy, Notes and launcher.json are preserved unless --vendor-runtime was given.');return 0;
 }
 function addSkill(h,o){
   const root=checkedRoot(h,o.root==='.'?h.cwd():o.root,false),lock=verifyRuntimeLock(h,root,true);
@@ -386,21 +472,63 @@ function addSkill(h,o){
   if(!o.apply)return plan.actions.some(x=>x.status==='conflict')?2:0;
   apply(h,root,plan,{...lock,config,managed:plan.managed});h.log('Added Skill: '+name);return 0;
 }
+/* 稳定 ID 现在从 spec frontmatter 解析；manifest.assets[].id 只是构建缓存。 */
+function frontmatterId(text){
+  for(const line of String(text).split(/\r?\n/).slice(0,30)){
+    const match=/^id:\s*(\S+)\s*$/.exec(line);
+    if(match)return match[1].replace(/^["']|["']$/g,'');
+  }
+  return null;
+}
+function specIndex(h){
+  const manifest=assetIndex(h),docs=[];
+  for(const asset of manifest.assets){
+    if(asset.type!=='specs')continue;
+    const text=read(h,ASSETS+'specs/'+asset.path);
+    docs.push({id:frontmatterId(text),path:asset.path,text});
+  }
+  return docs;
+}
 function docCmd(h,o){
-  const manifest=assetIndex(h);const docs=manifest.assets.filter(x=>x.type==='specs'&&x.id), action=o.pos[0],q=(o.pos[1]||'').toLowerCase();
+  const action=o.pos[0]||'find',q=(o.pos[1]||'').toLowerCase();
+  if(action==='check'){
+    const manifest=assetIndex(h);
+    const report=lintAssets(manifest.assets,(type,relPath)=>read(h,ASSETS+type+'/'+relPath));
+    if(o.json){h.log(fmt(report));return report.errors.length?2:0;}
+    h.log('assets: '+report.stats.specs+' specs, '+report.stats.skills+' skills; references: '+report.stats.references);
+    h.log(report.errors.length?'FAIL':'PASS');
+    for(const warning of report.warnings)h.log('WARN '+warning.asset+': '+warning.message);
+    for(const error of report.errors)h.log('ERROR '+error.asset+': '+error.message);
+    return report.errors.length?2:0;
+  }
+  const docs=specIndex(h);
   if(action==='find'){
-    invariant(q,'docs find <query>');const hits=docs.filter(x=>x.id.toLowerCase().includes(q)||x.path.toLowerCase().includes(q)||read(h,ASSETS+'specs/'+x.path).toLowerCase().includes(q));
-    for(const x of hits.slice(0,30))h.log(x.id+'\t'+x.path);return hits.length?0:1;
+    invariant(q,'docs find <query>');
+    const hits=docs.filter(x=>x.id&&(x.id.toLowerCase().includes(q)||x.path.toLowerCase().includes(q)||x.text.toLowerCase().includes(q)));
+    for(const hit of hits.slice(0,30))h.log(hit.id+'\t'+hit.path);
+    return hits.length?0:1;
   }
   if(action==='show'||action==='context'){
-    invariant(q,'docs show <id>');const x=docs.find(x=>x.id===q);invariant(!!x,'Unknown spec id: '+q);
-    const body=read(h,ASSETS+'specs/'+x.path);h.log(action==='context'?body.slice(0,8000):body);return 0;
+    invariant(q,'docs show <id>');
+    const doc=docs.find(x=>x.id&&x.id.toLowerCase()===q);
+    invariant(!!doc,'Unknown spec id: '+q);
+    const truncated=doc.text.length>8000;
+    h.log(action==='context'?(truncated?doc.text.slice(0,8000)+'\n\n[truncated at 8000 characters; use dairn docs show '+doc.id+' for the full authoritative text]':doc.text):doc.text);
+    return 0;
   }
-  throw Error('Usage: dairn docs find <topic> | docs show <spec-id>');
+  throw Error('Usage: dairn docs find <topic> | docs show <spec-id> | docs context <spec-id> | docs check [--json]');
 }
 function doctor(h,root){
   const lock=verifyRuntimeLock(h,root,true);const cfg=JSON.parse(read(h,j(root,'.dairn/governance/project.json')));
   const problems=policyValidate(cfg),modules=cfg.modules.map(m=>({name:m.name,path:m.path,checks:Object.keys(m.checks)}));
+  const launcherCheck=verifyLauncher(h,root);
+  for(const problem of launcherCheck.problems)problems.push(problem);
+  let launcher=launcherCheck.info;
+  if(!launcher){try{launcher=launcherInfo(h,root);}catch(_){launcher=null;}}
+  if(!launcher)launcher={resolved:LAUNCHER_POSIX,windows:LAUNCHER_WINDOWS,mode:'external',invocation:'./'+LAUNCHER_POSIX,windows_invocation:LAUNCHER_WINDOWS.replace(/\//g,'\\'),runtime:null};
+  if(launcher.mode==='vendored'&&launcher.runtime&&launcher.runtime.version&&launcher.runtime.version!==lock.version){
+    problems.push('vendored launcher runtime is '+launcher.runtime.version+' but project lock is '+lock.version+'; run dairn upgrade --vendor-runtime .dairn/runtime --apply');
+  }
   const candidates=[['git','--version']];
   for(const m of cfg.modules)for(const stack of m.profiles){
     const tool=({go:['go','version'],rust:['cargo','--version'],python:['python','--version'],vue:['node','--version'],
@@ -411,11 +539,13 @@ function doctor(h,root){
     try{const result=h.run(argv,root,10);tools[argv[0]]=result.code===0?'available':'missing-or-error';}
     catch(e){tools[argv[0]]='unavailable: '+e.message;}
   }
-  const status=problems.length?'unready':'ready';h.log(fmt({product:'Dairn',engine:'Cosmopolitan QuickJS',version:runtimeVersion(h),status,root,runtime_sha256:lock.runtime_sha256,modules,tools,problems}));
+  const status=problems.length?'unready':'ready';
+  h.log(fmt({product:'Dairn',engine:'Cosmopolitan QuickJS',version:runtimeVersion(h),status,root,runtime_sha256:lock.runtime_sha256,launcher,invocation:launcher.invocation+' doctor',modules,tools,problems}));
+  for(const problem of problems)h.error('ERROR: '+problem);
   return problems.length?1:0;
 }
 
-export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','stubs','doctor','version','--version'].includes(args[0]);}
+export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','stubs','doctor','version','--version','tasks','hooks','notes'].includes(args[0]);}
 export function dispatch(h,args){
   try{
     const o=argsParse(args),root=o.root==='.'?h.cwd():o.root;
@@ -424,7 +554,43 @@ export function dispatch(h,args){
     if(o.cmd==='detect'){const r=checkedRoot(h,root,false);h.log(fmt(detect(h,r)));return 0;}
     if(o.cmd==='upgrade')return upgrade(h,o);
     if(o.cmd==='doctor')return doctor(h,checkedRoot(h,root,false));
-    if(o.cmd==='docs')return docCmd(h,{...o,pos:o.pos});
+    if(o.cmd==='docs')return docCmd(h,o);
+    if(o.cmd==='tasks'){
+      const tasksRoot=checkedRoot(h,root,false), op=o.pos[0]||'check';
+      invariant(['check','ready'].includes(op),'Usage: dairn tasks check [--strict] [--json] | dairn tasks ready [--json]');
+      if(op==='ready'){
+        const report=tasksReady(h,tasksRoot);
+        if(o.json){h.log(fmt(report));}
+        else {
+          h.log('tasks: ready '+report.ready.length+', blocked '+report.blocked.length+(report.errors.length?', errors '+report.errors.length:''));
+          for(const item of report.ready)h.log('READY '+item);
+          for(const item of report.blocked)h.log('BLOCKED '+item.id+' waiting_on '+item.waiting_on.join(','));
+        }
+        for(const error of report.errors)h.error('ERROR: '+error);
+        return report.errors.length?2:0;
+      }
+      const report=tasksReport(h,tasksRoot,{strict:!!o.strict});
+      if(o.json)h.log(fmt(report));
+      else {
+        h.log('tasks: '+report.tasks+'; ready: '+report.ready.length+'; errors: '+report.errors.length+'; warnings: '+report.warnings.length);
+        for(const error of report.errors)h.log('ERROR '+error);
+        for(const warning of report.warnings)h.log('WARN '+warning);
+        h.log(report.errors.length?'FAIL':'PASS');
+      }
+      return report.errors.length?2:0;
+    }
+    if(o.cmd==='hooks'){
+      const hooksRoot=checkedRoot(h,root,false);verifyRuntimeLock(h,hooksRoot,true);
+      invariant((o.pos[0]||'install')==='install','Usage: dairn hooks install [--apply] [--git] [--force] [--launcher PATH]');
+      h.log(fmt(installHooks(h,hooksRoot,{apply:!!o.apply,git:!!o.git,force:!!o.force,launcher:o.launcher})));
+      return 0;
+    }
+    if(o.cmd==='notes'){
+      const notesRoot=checkedRoot(h,root,false);verifyRuntimeLock(h,notesRoot,true);
+      invariant(o.pos[0]==='seal','Usage: dairn notes seal [--apply]');
+      h.log(fmt(sealArchive(h,notesRoot,{apply:!!o.apply})));
+      return 0;
+    }
     if(o.cmd==='workflow'){
       if(o.pos[0]==='stages'){h.log(fmt(workflowStageList()));return 0;}
       invariant(o.pos[0]==='recommend'&&o.pos.length>1,'Usage: dairn workflow stages | workflow recommend <task description>');

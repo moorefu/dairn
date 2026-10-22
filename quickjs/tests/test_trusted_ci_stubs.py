@@ -79,8 +79,12 @@ class TrustedCIAndPortableStub(unittest.TestCase):
 
     def test_split_protected_signing_and_wrong_scope(self):
         self.dairn('work','start','Implement authentication feature','--id','auth')
-        for _ in range(3):
-            self.dairn('work','record','auth','README.md','--kind','note')
+        (self.project/'grill.json').write_text(json.dumps({'schema':1,'task_id':'auth','questions':[
+            {'id':'q1','prompt':'Which token lifetime fits the threat model?',
+             'recommendation':'Short-lived signed token','status':'resolved',
+             'decision':'Short-lived signed token, rotated on login'}]}))
+        for path,kind in [('README.md','note'),('grill.json','grill'),('README.md','spec'),('README.md','note')]:
+            self.dairn('work','record','auth',path,'--kind',kind)
             self.dairn('work','advance','auth')
         base=self.commit()
         (self.project/'auth.go').write_text('package hello\nfunc VerifyToken(s string) bool {return len(s)>0}\n')
@@ -124,7 +128,7 @@ class TrustedCIAndPortableStub(unittest.TestCase):
         wrong={**trust,'DAIRN_TRUSTED_CI_REPOSITORY':'evil/project'}
         self.assertNotEqual(self.dairn('work','verify','auth','--require-ci-attestation',env=wrong,pass_required=False).returncode,0)
         ledger=json.loads((self.project/'.dairn/work/auth.json').read_text())
-        self.assertEqual(ledger['stages'][3]['machine_runs'][-1]['status'],'passed')
+        self.assertEqual(ledger['stages'][4]['machine_runs'][-1]['status'],'passed')
         self.assertEqual(len(ledger['ci_attestations']),1)
         self.assertNotIn('check --task',sign.read_text())
 

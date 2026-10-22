@@ -10,19 +10,19 @@ related: ["dairn.governance.core", "dairn.governance.modes", "dairn.ci.gates", "
 symbols: ["dairn init", "dairn adopt", "dairn detect", "dairn doctor", "dairn check", "dairn upgrade --plan"]
 ---
 
-# Dairn v1.0.0 发行及项目接入契约
+# Dairn 发行及项目接入契约
 
 ## 发行边界
 
-Dairn Core 由独立、可版本固定的 Python `dairn` 分发，提供 `dairn` 命令。核心检查器、Skill 模板及主题规范归属发行包；业务工程只保存项目专属规则、少量 Agent Skills、Notes 空目录和 `.dairn/lock.json`。不要再复制参考仓库测试与完整文档到业务仓库。
+Dairn Core 由独立、可版本固定的分发包提供（npm 包 `@moorefu/dairn`、PyPI 包 `dairn` 与离线 ZIP/APE；预发布使用 `@next` / `--pre` 通道），提供 `dairn` 命令。核心检查器、Skill 模板及主题规范归属发行包；业务工程只保存项目专属规则、少量 Agent Skills、Notes 空目录和 `.dairn/lock.json`。不要再复制参考仓库测试与完整文档到业务仓库。
 
-CLI 的默认安装方式为从可信本地 Wheel、组织包仓库或批准的不可变源进行 `pip install`。v1.0.0 项目生成的 CI 工作流需要用户提供批准的 `DAIRN_INSTALL_SPEC`：它不把尚未发布的公共 PyPI 名称当成可用的远程依赖。发布到企业仓库之前必须明确许可、签名与供应链审查要求。
+CLI 应从可信本地包、组织包仓库或批准的不可变源安装；CI 工作流需要管理员预装并固定版本（Dairn 不要求也不提供 `DAIRN_INSTALL_SPEC` 这类安装规格）。当前 0.1.0-rc.1 为预发布，正式版以发布标签为准；发布到企业仓库之前必须明确许可、签名与供应链审查要求。
 
 ## 初次接入
 
 `dairn detect` 从明确的构建清单定位 Go、Rust、Python、Vue、Java、Spring Boot 和 OpenResty 模块，可识别多个模块；标记不足时使用 `--stack`，不能通过虚构工具或测试脚本满足门禁。`dairn init` 专门面向新建的空目录，`dairn adopt` 专门面向已有工程。二者首先生成文件计划；发现托管路径冲突不得产生部分写入。
 
-不要覆盖已有的 README、Makefile、AGENTS.md 或现有 CI 文件。`AGENTS.md` 中只追加一段起止标记明确的导航块；现有业务 Makefile 原样保留，新入口为 `dairn` CLI 或 `make -f .dairn/Makefile`。
+不要覆盖已有的 README、AGENTS.md 或现有 CI 文件。`AGENTS.md` 中只追加一段起止标记明确的导航块；项目现有构建配置原样保留，Dairn 只通过 `dairn` CLI 提供统一门禁入口，不要求项目再叠加一层命令包装。
 
 ## 版本锁与升级
 
@@ -32,7 +32,7 @@ CLI 的默认安装方式为从可信本地 Wheel、组织包仓库或批准的�
 
 ## 验证与可信边界
 
-不指定 Git 基线的 `dairn check` 运行静态治理检查及全部 L2 四项业务检查，并把证据标为 *baseline*，不能冒充 PR/MR 的风险门禁。指定 `--base` 时由固定版本治理执行器校验 Git 变更路径、风险下限、所需检查及证据，并实际运行各模块工具。新建仓库至少需完成第一次 Git 提交，PR/MR 前再对真实 base 执行 `dairn check --base <sha>`。
+`dairn check --all` 运行静态治理检查及全部 L2 四项业务检查，并把证据标为 *baseline*（`mode=baseline-all`），不能冒充 PR/MR 的风险门禁。指定 `--base` 时由固定版本治理执行器校验 Git 变更路径、风险下限、所需检查及证据，并实际运行各模块工具。新建仓库至少需完成第一次 Git 提交，PR/MR 前再对真实 base 执行 `dairn check --base <sha>`。
 
 CI 对 PR 提供的命令按不可信代码执行，必须使用无生产密钥的隔离 Runner；分支保护、代码所有者审查、密钥策略、生产审批与外部工具链安装不由 Dairn 自动替代。`.dairn/` 内锁文件和管理入口属于 L2/G2 治理变更，规则不能被同一 PR 自行降低。项目配置修改必须经过可信 CI 权限边界保护。
 

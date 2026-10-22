@@ -108,7 +108,9 @@ export function lifecycleValidate(h,root,base=null) {
   const errors=[],operation='.dairn/governance/operations',seen=new Set();
   for(const kind of Object.keys(definitions)) {
     const dir=join(root,operation+'/'+kind);
-    if(!h.isDirectory(dir)){errors.push('missing operation directory '+kind);continue;}
+    // 空目录不会被 Git 记录：fresh clone 中缺失等价于“尚无该类操作记录”，
+    // 不能当成治理结构损坏；下一次写入/upgrade 会由 layout 重新创建。
+    if(!h.isDirectory(dir))continue;
     for(const name of h.list(dir).sort()) {
       if(name==='.gitkeep')continue;
       const file=join(dir,name);if(h.isDirectory(file)||!name.endsWith('.json')){errors.push('unexpected operations file '+kind+'/'+name);continue;}

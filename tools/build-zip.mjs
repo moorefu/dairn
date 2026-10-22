@@ -42,9 +42,37 @@ try {
   for(const p of release.source_paths){if(p.includes('..')||p.startsWith('/'))throw Error('非法构建路径');walk(p);}
   const manifest=JSON.parse(host.read(root+'/quickjs/assets/manifest.json'));
   manifest.version=release.version;
+  // 资产清单从源码树自动发现：新增 Skill/Spec/Stub 模板无需再手工维护 manifest.assets。
+  const assetTypes=['skills','specs','stub-templates'];
+  function specId(path){ // Spec 稳定 ID 来自 frontmatter，供 `dairn docs find/show` 检索。
+    const lines=host.read(root+'/'+path).split(/\r?\n/);
+    if(!lines.length||lines[0].trim()!=='---')return null;
+    for(let i=1;i<lines.length;i++){
+      if(lines[i].trim()==='---')return null;
+      const match=/^id:\s*(\S+)\s*$/.exec(lines[i]);if(match)return match[1];
+    }
+    return null;
+  }
+  const assets=[];
+  for(const [path,data] of files){
+    for(const type of assetTypes){
+      const prefix='quickjs/assets/'+type+'/';
+      if(!path.startsWith(prefix))continue;
+      const rel=path.slice(prefix.length);
+      // 只接纳各资产的合法文件，防止 README/图片/散落文件混入 manifest 后触发 lint 误报。
+      if(type==='specs' && !rel.endsWith('.md')) break;
+      if(type==='skills' && !/^[^/]+\/(?:SKILL\.md|agents\/[A-Za-z0-9._-]+\.ya?ml|references\/[^/]+\.(?:md|txt|json))$/.test(rel)) break;
+      if(rel.split('/').some(part=>part.startsWith('.'))) break;
+      const asset={type,path:rel,sha256:sha256Bytes(data)};
+      if(type==='specs'){const id=specId(path);if(id)asset.id=id;}
+      assets.push(asset);break;
+    }
+  }
+  // 确定性顺序：type 固定顺序，再 path 字典序；保证构建字节可复现。
+  assets.sort((a,b)=>assetTypes.indexOf(a.type)-assetTypes.indexOf(b.type)||(a.path<b.path?-1:a.path>b.path?1:0));
+  manifest.assets=assets;
   const sources=[...files.keys()].filter(p=>p==='quickjs/main.mjs'||/^quickjs\/(core|host)\/[^/]+\.mjs$/.test(p)).sort();
   manifest.engine_sources=sources.map(path=>({path,sha256:sha256Bytes(files.get(path))}));
-  for(const asset of manifest.assets){const data=files.get('quickjs/assets/'+asset.type+'/'+asset.path);if(!data)throw Error('缺少资源：'+asset.path);asset.sha256=sha256Bytes(data);}
   files.set('quickjs/assets/manifest.json',utf8(JSON.stringify(manifest,null,2)+'\n'));
   const original=readZip(input);
   const embedded=sources.concat([...files.keys()].filter(p=>p.startsWith('quickjs/assets/'))).sort();

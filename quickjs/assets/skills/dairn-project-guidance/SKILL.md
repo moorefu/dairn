@@ -18,7 +18,7 @@ dairn-stage: stable
 
 1. `dairn guide plan` 读取现有模块、已配置检查命令、存在的项目资料。`commands.verified=false` 仅表示配置，不能报告为已测试。
 如已接入但缺少项目文档，可先运行 `dairn guide scaffold` 预览，再 `dairn guide scaffold --apply` 仅创建缺失的 README 和项目指南，不会覆盖已有内容。
-2. 查阅实际模块清单、构建文件、源码入口、已有 README、设计文档、Makefile、CI；当信息不足时保留 `TODO: 待确认`，不臆测架构、运行命令或安全能力。
+2. 查阅实际模块清单、构建文件、源码入口、已有 README、设计文档、CI 与 `.dairn/governance/project.json` 中的检查 argv；当信息不足时保留 `TODO: 待确认`，不臆测架构、运行命令或安全能力。
 3. 先列出差异计划：文件、预期读者、信息来源、保留/新建/修改、冲突和待确认问题。先提出 Diff；未经授权不覆盖既有团队说明。
 4. 每处新增事实尽量关联代码路径、测试命令或现有决策/Spec；只将**实测成功**写为“通过”。
 
@@ -43,7 +43,7 @@ dairn-stage: stable
 3. 对每个声称可运行的命令实际测试，并记录失败、限制、工具链版本；检查链接和示例与当前项目一致。
 4. 输出差异摘要和尚未验证的事实清单。不得声称 CLI 自动生成了真实架构设计；`init/adopt` 只生成最小脚手架。
 
-**安全边界**：不写入或降低 `.dairn/governance/project.json` 的最低门禁，不回避 `.dairn/lock.json`，不自动覆盖 README、Makefile、CI 或团队 Agent 指令，绝不将 secret 写进示例或生成文档。
+**安全边界**：不写入或降低 `.dairn/governance/project.json` 的最低门禁，不回避 `.dairn/lock.json`，不自动覆盖 README、构建文件、CI 或团队 Agent 指令，绝不将 secret 写进示例或生成文档。
 
 ## Continuous project facts and documentation drift
 

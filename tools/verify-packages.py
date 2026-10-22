@@ -93,6 +93,9 @@ def verify():
             assert (project / 'AGENTS.md').is_file()
             assert json.loads((project / '.dairn/lock.json').read_text(encoding='utf-8'))['version'] == VERSION
             run(kind + '-validate', [*command, 'validate', '--root', project], cwd=tmp)
+            # 分发资产 lint 不依赖语言工具链，因此 smoke 与 full 模式都执行。
+            docs = run(kind + '-docs-check', [*command, 'docs', 'check'], cwd=tmp)
+            assert b'PASS' in docs.stdout
 
         built = tmp / 'artifacts'
         if args.artifacts:

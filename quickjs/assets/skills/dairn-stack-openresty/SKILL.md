@@ -25,6 +25,6 @@ Lua 静态检查 luacheck、单测 busted、OpenResty Test::Nginx 集成测试�
 
 涉及认证、网络协议兼容、worker 共享状态、连接调度或线上限流/熔断逻辑时，默认 L2 且需独立评审。相关测试覆盖并发、资源清理和错误分支，不仅覆盖 happy path。
 
-## Dairn v1.2 最佳实践检查表
+## Dairn 当前发行版最佳实践检查表
 
-在修改代码、编写测试和 PR review 时阅读 [`docs/best-practices/openresty.md`](../../../docs/best-practices/openresty.md)；引用其中的规则 ID，区分可机械验证项与必须人工评审的语义检查。没有执行相应测试不得宣称满足规则。
+在修改代码、编写测试和 PR review 时阅读项目自有的 `docs/best-practices/openresty.md`（若存在）；引用其中的规则 ID，区分可机械验证项与必须人工评审的语义检查。没有执行相应测试不得宣称满足规则。

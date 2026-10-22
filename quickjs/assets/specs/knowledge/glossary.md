@@ -7,7 +7,7 @@ module: knowledge
 keywords: ["Glossary", "术语", "上下文", "domain", "context pointer"]
 aliases: ["领域术语", "领域模型词汇"]
 related: ["dairn.docs.discovery", "dairn.engineering.tasks"]
-symbols: ["make glossary-check", "make glossary-find"]
+symbols: ["dairn validate"]
 ---
 
 # Glossary 与上下文发现
@@ -18,4 +18,4 @@ symbols: ["make glossary-check", "make glossary-find"]
 
 ## 低成本校验
 
-`make glossary-check` 校验标题结构、重复术语、非空定义和 Map 目标有效性；`make glossary-find Q=...` 查询。未采用 Glossary 的仓库不受影响。Map 不得循环引用或包含仓库外路径。
+`dairn validate` 校验 GLOSSARY 标题结构、重复术语、非空定义和 Map 目标有效性；术语查询直接读取项目 `GLOSSARY.md` / `GLOSSARY-MAP.md`，没有对应的 CLI 子命令。未采用 Glossary 的仓库不受影响。Map 不得循环引用或包含仓库外路径。

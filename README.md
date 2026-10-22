@@ -25,9 +25,47 @@ dairn version
 dairn init --root "示例 项目" --name demo --stack go --sample
 dairn validate --root "示例 项目"
 dairn check --root "示例 项目" --all
+dairn docs check                       # 校验内嵌 Skill/Spec 的命令与元数据一致性
+dairn tasks check --root "示例 项目"     # 校验任务切片与阻塞关系（可选）
+dairn hooks install --apply --root "示例 项目"   # 生成 pre-push / turn-end hook
 ```
 
+初始化后的项目优先使用项目内 launcher：`./.dairn/bin/dairn …`（Windows `.dairn\bin\dairn.cmd …`）；目标项目文档中的 `dairn` 均指该 launcher（Dairn 源码仓库场景用根 `./dairn.sh`，见下一节）。
+
+任务流程使用 `dairn work start/list/status/next/record/advance/skip/verify/finish/cancel/reopen`（普通变更新增 Grill 阶段，必须先消除未决问题；`skip` 只允许规划阶段并留下理由）；`dairn hook turn-end` 把当前会话锚定到活跃任务，`dairn hook pre-push` 在推送前复跑结构治理、风险门禁并校验活跃任务证据是否对应当前 HEAD。发布构建会执行 `dairn docs check` 与资产 lint 回归，把 Skill/Spec 与 CLI 的命令漂移挡在发布之前。
+
 项目检查需要项目自己的工具链；Go `-race` 需要 CGO 和 C 编译器。Windows 支持中文和空格路径，拒绝目录联接与符号链接；批处理门禁需显式配置 `cmd.exe`。POSIX 首次启动 APE 使用系统基础命令初始化加载器，macOS ARM64 还需 Xcode Command Line Tools 的 `cc`。
+
+## 在仓库中调用 Dairn（无安装/离线）
+
+`dairn init` / `dairn adopt` 会在项目里生成 launcher：POSIX `.dairn/bin/dairn`、Windows `.dairn\bin\dairn.cmd`。它是项目内的稳定入口（目标项目文档中的 `dairn` 都是它的简写），按以下顺序解析运行时：
+
+1. 环境变量 `DAIRN_BIN` 指定的 Dairn 可执行入口（外部受信的启动器/CLI）；
+2. 项目内 vendored 运行时 `.dairn/runtime/dairn-embedded.com`；
+3. `PATH` 上的 `dairn`；
+4. 都不可用时输出 `dairn not found (DAIRN_NOT_AVAILABLE): vendor the runtime into .dairn/runtime/ or set DAIRN_BIN` 并以 127 退出。**launcher 不会自动安装或联网下载。**
+
+**离线 vendoring。** 把官方发布的 APE `dairn-embedded.com` 与 `runtime-integrity.json` 放入目标项目的 `.dairn/runtime/`，然后用已有 Dairn 注册并固定该运行时：
+
+```sh
+# 已有 Dairn 项目：切换/固定到项目内运行时（写入 .dairn/launcher.json）
+dairn upgrade --root "示例 项目" --vendor-runtime .dairn/runtime --apply
+# 已有仓库接入时也可在 adopt 时注册（先把运行时放入 .dairn/runtime/）
+dairn adopt --root "示例 项目" --vendor-runtime .dairn/runtime
+```
+
+新项目先 `dairn init ...` 建好项目，再把运行时放入 `.dairn/runtime/`，最后执行上面的 `dairn upgrade --vendor-runtime … --apply`（`init` 要求空目录，不能在 init 前预置运行时；`--vendor-runtime` 路径相对项目根解析）。CLI 用内建 SHA256 直接读取二进制计算实际摘要并与 `runtime-integrity.json` 比对（仅当二进制读取不可用时才回退 `sha256sum`/`shasum`/`certutil`），同时要求运行时版本与执行该命令的 Dairn CLI 版本一致（init/adopt/upgrade 会把该版本写入项目 lock；升级 Dairn 版本时用同版本 CLI 执行 `upgrade`）；成功后 `.dairn/launcher.json` 记录 `mode=vendored` 与 `runtime.sha256`。之后无需 PATH 中的 Dairn：
+
+```sh
+./.dairn/bin/dairn version              # POSIX
+.dairn\bin\dairn.cmd version            # Windows
+```
+
+**Fresh clone。** 把 `.dairn/bin/`、`.dairn/launcher.json`、`.dairn/runtime/` 一并提交后，clone 出来的项目可直接 `./.dairn/bin/dairn doctor`（Windows `.dairn\bin\dairn.cmd doctor`）。`.dairn/cache/`、`.dairn/tmp/` 是 gitignore 的临时目录；空的 `operations/*` 目录不会被 Git 记录，校验按“暂无记录”处理，不属于治理损坏。
+
+**Agent 规则。** 在项目任务中不要自动执行 `npm install` / `pip install` 安装 Dairn；先运行 launcher 的 `doctor`（`./.dairn/bin/dairn doctor`），launcher 缺失或检查失败时停止并报告环境问题，而不是自行安装或下载运行时。
+
+**Dairn 源码仓库本身。** 本仓库的 `runtime/` 是被 gitignore 的构建产物，没有 `.dairn/` 项目文件：fresh checkout 先 `python tools/build.py`（或 `npm run build`）生成运行时，再用 POSIX `./dairn.sh <命令>`、Windows `dairn.cmd <命令>` 调用；不要在此仓库裸敲 `dairn`。
 
 ## 构建与维护
 

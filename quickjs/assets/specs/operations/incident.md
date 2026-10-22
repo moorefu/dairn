@@ -7,7 +7,7 @@ module: operations
 keywords: ["Incident", "事故", "故障", "应急", "故障复盘", "SEV1", "SEV2", "恢复"]
 aliases: ["事故响应", "生产故障回路", "Postmortem 工作流"]
 related: ["dairn.governance.lifecycle", "dairn.operations.traceability", "dairn.operations.defect", "dairn.operations.feedback"]
-symbols: ["make postmortem-init", "make lifecycle-transition"]
+symbols: ["dairn validate"]
 ---
 
 # Incident 与 Postmortem
@@ -20,7 +20,7 @@ symbols: ["make postmortem-init", "make lifecycle-transition"]
 
 ## 重大事故强制复盘
 
-SEV1/SEV2 在 `closed` 前必须有 `docs/postmortems/<INC-ID>.md`，章节包括 Summary、Impact、Timeline、Contributing factors、Detection and response、Corrective actions、Verification，并至少关联一个 Action。复盘采用不归责的语言，记载真实影响、可验证时间线、有效纠正措施、负责人和核验方法。未完成的 Action 可保持 open，不阻断用户恢复。
+SEV1/SEV2 在 `closed` 前必须有 `docs/postmortems/<INC-ID>.md`，章节包括 Summary、Impact、Timeline、Contributing factors、Detection and response、Corrective actions、Verification，并至少关联一个 Action。复盘文件按该模板手动创建（没有专门的 CLI 初始化命令），写完后运行 `dairn validate` 校验记录结构与关联。复盘采用不归责的语言，记载真实影响、可验证时间线、有效纠正措施、负责人和核验方法。未完成的 Action 可保持 open，不阻断用户恢复。
 
 ## 关闭与 Agent Note 的区别
 

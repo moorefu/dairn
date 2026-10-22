@@ -7,7 +7,7 @@ module: operations
 keywords: ["反馈", "监控告警", "用户反馈", "线上观测", "SLO", "错误率", "性能退化"]
 aliases: ["运行反馈接入", "Feedback Triage"]
 related: ["dairn.governance.lifecycle", "dairn.operations.traceability", "dairn.operations.incident", "dairn.operations.defect"]
-symbols: ["make lifecycle-create", "make lifecycle-evidence"]
+symbols: ["dairn validate"]
 ---
 
 # 运行信号接入与反馈分流

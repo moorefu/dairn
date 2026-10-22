@@ -2,6 +2,7 @@
 import * as std from 'std';
 import * as os from 'os';
 import {host} from '../host/qjs.mjs';
+import {sha256Bytes} from '../core/sha256.mjs';
 
 const qjs = std.getenv('DAIRN_QJS_BIN');
 if (!qjs) throw new Error('DAIRN_QJS_BIN 必须指向待验证的原生 QuickJS 解释器绝对路径');
@@ -41,7 +42,7 @@ try {
   });
   test('argv preserves spaces, quotes and shell metacharacters', () => {
     const args=['a b','quote"value','x&echo injected','100%','中文😀'];
-    host.write(child,'print(JSON.stringify(scriptArgs.slice(1)));\n');
+    host.write(child,"import * as std from 'std'; print(JSON.stringify(scriptArgs.slice(1))); std.exit(0);\n");
     const r=host.run([qjs,child,...args],base,10);
     assert(r.code===0 && r.output.trim()===JSON.stringify(args),'argv changed: '+JSON.stringify(r));
     assert(host.realpath(host.cwd())===cwd,'child changed parent cwd');
@@ -60,6 +61,24 @@ try {
   test('invalid arguments rejected', () => {
     let failed=false;try{host.run('sh -c exit 0',cwd,1);}catch(_){failed=true;}
     assert(failed,'string command accepted instead of argv');
+  });
+  test('binary readBytes and internal SHA256 (launcher vendoring)', () => {
+    const file=base+'/binary.bin';
+    const bytes=new Uint8Array([0,1,2,254,255,13,10,65]);
+    const fd=os.open(file, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600);
+    assert(fd>=0,'cannot create binary fixture: '+fd);
+    const written=os.write(fd, bytes.buffer, 0, bytes.length);
+    os.close(fd);
+    assert(written===bytes.length,'binary write failed: '+written);
+    const read=host.readBytes(file);
+    assert(read.length===bytes.length,'binary length differs: '+read.length);
+    assert(Array.from(read).join(',')===Array.from(bytes).join(','),'binary bytes differ');
+    assert(sha256Bytes(read)==='3d804d24c5e0d6a98067c572e217c58c372be51996e187c389cfec2fdd3734ae','sha256 differs');
+    os.remove(file);
+  });
+  test('ES2021/2022 features used by core are available', () => {
+    assert('Ａ'.normalize('NFKC')==='A','String.normalize unavailable');
+    assert([1,2,3].at(-1)===3,'Array.prototype.at unavailable');
   });
 } finally {
   for(const p of [base+'/utf8.txt',child,failing,sleeping]) os.remove(p);

@@ -89,7 +89,13 @@ class GuidanceFacts(unittest.TestCase):
         self.assertEqual(bug['classification'],'bug')
         self.assertIn('dairn-bugfix',{x['skill'] for x in bug['stages']})
         self.assertIn('dairn-code-review',{x['skill'] for x in bug['stages']})
+        self.assertNotIn('dairn-grill',{x['skill'] for x in bug['stages']})
         self.assertTrue(any('not-applicable' in x for x in bug['invariants']))
+        change=json.loads(self.ok('workflow','recommend','实现登录记住我功能').stdout)
+        self.assertEqual(change['classification'],'change')
+        change_skills=[x['skill'] for x in change['stages']]
+        self.assertIn('dairn-grill',change_skills)
+        self.assertLess(change_skills.index('dairn-grill'),change_skills.index('dairn-change-plan'))
         docs=json.loads(self.ok('workflow','recommend','README docs drift').stdout)
         self.assertEqual(docs['classification'],'documentation')
         self.assertIn('dairn-project-guidance',{x['skill'] for x in docs['stages']})

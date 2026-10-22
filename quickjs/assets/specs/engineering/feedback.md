@@ -7,7 +7,7 @@ module: engineering
 keywords: ["TDD", "复现", "快速反馈", "bug", "红绿", "回归", "tight feedback"]
 aliases: ["Tight Feedback", "故障快速反馈环"]
 related: ["dairn.operations.defect", "dairn.engineering.review"]
-symbols: ["make feedback-check"]
+symbols: ["dairn validate"]
 ---
 
 # Tight Feedback 与行为验证契约

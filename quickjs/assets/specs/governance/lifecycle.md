@@ -7,7 +7,7 @@ module: governance
 keywords: ["开发闭环", "生产反馈", "Bug修复", "运行反馈", "故障反馈", "回归", "复发", "postmortem"]
 aliases: ["Dairn 开发运维闭环", "devops feedback loop", "开发-运维-修复循环"]
 related: ["dairn.governance.core", "dairn.governance.modes", "dairn.operations.traceability", "dairn.operations.feedback", "dairn.operations.incident", "dairn.operations.defect", "dairn.operations.release"]
-symbols: ["make lifecycle-check", "make lifecycle-trace"]
+symbols: ["dairn validate --base", "dairn check --base"]
 ---
 
 # 开发—验证—运行—反馈—修复闭环
@@ -26,7 +26,7 @@ symbols: ["make lifecycle-check", "make lifecycle-trace"]
 
 ## 按需记录，不是五种记录都必须创建
 
-常规任务复用 PR/MR、Issue、事故管理或 CD 发布记录，只有拥有独立状态机、负责人或审计边界时才在本地创建对应记录。`make lifecycle-check` 验证已有本地记录及必要的事故终态，不要求每个变更都创建五种记录；详见[轻量治理](modes.md)。
+常规任务复用 PR/MR、Issue、事故管理或 CD 发布记录，只有拥有独立状态机、负责人或审计边界时才在本地创建对应记录。`dairn validate --base <ref>` 验证已有本地记录及必要的事故终态，不要求每个变更都创建五种记录；详见[轻量治理](modes.md)。
 
 ## 五种记录及职责
 
@@ -50,4 +50,4 @@ symbols: ["make lifecycle-check", "make lifecycle-trace"]
 
 ## 权限和反造假边界
 
-`make lifecycle-*` 仅修改版本库中的结构化留痕，不会连接监控系统、验证外部链接真实性、自动批准发布或操作生产环境。CLI 的 `actor` 只是提交者声明，不能替代 Git/工单系统身份验证。可观测系统/事件系统是外部事实来源；仓库保存经过脱敏的引用、状态历史与纠正措施。真实的权限、隔离、审计留存和发布权限必须由受保护仓库及外部平台落实。
+本地记录只保存版本库中的结构化留痕（按规范手动写入 JSON/Markdown，没有专门的 CLI 状态迁移命令），不会连接监控系统、验证外部链接真实性、自动批准发布或操作生产环境。记录中的 `actor` 只是提交者声明，不能替代 Git/工单系统身份验证。可观测系统/事件系统是外部事实来源；仓库保存经过脱敏的引用、状态历史与纠正措施。真实的权限、隔离、审计留存和发布权限必须由受保护仓库及外部平台落实。

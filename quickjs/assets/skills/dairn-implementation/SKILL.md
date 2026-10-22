@@ -12,7 +12,7 @@ dairn-stage: stable
 4. 审查每个异常处理与状态所有者：捕获异常不意味着恢复成功；必须明确副作用提交状态、重试是否幂等、超时边界及清理完成。
 5. 执行相关单元/集成/契约测试。环境问题只允许用证据说明，不能静默跳过、降低阈值或手写通过结果。
 6. 变更完成后同步 change.json 和有长期价值的 Agent Note；若已交付，Note 使用 implemented 的正文，不保留未执行的计划作为既成事实。
-7. 先 `make scope BASE=<base>`，再 `make gate BASE=<base>` 对准当前已提交的 HEAD；局部调试可使用 `make lint/test/integration/build BASE=<base>`，但单项成功不得冒充完整门禁。把命令、退出码、失败、遗漏与报告路径写入 PR。
+7. 先 `dairn scope --base <base>`，再 `dairn check --base <base>` 对准当前已提交的 HEAD；局部调试直接运行 `.dairn/governance/project.json` 中配置的 lint/test/integration/build argv，但单项成功不得冒充完整门禁。把命令、退出码、失败、遗漏与报告路径写入 PR。
 
 **防止无关工作**：不改未经批准的项目管理/发布设置，不进行无必要兼容层、推测性重构或横向扩展。
 
@@ -23,4 +23,4 @@ For changes initiated by a `BUG-*` or `INC-*` record, read `dairn.operations.def
 
 ## Engineering feedback discipline
 
-For new behavior use the `dairn-tdd` Skill at an observable test seam when feasible. Run focused checks frequently and `make gate BASE=...` once at the proper review point; do not force a blanket red-green ritual on mechanical changes. Consult `GLOSSARY.md` only if the repo uses one; read relevant L2 Note rationale if it governs a changed interface. Keep tests and implementation in small vertical slices and require a Standards + Spec Fidelity Review before handing off. Avoid manual-only Skills without explicit human invocation.
+For new behavior use the `dairn-tdd` Skill at an observable test seam when feasible. Run focused checks frequently and `dairn check --base <base>` once at the proper review point; do not force a blanket red-green ritual on mechanical changes. Consult `GLOSSARY.md` only if the repo uses one; read relevant L2 Note rationale if it governs a changed interface. Keep tests and implementation in small vertical slices and require a Standards + Spec Fidelity Review before handing off. Avoid manual-only Skills without explicit human invocation.

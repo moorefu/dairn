@@ -3,10 +3,10 @@ id: dairn.engineering.stubs-attestation
 title: Project Stubs and Signed CI Evidence
 summary: Language-neutral project analyzers, reproducible execution cache, and protected CI signatures.
 kind: spec
-module: dairn
-keywords: [stub, workflow, evidence, CI, Ed25519, project-intelligence]
+module: engineering
+keywords: ["stub", "workflow", "evidence", "CI", "Ed25519", "project-intelligence"]
 aliases: []
-related: [dairn.engineering.work-execution, dairn.engineering.impact-analysis]
+related: ["dairn.engineering.work-execution", "dairn.engineering.impact-analysis"]
 ---
 
 # Project Stub Protocol

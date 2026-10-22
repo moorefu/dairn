@@ -13,15 +13,21 @@ root = Path(__file__).resolve().parent.parent
 out = Path(sys.argv[1]).resolve()
 out.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(root))
+# 集成测试必须像本地开发者一样运行：清除 CI 平台注入的环境变量，
+# 否则 dairn check 会进入 CI 保护模式并要求 DAIRN_EXPECTED_POLICY_SHA256。
+for _key in ('GITHUB_ACTIONS','GITHUB_EVENT_NAME','GITHUB_EVENT_PATH','GITHUB_REF','GITHUB_SHA',
+             'GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB','GITHUB_REPOSITORY','GITHUB_WORKFLOW',
+             'GITLAB_CI','CI_PIPELINE_SOURCE','CI_MERGE_REQUEST_DIFF_BASE_SHA','CI_MERGE_REQUEST_LABELS'):
+    os.environ.pop(_key, None)
 binary = root / 'runtime/dairn-embedded.com'
 before = hashlib.sha256(binary.read_bytes()).hexdigest()
 results = {}
 # 不自动下载新工具链或依赖；race 必须使用容器提供的 CGO 编译环境。
 os.environ.update(GOTOOLCHAIN='local', GOPROXY='off', CGO_ENABLED='1',
                   DAIRN_TEST_EVIDENCE_DIR=str(out))
-for tool in ['git', 'go', 'gcc']:
+for tool in ['git', 'go', 'gcc', 'openssl', 'jq', 'sha256sum']:
     if not shutil.which(tool):
-        raise SystemExit('Linux 完整回归缺少工具：' + tool)
+        raise SystemExit('Linux 完整回归缺少工具：' + tool + '（容器镜像/runner 需预装 git/go/gcc/openssl/jq/coreutils）')
 go_env = subprocess.run(['go', 'env', '-json', 'GOVERSION', 'GOOS', 'GOARCH',
                          'CGO_ENABLED', 'CC', 'GOTOOLCHAIN', 'GOPROXY'],
                         capture_output=True, check=True, timeout=30)
@@ -45,6 +51,18 @@ with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
         'quickjs.tests.test_project_guidance',
         'quickjs.tests.test_workflow_facts',
         'quickjs.tests.test_work_intelligence',
+        'quickjs.tests.test_assets_lint',
+        'quickjs.tests.test_grill_workflow',
+        'quickjs.tests.test_tasks_command',
+        'quickjs.tests.test_hooks',
+        'quickjs.tests.test_notes_seal',
+        'quickjs.tests.test_launcher',
+        'quickjs.tests.test_audit_logs',
+        'quickjs.tests.test_review_identity',
+        'quickjs.tests.test_agent_protocol',
+        'quickjs.tests.test_stub_ci_review',
+        'quickjs.tests.test_trusted_ci_stubs',
+        'quickjs.tests.test_project_lifecycle',
     ])
     def flatten(suite):
         for case in suite:

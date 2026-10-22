@@ -18,8 +18,12 @@ class StubCIReview(unittest.TestCase):
  def base(self):self.git('add','.');self.git('commit','-qm','baseline');return self.git('rev-parse','HEAD')
  def task(self):
   self.obj('work','start','Implement authentication feature','--id','auth')
-  for i in range(3):
-   self.obj('work','record','auth','README.md','--kind','note')
+  (self.project/'grill.json').write_text(json.dumps({'schema':1,'task_id':'auth','questions':[
+   {'id':'q1','prompt':'Which token lifetime fits the threat model?',
+    'recommendation':'Short-lived signed token','status':'resolved',
+    'decision':'Short-lived signed token, rotated on login'}]})+'\n')
+  for path,kind in [('README.md','note'),('grill.json','grill'),('README.md','spec'),('README.md','note')]:
+   self.obj('work','record','auth',path,'--kind',kind)
    self.obj('work','advance','auth')
  def change(self):
   f=self.project/'auth.go';f.write_text('package hello\n\nfunc VerifyToken(s string) bool {\n\treturn len(s) > 0\n}\n');self.git('add','auth.go');self.git('commit','-qm','new auth')

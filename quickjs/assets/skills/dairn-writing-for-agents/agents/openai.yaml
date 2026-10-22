@@ -1,0 +1,5 @@
+interface:
+  display_name: "dairn-writing-for-agents"
+  short_description: "Writing rules for agent-consumed docs, steering files and Skills"
+policy:
+  allow_implicit_invocation: true

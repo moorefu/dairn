@@ -7,14 +7,14 @@ module: operations
 keywords: ["Bug", "缺陷", "复现", "根因", "回归测试", "hotfix", "补丁", "重新打开"]
 aliases: ["Bug 修复闭环", "Bug修复", "缺陷修复记录", "回归与复发治理"]
 related: ["dairn.governance.lifecycle", "dairn.operations.traceability", "dairn.operations.release", "dairn.operations.incident"]
-symbols: ["make lifecycle-transition", "make lifecycle-link"]
+symbols: ["dairn validate"]
 ---
 
 # Bug Case 修复闭环
 
 ## 生命周期
 
-`new → triaged → fixing → verifying → fixed → closed`；不能修复时可从 new/triaged 转 `rejected` 并附依据，已关闭的缺陷复发可重新进入 triaged。Bug 与 Incident 可以多对多关联：故障是运行事件，Bug 是需要修正的可观察行为或技术缺陷。
+`new → triaged → fixing → verifying → fixed → closed`；不能修复时可从 new/triaged 转 `rejected` 并附依据，已关闭的缺陷复发可重新进入 triaged。Bug 与 Incident 可以多对多关联：故障是运行事件，Bug 是需要修正的可观察行为或技术缺陷。状态迁移按本规范手动编辑记录 JSON，然后运行 `dairn validate`（需要校验历史不可改写时加 `--base <ref>`）；没有专门的 CLI 状态迁移命令。
 
 ## 修复准则
 

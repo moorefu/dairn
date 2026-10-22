@@ -5,7 +5,7 @@ DAIRN_DIR=${0%/*}
 [ "$DAIRN_DIR" != "$0" ] || DAIRN_DIR=.
 HERE=$(CDPATH= cd -- "$DAIRN_DIR" && pwd)
 RUNTIME="$HERE/runtime/dairn-embedded.com"
-[ -f "$RUNTIME" ] || { echo "未找到 Dairn 运行时：$RUNTIME" >&2; exit 2; }
+[ -f "$RUNTIME" ] || { echo "未找到 Dairn 运行时：$RUNTIME（源码仓库请先运行 python tools/build.py；安装包请重新安装）" >&2; exit 2; }
 # APE 的 sh 加载器用 command -v "$0" 定位自身；bash（macOS 的 /bin/sh）对没有
 # 执行位的路径返回失败，dd 会读到空输入并让 gzip 报 EOF。这里只补元数据。
 if [ ! -x "$RUNTIME" ]; then

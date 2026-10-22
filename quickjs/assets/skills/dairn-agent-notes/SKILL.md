@@ -15,7 +15,7 @@ Read [the Agent Note contract](../../../docs/AGENT_NOTES_SPEC.md), the current a
 1. Search active `implemented/`, `proposed/`, and `rejected/` notes for the same decision or mechanism. Update the existing owning note for changed factual paths/defaults; do not duplicate its rationale.
 2. Select one closed class and a `YYYY-MM-DD-topic-title.md` filename. The date is the date of first proposal and stays unchanged across moves. `security` is a Dairn-only extended class.
 3. Choose `proposed` for future work, `implemented` only for actual shipped behavior, or `rejected` with a one-line substantive reason.
-4. Write real alternatives and why they lost. Never invent an alternative to make the checker green.
+4. Write real alternatives and why they lost. Never invent an alternative just to turn the checker green.
 5. Keep future acceptance tasks in the change manifest/tests after implementation. Implemented Notes state present facts, costs and benefits, and current verification.
 
 ## Lifecycle transitions
@@ -27,13 +27,13 @@ Read [the Agent Note contract](../../../docs/AGENT_NOTES_SPEC.md), the current a
 
 ## Archive and purge
 
-Only completed `implemented` decisions can be archived. Classify by future value (ownership rules, security invariants, protocol compatibility and reintroduction conditions generally stay active), not age or length. To archive, move the original file under `archived/<class>/`, insert only `Archived: YYYY-MM-DD` directly below the `Status: implemented` line, run `make seal-archive` and `make notes-check BASE=<trusted-base>`. The CI verifier checks old manifest entries against the base commit and prevents edited old seals. Never repair links *inside* sealed notes; repair active inbound links.
+Only completed `implemented` decisions can be archived. Classify by future value (ownership rules, security invariants, protocol compatibility and reintroduction conditions generally stay active), not age or length. To archive, move the original file under `archived/<class>/`, insert only `Archived: YYYY-MM-DD` directly below the `Status: implemented` line, run `dairn notes seal` to review the plan and `dairn notes seal --apply` to register the hash manifest, then run `dairn validate --base <trusted-base>`. The base check compares old manifest entries against the base commit and prevents edited old seals. Never repair links *inside* sealed notes; repair active inbound links.
 
-Dairn v1.3 does not automatically verify content-level bilingual parity; projects requiring English/Chinese parity must add a separate gate until full triplet/section-hash support is implemented. Do not claim parity from a successful `notes-check`.
+当前发行版不自动验证内容级双语对等；需要英文/中文双语对等的项目应另加独立门禁。不要因 `dairn validate` 成功就声称双语内容已对等。
 
 ## Verify and report
 
-Run `make notes-check BASE=<verified-base>`, then the relevant `make gate BASE=<verified-base>`. Report link changes, lifecycle changes, decision replacements, and checks actually run. Format checking cannot prove that alternatives are truthful, that a decision shipped, or that human approval happened.
+Run `dairn validate --base <verified-base>`, then `dairn check --base <verified-base>` for the applicable risk gate. Report link changes, lifecycle changes, decision replacements, and checks actually run. Format checking cannot prove that alternatives are truthful, that a decision shipped, or that human approval happened.
 
 
 ## Separate operational records

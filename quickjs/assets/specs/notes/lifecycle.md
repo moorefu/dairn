@@ -7,14 +7,14 @@ module: notes
 keywords: ["notes", "Agent Note", "生命周期", "proposed", "implemented", "rejected", "archived", "封存", "哈希"]
 aliases: ["note-lifecycle", "Note归档", "Agent Note 归档"]
 related: ["dairn.notes.format"]
-symbols: ["make notes-check", "make seal-archive"]
+symbols: ["dairn validate --base", "dairn notes seal"]
 ---
 
 # Agent Notes 生命周期与封存
 
 ## 何时新增 Note
 
-仅在设计动机、真实替代方案、损失、边界条件或负面保证具有长期价值时新增 Note；局部机械变更免除。Dairn v1.5.1 不再按 L2 一律强制 Note；仅对具有持久设计取舍的变更强制记录。L2 仍需真实人工审批。
+仅在设计动机、真实替代方案、损失、边界条件或负面保证具有长期价值时新增 Note；局部机械变更免除。当前发行版不再按 L2 一律强制 Note；仅对具有持久设计取舍的变更强制记录。L2 仍需真实人工审批。
 
 ## 生命周期迁移
 
@@ -28,6 +28,6 @@ symbols: ["make notes-check", "make seal-archive"]
 
 ## 归档的不可变保证
 
-只允许已实施且不再指导未来工作的 Note 进入 `archived/<class>/`，并插入 `Archived: YYYY-MM-DD`。先运行受保护的归档命令登记哈希，后续永久冻结，不能修改正文、翻译、移动或删除。受信任的 Git 基线用于证明旧 manifest 不变。归档不再是当前行为的权威来源。
+只允许已实施且不再指导未来工作的 Note 进入 `archived/<class>/`，并插入 `Archived: YYYY-MM-DD`。先运行 `dairn notes seal` 审查归档计划，再运行 `dairn notes seal --apply` 登记哈希；归档后永久冻结，不能修改正文、翻译、移动或删除。受信任的 Git 基线用于证明旧 manifest 不变：用 `dairn validate --base <ref>` 检查旧登记未被改写。归档不再是当前行为的权威来源。
 
 活动 Note 仍按官方原则不建立手工集中 INDEX；当前 Spec 的自动化检索索引与 Agent Notes 生命周期目录互不冲突。

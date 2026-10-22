@@ -1,6 +1,7 @@
 /* Deterministic advisory workflow router. Never claims human approval or auto-invokes an agent. */
 const stages=[
  {id:'orient',skill:'dairn-spec-discovery',goal:'Locate existing project facts, decisions, glossary and authoritative contracts',output:'evidence-backed scope'},
+ {id:'grill',skill:'dairn-grill',goal:'Resolve design-tree unknowns with a human interview before specifying',output:'grill questions with no open frontier'},
  {id:'diagnose',skill:'dairn-bugfix',goal:'Find one red-capable and fast failure signal before hypotheses',output:'reproduction command and red result'},
  {id:'specify',skill:'dairn-change-plan',goal:'Specify user-observable result, out-of-scope and test seams',output:'reviewable spec or plan'},
  {id:'slice',skill:'dairn-tracer-tasks',goal:'Break the change into independently verifiable vertical slices',output:'blocking DAG and vertical slice plan'},
@@ -21,11 +22,12 @@ export function recommendWorkflow(text){
  else if(isIncident)selected.push('diagnose','review','reflect');
  else if(isDoc)selected.push('synchronize');
  else if(isReview)selected.push('review','synchronize');
- else if(isDesign)selected.push('specify','slice','review','synchronize');
- else selected.push('specify','slice','implement','review','synchronize');
+ else if(isDesign)selected.push('grill','specify','slice','review','synchronize');
+ else selected.push('grill','specify','slice','implement','review','synchronize');
  return {query:text,classification:isBug?'bug':isIncident?'incident':isDoc?'documentation':isReview?'review':isDesign?'design':'change',
    stages:stages.filter(x=>selected.includes(x.id)),
    invariants:['Start from observed repository facts and authoritative specs',
+     'Grill resolves design unknowns before Specify; no open questions may remain',
      'Never report an unrun test as passed',
      'For bugs reproduce red before applying a fix',
      'Spec Fidelity is not-applicable without an authoritative spec',

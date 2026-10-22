@@ -7,7 +7,7 @@ module: skills
 keywords: ["Skill", "Invocation", "experimental", "deprecated", "生命周期", "路由", "P2"]
 aliases: ["Skill Governance", "Skill 调用协议"]
 related: ["dairn.governance.core", "dairn.docs.discovery"]
-symbols: ["make skills-check", "make skills-list", "make skills-route"]
+symbols: ["dairn docs check", "dairn validate", "dairn skills catalog", "dairn skills list"]
 ---
 
 # Skill 合约与生命周期
@@ -18,7 +18,7 @@ symbols: ["make skills-check", "make skills-list", "make skills-route"]
 
 ## 生命周期
 
-每个 Skill 通过 `dairn-stage: stable | experimental | deprecated` 声明状态。默认推荐路由只列 stable；实验版本只能在人明确指定下评估，弃用必须提供 `dairn-replaced-by`，不能进入默认路由。元数据与目录/文档同步接受 `make skills-check` 审查。
+每个 Skill 通过 `dairn-stage: stable | experimental | deprecated` 声明状态。默认推荐路由只列 stable；实验版本只能在人明确指定下评估，弃用必须提供 `dairn-replaced-by`，不能进入默认路由。元数据与目录/文档同步由 `dairn docs check`（分发资产一致性）与 `dairn validate`（项目内已安装 Skill）审查。
 
 ## 质量与退出条件
 

@@ -1,6 +1,7 @@
 /* Dairn validation contracts ported to portable ES Modules for official QuickJS.
  * These are structural checks, NOT proof of human approval or trusted CI execution.
  */
+import {tasksValidate} from './tasks.mjs';
 const posix = p => p.replace(/\\/g, '/');
 const join = (a,b) => a.replace(/\/$/,'')+'/'+b;
 const isObj = x => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -79,25 +80,6 @@ export function glossaryValidate(h,root) {
       const key=title.toLowerCase(); if(seen.has(key))errors.push(rel(root,file)+': repeated term '+title);seen.add(key);
     }
   }
-  return errors;
-}
-export function tasksValidate(h,root) {
-  const errors=[], tasks=new Map(), id=/^TASK-[A-Za-z0-9_-]+$/;
-  const dir=join(root,'.dairn/governance/tasks');
-  for(const file of collect(h,dir,f=>f.endsWith('.json'))) {
-    try {const t=readJson(h,file);
-      if(!isObj(t) || !id.test(t.id))throw Error('invalid task id');
-      if(tasks.has(t.id))throw Error('duplicate task id');
-      if(!['ready','in-progress','done','blocked'].includes(t.status))throw Error('invalid status');
-      if(!nonempty(t.title)||!nonempty(t.acceptance))throw Error('missing title/acceptance');
-      if(!Array.isArray(t.blocked_by)|| t.blocked_by.some(s=>typeof s!=='string'||!id.test(s)) || new Set(t.blocked_by).size!==t.blocked_by.length)throw Error('invalid blocked_by');
-      tasks.set(t.id,t);
-    }catch(e){errors.push(rel(root,file)+': '+e.message);}
-  }
-  for(const [id,t] of tasks)for(const dep of t.blocked_by){if(!tasks.has(dep))errors.push(id+': unknown dependency '+dep);if(dep===id)errors.push(id+': self dependency');}
-  const color=new Map();function visit(id){if(color.get(id)===1){errors.push('cycle through '+id);return;}
-    if(color.get(id)===2)return;color.set(id,1);for(const d of tasks.get(id).blocked_by)if(tasks.has(d))visit(d);color.set(id,2);}
-  for(const id of tasks.keys())visit(id);
   return errors;
 }
 export function feedbackValidate(h,root) {

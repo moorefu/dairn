@@ -7,7 +7,7 @@ module: operations
 keywords: ["Release", "发布反馈", "部署", "灰度", "回滚", "验证", "部署观察", "制品"]
 aliases: ["发布运行闭环", "Release Observation", "生产发布审计"]
 related: ["dairn.governance.lifecycle", "dairn.operations.traceability", "dairn.operations.feedback", "dairn.ci.gates"]
-symbols: ["make release-preflight", "make lifecycle-transition"]
+symbols: ["dairn check --base", "dairn validate"]
 ---
 
 # 发布与运行反馈
@@ -15,6 +15,8 @@ symbols: ["make release-preflight", "make lifecycle-transition"]
 ## 状态
 
 `planned → approved → deployed → observing → accepted`，若效果不达标可从 deployed/observing/accepted 转为 `rolled_back`。这个记录只是对真实外部发布的镜像。`approved` 文本不等价于真实审批；GitHub/GitLab/CD 平台需实施受保护环境、人工确认、制品完整性和批准留痕。
+
+发布前先运行 `dairn check --base <ref>` 覆盖真实风险门禁，并核对项目 release checklist（`.dairn/governance/templates/release-checklist.md`，若存在）；技术门禁通过不等于部署批准。
 
 ## 事实关联
 

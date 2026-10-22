@@ -1,20 +1,20 @@
 ---
 id: dairn.ci.provider
 title: GitHub / GitLab 中立 CI 接入
-summary: GitHub Actions 与 GitLab CI 如何提供可信基线并调用同一 Makefile。
+summary: GitHub Actions 与 GitLab CI 如何提供可信基线并调用同一 CLI 门禁。
 kind: spec
 module: ci
 keywords: ["GitHub", "GitLab", "MR", "PR", "merge-base", "CI基线"]
 aliases: ["双CI", "流水线"]
 related: ["dairn.ci.gates"]
-symbols: ["CI_MERGE_REQUEST_DIFF_BASE_SHA", "scripts/ci_base.py"]
+symbols: ["dairn validate --base", "dairn check --base"]
 ---
 
 # GitHub / GitLab 中立 CI 接入
 
 ## 职责分工
 
-GitHub Actions 与 GitLab CI 只负责正确检出仓库、确定可信差异基线、安装依赖、调用 `make ci`、保存原始工件和通过受保护合并规则约束合并。不得在 YAML 中复制风险策略。
+GitHub Actions 与 GitLab CI 只负责正确检出仓库、确定可信差异基线、安装依赖、调用 `dairn validate --base "$BASE"` + `dairn check --base "$BASE"`、保存原始工件和通过受保护合并规则约束合并。不得在 YAML 中复制风险策略。
 
 ## PR / MR 差异范围
 
@@ -24,4 +24,4 @@ GitHub Actions 与 GitLab CI 只负责正确检出仓库、确定可信差异基
 
 禁止把未审查的 PR 脚本直接置于拥有生产密钥的高权限 Runner 中。治理规则本身的改变必须由受保护规则、Code Owners 和独立校验控制；不能依赖 PR 提交的脚本自证安全。
 
-详见 [平台接入实现说明](../../CI_INTEGRATION.md)。
+详见 [受保护 CI 双作业签名协议](protected-attestation.md)。

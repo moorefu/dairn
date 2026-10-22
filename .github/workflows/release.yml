@@ -36,6 +36,10 @@ jobs:
           python tools/build.py
           npm run build
           python tools/checksums.py
+      - name: 分发资产一致性（Skill/Spec 命令）
+        run: sh ./dairn.sh docs check
+      - name: 分发资产与 docs find 回归
+        run: python -B -X utf8 -m unittest quickjs.tests.test_assets_lint -v
       - uses: actions/upload-artifact@v4
         with:
           name: dairn-packages
@@ -84,17 +88,73 @@ jobs:
           path: validation/runner/
           if-no-files-found: error
 
+  test-python:
+    name: Python 集成回归（Linux 套件）
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ hashFiles('quickjs.lock.json') }}
+          restore-keys: go-build-${{ runner.os }}-
+      - uses: actions/download-artifact@v4
+        with:
+          name: dairn-packages
+          path: incoming
+      - name: 从发布 ZIP 提取运行时
+        run: |
+          python - <<'PY'
+          import glob
+          import pathlib
+          import zipfile
+
+          candidates = glob.glob('incoming/*.zip')
+          assert len(candidates) == 1, candidates
+          with zipfile.ZipFile(candidates[0]) as zipped:
+              runtime = [name for name in zipped.namelist()
+                         if name.endswith('/runtime/dairn-embedded.com')]
+              integrity = [name for name in zipped.namelist()
+                           if name.endswith('/runtime/runtime-integrity.json')]
+              assert len(runtime) == 1 and len(integrity) == 1, (runtime, integrity)
+              target = pathlib.Path('runtime')
+              target.mkdir(parents=True, exist_ok=True)
+              (target / 'dairn-embedded.com').write_bytes(zipped.read(runtime[0]))
+              (target / 'runtime-integrity.json').write_bytes(zipped.read(integrity[0]))
+          PY
+          chmod +x runtime/dairn-embedded.com dairn.sh ci/protected/*.sh
+          jq --version >/dev/null && openssl version >/dev/null && sha256sum --version >/dev/null
+      - name: Python 集成回归（Linux 套件）
+        # verify-linux.py 会清除 CI 平台变量，模拟本地开发者环境；
+        # 这里不再覆盖 GITHUB_*（GitHub 默认变量不可覆盖，且脚本已内建清洗）。
+        run: python -B -X utf8 tools/verify-linux.py validation/ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-ci
+          path: validation/ci/
+          if-no-files-found: error
+
   accepted:
     name: 全部矩阵通过
     if: always()
-    needs: [build, test]
+    needs: [build, test, test-python]
     runs-on: ubuntu-24.04
     steps:
       - name: 必须全部成功
         env:
           BUILD_RESULT: ${{ needs.build.result }}
           TEST_RESULT: ${{ needs.test.result }}
-        run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success
+          TEST_PYTHON_RESULT: ${{ needs.test-python.result }}
+        run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success && test "$TEST_PYTHON_RESULT" = success
 
   publish:
     name: 发布版本与 latest 三类制品

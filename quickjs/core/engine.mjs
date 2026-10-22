@@ -4,32 +4,69 @@ import {sha256} from './sha256.mjs';
 import {validateAll,archiveValidate} from './validators.mjs';
 import {docsValidate} from './docs-validator.mjs';
 import {lifecycleValidate} from './lifecycle-validator.mjs';
-import {verifyRuntimeLock,runtimeVersion} from './project.mjs';
-import {prepareCheckTask,attachCheckRun} from './work.mjs';
+import {verifyRuntimeLock,runtimeVersion,doctor as projectDoctor} from './project.mjs';
+import {prepareCheckTask,attachCheckRun,activeTaskIds,activeTaskProblems} from './work.mjs';
+import {runTurnEnd} from './hooks.mjs';
+import {prChangeMeta,isCiPullRequest} from './ci-context.mjs';
 import {captureFacts} from './facts.mjs';
 import {readRelations} from './relations.mjs';
 import {configuredStubs} from './stubs.mjs';
 const slash = x => x.replace(/\\/g, '/');
 const join = (a,b) => b === '.' ? a : a.replace(/\/$/,'') + '/' + b;
 const within = (root, path) => path === root || path.startsWith(root.replace(/\/$/,'') + '/');
+const COMMANDS = ['doctor','validate','validate-core','scope','check','help','hook'];
+const HOOKS = ['pre-push','turn-end'];
+const VALUE_FLAGS = new Map([['--root','root'],['--base','base'],['--head','head'],['--timeout','timeout'],['--task','task'],
+  ['--payload','payload'],['--provider','provider'],['--session','session'],['--event','event']]);
 function parseArgs(args) {
+  // `--help`/`-h` 在任何位置都直接早退，不让缺少 --base 之类的检查把它变成错误。
+  if (args.includes('--help') || args.includes('-h')) {
+    return {cmd:'help',root:null,base:null,head:'HEAD',timeout:120,all:false,json:false,task:null,
+      pos:[],hook:null,strict:false,stdin:false,no_check:false,allow_unattributed:false,
+      payload:null,provider:null,session:null,event:null};
+  }
   let cmd = null, root = null, base = null, head = 'HEAD', timeout = 120, all = false, json = false, task=null;
+  let strict = false, stdin = false, no_check = false, allow_unattributed = false;
+  let payload = null, provider = null, session = null, event = null;
+  const pos = [];
   for(let i=0; i<args.length; i++) {
     const a=args[i];
-    if (a === '--root' || a === '--base' || a === '--head' || a === '--timeout' || a === '--task') {
+    if (VALUE_FLAGS.has(a)) {
       invariant(i+1<args.length, a+' needs value');
-      const v=args[++i]; if (a==='--root') root=v; else if(a==='--base') base=v; else if(a==='--head') head=v; else if(a==='--task') task=v; else timeout=Number(v);
+      const v=args[++i];
+      const key=VALUE_FLAGS.get(a);
+      if (key==='timeout') timeout=Number(v);
+      else if (key==='root') root=v;
+      else if (key==='base') base=v;
+      else if (key==='head') head=v;
+      else if (key==='task') task=v;
+      else if (key==='payload') payload=v;
+      else if (key==='provider') provider=v;
+      else if (key==='session') session=v;
+      else event=v;
     } else if (a==='--all') all=true;
     else if (a==='--json') json=true;
-    else if (!cmd && ['doctor','validate','validate-core','scope','check','help'].includes(a)) cmd=a;
-    else throw new Error('Unknown option / command: '+a);
+    else if (a==='--strict') strict=true;
+    else if (a==='--stdin') stdin=true;
+    else if (a==='--no-check') no_check=true;
+    else if (a==='--allow-unattributed') allow_unattributed=true;
+    else if (a.startsWith('-')) throw new Error('Unknown option / command: '+a);
+    else if (!cmd && COMMANDS.includes(a)) cmd=a;
+    else pos.push(a);
   }
   invariant(Number.isFinite(timeout)&&timeout>=1&&timeout<=3600, 'timeout must be 1..3600 seconds');
   if (!cmd) cmd = 'help';
+  let hook = null;
+  if (cmd==='hook') {
+    invariant(pos.length>0, 'Usage: dairn hook pre-push|turn-end');
+    invariant(HOOKS.includes(pos[0]), 'Unknown hook: '+pos[0]+' (expected pre-push|turn-end)');
+    invariant(pos.length===1, 'Unexpected hook arguments: '+pos.slice(1).join(' '));
+    hook = pos[0];
+  } else if (pos.length) throw new Error('Unknown option / command: '+pos[0]);
   if ((cmd==='scope' || cmd==='check') && !base && !all) throw new Error(cmd+' requires --base (or check --all)');
   if (all && cmd!=='check') throw new Error('--all only supported by check');
-  if (task && (cmd!=='check'||all||!base||head!=='HEAD')) throw new Error('--task requires check --base REF with checked-out HEAD; --all/--head not supported');
-  return {cmd,root,base,head,timeout,all,json,task};
+  if (task && cmd!=='hook' && (cmd!=='check'||all||!base||head!=='HEAD')) throw new Error('--task requires check --base REF with checked-out HEAD; --all/--head not supported');
+  return {cmd,root,base,head,timeout,all,json,task,pos,hook,strict,stdin,no_check,allow_unattributed,payload,provider,session,event};
 }
 function mustRead(h,root,file) {return h.read(join(root,file));}
 function jsonFile(h,root,p) {return JSON.parse(mustRead(h,root,p));}
@@ -89,10 +126,11 @@ function readScope(h,root,policy,opts) {
     const m=jsonFile(h,root,changes[0]);
     if(m.decision_note) invariant(h.exists(join(root,m.decision_note)), 'Missing decision_note');
     meta=manifestValidate(m,floor);
-  } else if ((h.env('GITHUB_ACTIONS')==='true' && h.env('GITHUB_EVENT_NAME')==='pull_request') ||
-    (h.env('GITLAB_CI')==='true' && h.env('CI_PIPELINE_SOURCE')==='merge_request_event')) {
-    // CI provider body metadata is not yet ported; fail closed rather than treating PR as local.
-    if(requiresManifest(paths)) throw new Error('QuickJS preview requires manifest for CI PR/MR changes');
+  } else if (isCiPullRequest(h)) {
+    // 缺少变更清单时回退到平台 PR/MR 元数据；元数据不可用时保持 fail closed。
+    const pr = prChangeMeta(h, floor);
+    if (pr) meta={...pr};
+    else if(requiresManifest(paths)) throw new Error('QuickJS preview requires manifest for CI PR/MR changes; provide .dairn/governance/changes/<id>.json or platform PR metadata');
   }
   return {paths, modules:moduleSelection(policy,paths), risk:meta.risk, governance_mode:meta.governance_mode,
     triggers:meta.risk_triggers, required:policy.required_checks[meta.risk], base:resolvedBase, head,
@@ -128,23 +166,76 @@ function runStackCheck(h,stack,step,cwd,timeout) {
   }
   throw new Error('Unsupported internal stack-check: '+stack+' '+step+' (fail closed)');
 }
-function checks(h,root,opts,st,raw,validation) {
+/* --- 审计日志：每个 gate 的原始输出落盘，截断上限按 UTF-8 字节计算。 --- */
+const LOG_LIMIT = 65536;
+const LOG_TRUNCATION_MARKER = '\n[... truncated at 65536 bytes]';
+function sanitizeName(value) {
+  const name = String(value == null ? '' : value).replace(/[^A-Za-z0-9_.-]/g, '_');
+  return name || '_';
+}
+function truncateUtf8(text, limit) {
+  // JS 字符串按 UTF-16 计长，这里按 UTF-8 字节截断，避免多字节字符被截半个。
+  let bytes = 0, end = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0);
+    const size = code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+    if (bytes + size > limit) return {text: text.slice(0, end), truncated: true};
+    bytes += size;
+    end += char.length;
+  }
+  return {text, truncated: false};
+}
+function gateLogKey(opts) {
+  const prefix = opts.task ? 'task-' + sanitizeName(opts.task) : opts.hook ? 'pre-push' : 'check';
+  // 同一 HEAD 重复 check 也必须得到新目录：时间戳 + 短随机摘要，绝不覆盖旧日志。
+  return prefix + '-' + Date.now() + '-' + sha256(prefix + '|' + Date.now() + '|' + Math.random()).slice(0, 6);
+}
+function writeGateLog(h, logsDir, logsRel, seen, name, text) {
+  let base = sanitizeName(name);
+  if (seen.has(base)) {
+    let index = 2;
+    while (seen.has(base + '-' + index)) index++;
+    base = base + '-' + index;
+  }
+  seen.add(base);
+  const file = base + '.log';
+  const cut = truncateUtf8(String(text == null ? '' : text), LOG_LIMIT);
+  const content = cut.truncated ? cut.text + LOG_TRUNCATION_MARKER : cut.text;
+  h.write(join(logsDir, file), content);
+  return {log: logsRel + '/' + file, log_sha256: sha256(content), log_truncated: cut.truncated};
+}
+/* doctor 由 project.mjs 唯一实现（launcher 感知）；此处不再保留第二份不可达实现。 */
+function checks(h,root,opts,st,raw,validation,stats) {
   const risk=opts.all ? 'L2' : st.risk;
   const mods=opts.all ? st.policy.modules : st.modules;
   const required=st.policy.required_checks[risk];
-  const report={schema_version:opts.task?2:1,engine:'dairn-quickjs',assurance:'technical-checks-only',mode:opts.all?'baseline-all':'risk-gate-preview',
+  const evidenceDir=join(root,'.dairn/governance/evidence');
+  const logRunKey=gateLogKey(opts);
+  const logsRel='.dairn/governance/evidence/logs/'+logRunKey;
+  const report={schema_version:opts.task?2:1,engine:'dairn-quickjs',assurance:'technical-checks-only',mode:opts.all?'baseline-all':opts.hook?'pre-push-gate':'risk-gate-preview',
     risk,governance_mode:opts.all?'G2':st.governance_mode,review_pending:opts.all?true:st.review_pending,
     base:opts.all?null:st.base,head:opts.all?null:st.head,utc:h.now(),changed_paths:opts.all?[]:st.paths,
-    policy_sha256:sha256(raw),governance_validation:{status:'passed',validators:Object.keys(validation.detail).sort(),error_count:0},checks:[]};
+    policy_sha256:sha256(raw),governance_validation:{status:'passed',validators:Object.keys(validation.detail).sort(),error_count:0},checks:[],logs_dir:logsRel};
+  if(opts.hook) report.trust='local-unattested';
   let failed=false;
   if (!opts.all && !st.paths.length) {
     if(opts.task)throw Error('Task-linked check requires changed paths and actual selected checks');
+    if(stats){stats.checks=0;stats.failed=false;}
     h.log('No diff; static core validated, no stack checks');return 0;}
   invariant(mods.length>0 || st.paths.every(p=>p.startsWith('docs/') || p.endsWith('.md') || p.startsWith('.agents/notes/') || p.startsWith('.dairn/governance/operations/') || p.startsWith('.dairn/governance/changes/') || p.startsWith('.dairn/work/') || p.startsWith('.dairn/facts/') || p.startsWith('.dairn/governance/evidence/') || p.startsWith('.dairn/cache/')), 'No module matched changed source');
+  const logsAbs=join(join(evidenceDir,'logs'),logRunKey);
+  h.mkdirs(logsAbs);
+  const seenLogs=new Set();
   for(const m of mods) for(const gate of required) {
     const cfg=m.checks[gate];const record={module:m.name,gate,status:'missing',returncode:null};
-    if(!cfg) {failed=true;report.checks.push(record);continue;}
+    const logName=m.name+'-'+gate;
+    if(!cfg) {
+      failed=true;
+      Object.assign(record,writeGateLog(h,logsAbs,logsRel,seenLogs,logName,'Check configuration missing for '+m.name+':'+gate+'\n'));
+      report.checks.push(record);continue;
+    }
     record.argv=cfg.argv;
+    let gateOutput='';
     try {
       const cwd=checkCwd(h,root,m,cfg); record.cwd=cwd.slice(root.length).replace(/^\//,'')||'.';
       h.log('[run] '+m.name+':'+gate+' '+cfg.argv.join(' '));
@@ -154,8 +245,13 @@ function checks(h,root,opts,st,raw,validation) {
       record.returncode=result.code;record.duration_sec=result.duration_sec;record.timed_out=!!result.timedOut;
       record.output_sha256=sha256(result.output||'');record.output_truncated=false;
       record.status=result.timedOut?'error':result.code===0?'passed':'failed';
-      if(record.status!=='passed') record.reason=(result.timedOut?'timeout: ':'failed: ')+(result.output||'').slice(0,1024);
-    }catch(e){record.status='error';record.reason=e.message;record.output_sha256=sha256(e.message||'');record.output_truncated=/output exceeded/.test(e.message||'');}
+      gateOutput=result.output||'';
+      if(record.status!=='passed') {record.reason=(result.timedOut?'timeout: ':'failed: ')+(result.output||'').slice(0,1024);if(!gateOutput)gateOutput=record.reason;}
+    }catch(e){
+      record.status='error';record.reason=e.message;record.output_sha256=sha256(e.message||'');record.output_truncated=/output exceeded/.test(e.message||'');
+      gateOutput=e&&e.message?e.message:String(e);
+    }
+    Object.assign(record,writeGateLog(h,logsAbs,logsRel,seenLogs,logName,gateOutput));
     if(record.status!=='passed') failed=true;
     report.checks.push(record);
   }
@@ -167,19 +263,49 @@ function checks(h,root,opts,st,raw,validation) {
     report.task_id=opts.task;report.base_commit=st.base;report.commit=st.head;report.modules=mods.map(m=>m.name);report.required_checks=[...required];
     report.status=failed?'failed':'passed';report.trust='local-unattested';report.ci=null;report.runtime={version:runtimeVersion(h),runtime_sha256:opts.runtimeHash};
   }
-  const dir=join(root,'.dairn/governance/evidence');h.mkdirs(dir);
-  const name=opts.task?report.run_id+'-checks.json':(opts.all?'all':st.head.slice(0,12))+'-qjs-checks.json';
+  const dir=evidenceDir;h.mkdirs(dir);
+  const name=opts.task?report.run_id+'-checks.json':opts.hook?'pre-push-'+Date.now()+'-checks.json':(opts.all?'all':st.head.slice(0,12))+'-qjs-checks.json';
   const file=join(dir,name);
   if(h.exists(file))throw Error('Refuse to overwrite existing run evidence: '+file);
   h.write(file,JSON.stringify(report,null,2)+'\n');
+  if(stats){stats.checks=report.checks.length;stats.failed=failed;}
   if(opts.task){const linked=attachCheckRun(h,root,opts.task,report,'.dairn/governance/evidence/'+name);h.log('Attached task run: '+linked.run_id+' ['+linked.status+']');}
   h.log('Evidence: '+file+'\nResult: '+(failed?'FAILED':'PASSED')+' [technical-checks-only; NOT full governance approval]');
   return failed?1:0;
 }
+function firstLine(value) { return String(value||'').trim().split(/\r?\n/)[0].trim(); }
+function prePushBase(h,root,opts) {
+  const override=opts.base||h.env('DAIRN_TRUSTED_BASE_REF');
+  if (typeof override==='string' && override.trim()) return override.trim();
+  const merge=h.run(['git','merge-base','HEAD','origin/main'],root,opts.timeout);
+  if(!merge.timedOut && merge.code===0 && firstLine(merge.output)) return firstLine(merge.output);
+  const parent=h.run(['git','rev-parse','HEAD^'],root,opts.timeout);
+  if(!parent.timedOut && parent.code===0 && firstLine(parent.output)) return firstLine(parent.output);
+  throw new Error('pre-push requires --base or origin/main or a parent commit');
+}
+function prePush(h,root,st,opts) {
+  const base=prePushBase(h,root,opts);
+  const validation=governanceValidators(h,root,base);
+  if(validation.errors.length){for(const error of validation.errors)h.error('ERROR: '+error);return 1;}
+  const stats={checks:0,failed:false};
+  if(!opts.no_check){
+    const scope={...readScope(h,root,st.policy,{...opts,cmd:'check',base,all:false,task:null}),policy:st.policy};
+    const code=checks(h,root,{...opts,cmd:'check',base,all:false,task:null,hook:true},scope,st.policy_raw,validation,stats);
+    if(code) return code;
+  }
+  let problems=[];
+  try {problems=activeTaskProblems(h,root)||[];}
+  catch(e){problems=[e&&e.message?e.message:String(e)];}
+  if(problems.length){for(const problem of problems)h.error('ERROR: '+problem);return 1;}
+  let active=[];
+  try {active=activeTaskIds(h,root)||[];}catch(_){active=[];}
+  h.log('pre-push PASS: '+stats.checks+' checks, '+active.length+' active tasks');
+  return 0;
+}
 export function main(h,args) {
   try {
     const opts=parseArgs(args);
-    if(opts.cmd==='help') {h.log('Dairn '+runtimeVersion(h)+' — AI-Native Software Engineering Toolkit\n  dairn init|adopt [--root PATH] [--stack go|python|rust|vue|java|spring-boot|openresty] [--ci none|github|gitlab|both] [--sample] [--plan]\n  dairn detect|doctor|validate [--root PATH]\n  dairn scope|check --base SHA [--root PATH]\n  dairn check --all (baseline L2 checks)\n  dairn upgrade --plan|--apply [--root PATH]\n  dairn work start|next|record|advance|verify|finish [--require-ci-attestation]\n  dairn work attest-prepare|attest-attach TASK [PAYLOAD SIG]\n  dairn guide impact --base SHA [--precision PROJECT-STUB-ID]\n  dairn stubs [list|templates|doctor|init --template LANGUAGE --id NAME [--apply]] [--root PATH]\n  dairn skills catalog|list|add NAME [--apply]\n  dairn docs find QUERY|show SPEC-ID');return 0;}
+    if(opts.cmd==='help') {h.log('Dairn '+runtimeVersion(h)+' — AI-Native Software Engineering Toolkit\n  dairn init|adopt [--root PATH] [--stack go|python|rust|vue|java|spring-boot|openresty] [--ci none|github|gitlab|both] [--sample] [--plan]\n  dairn detect|doctor|validate [--root PATH]\n  dairn scope|check --base SHA [--root PATH]\n  dairn check --all (baseline L2 checks)\n  dairn hook pre-push|turn-end [--task ID] [--no-check] [--provider P --session S] [--allow-unattributed]\n  dairn hooks install [--apply] [--git] [--force] [--launcher PATH]\n  dairn tasks check|ready [--strict]\n  dairn notes seal [--apply]\n  dairn docs check [--json]\n  dairn upgrade --plan|--apply [--root PATH]\n  dairn work start|list|status|next|record|advance|skip|verify|finish|cancel|reopen [--require-machine-gates|--require-session-anchor|--require-ci-attestation|--require-review-actor]\n  dairn work attest-prepare|attest-attach TASK [PAYLOAD SIG]\n  dairn guide impact --base SHA [--precision PROJECT-STUB-ID]\n  dairn stubs [list|templates|doctor|init --template LANGUAGE --id NAME [--apply]] [--root PATH]\n  dairn skills catalog|list|add NAME [--apply]\n  dairn docs find QUERY|show|context SPEC-ID|check [--json]');return 0;}
     const root=h.realpath(opts.root??h.cwd());
     verifyRuntimeLock(h,root,false);
     const st=staticChecks(h,root);
@@ -189,7 +315,13 @@ export function main(h,args) {
     if (opts.cmd==='check' && (h.env('GITHUB_ACTIONS')==='true'||h.env('GITLAB_CI')==='true'))
       invariant(!!expected,'CI check requires protected DAIRN_EXPECTED_POLICY_SHA256');
     if(st.errors.length) {for(const s of st.errors)h.error('ERROR: '+s);return 1;}
-    if(opts.cmd==='doctor') {h.log(JSON.stringify({engine:'Dairn QuickJS Governance',root,policy_sha256:sha256(st.policy_raw),status:'ready',full_python_parity:false},null,2));return 0;}
+    if(opts.cmd==='hook') {
+      // Hook 也要求已初始化项目：runtime lock 必须存在且与当前运行时一致。
+      verifyRuntimeLock(h,root,true);
+      if(opts.hook==='turn-end') return runTurnEnd(h,root,opts);
+      return prePush(h,root,st,opts);
+    }
+    if(opts.cmd==='doctor') return projectDoctor(h,root);
     if(opts.cmd==='validate-core') {h.log('PASS: QuickJS core structural checks only');return 0;}
     if(opts.cmd==='validate') {
       const result=governanceValidators(h,root,opts.base);
