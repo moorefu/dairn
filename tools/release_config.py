@@ -1,9 +1,12 @@
-"""从 package.json 读取唯一发布版本，派生 Python 版本及制品名称。"""
+"""发布版本以标签为准，没有标签时回退 package.json；派生 Python 版本及制品名称。"""
 import json
+import os
 from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parent.parent
+VERSION_PATTERN = (r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
+                   r'(?:-(?:alpha|beta|rc)\.(?:0|[1-9][0-9]*))?')
 
 
 def version_info(version):
@@ -16,13 +19,29 @@ def version_info(version):
     return {'version': version, 'python_version': python_version, 'prerelease': parsed[2] is not None}
 
 
+def tag_version(name):
+    version = name[1:] if name.startswith('v') else name
+    if not re.fullmatch(VERSION_PATTERN, version):
+        raise ValueError(f'标签 {name} 不是有效的发布版本')
+    return version
+
+
+def resolve_version(root=ROOT):
+    """标签版本优先；没有标签上下文（分支、PR、本地构建）时使用 package.json。"""
+    tag = os.environ.get('DAIRN_VERSION', '').strip()
+    if not tag and os.environ.get('GITHUB_REF_TYPE') == 'tag':
+        tag = os.environ.get('GITHUB_REF_NAME', '').strip()
+    if tag:
+        return tag_version(tag)
+    return json.loads((Path(root) / 'package.json').read_text(encoding='utf-8'))['version']
+
+
 def load_release(root=ROOT):
     root = Path(root)
     config = json.loads((root / 'tools/release.json').read_text(encoding='utf-8'))
     if {'version', 'python_version', 'npm_version'} & config.keys():
-        raise ValueError('版本只允许定义在 package.json 的 version 字段')
-    package = json.loads((root / 'package.json').read_text(encoding='utf-8'))
-    return {**config, **version_info(package['version'])}
+        raise ValueError('版本只由标签或 package.json 的 version 决定，release.json 不得定义')
+    return {**config, **version_info(resolve_version(root))}
 
 
 def artifact_names(config):

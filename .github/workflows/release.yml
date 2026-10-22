@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # 标签推送时版本以标签为准；没有标签的 CI 运行回退 package.json。
+  DAIRN_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+
 jobs:
   build:
     name: 获取现成 QuickJS 并自举三类制品
@@ -96,7 +100,8 @@ jobs:
   publish:
     name: 发布版本与 latest 三类制品
     needs: [build, test, accepted]
-    if: github.event_name != 'pull_request'
+    # 只有推送 v<package.json 版本> 标签才发布；普通分支推送和手动运行只做构建验证。
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -116,4 +121,5 @@ jobs:
       - name: 校验制品并发布版本与 latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python tools/publish-release.py --artifacts incoming
+        # 以 checkout 后的提交为准，避免标签推送时 GITHUB_SHA 指向 tag 对象而非提交。
+        run: python tools/publish-release.py --artifacts incoming --commit "$(git rev-parse HEAD)"

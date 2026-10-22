@@ -142,7 +142,10 @@ def verify():
         if 'npm' in selected:
             with tarfile.open(built / NAMES['npm']) as tar:
                 assert json.load(tar.extractfile('package/package.json'))['version'] == VERSION
-                assert tar.extractfile('package/runtime/dairn-embedded.com').read() == runtime.read_bytes()
+                ape_member = tar.getmember('package/runtime/dairn-embedded.com')
+                if os.name != 'nt':
+                    assert ape_member.mode & 0o111, 'npm 包内运行时必须带执行位，否则 bash 无法执行 APE 加载器'
+                assert tar.extractfile(ape_member).read() == runtime.read_bytes()
                 assert tar.extractfile('package/dairn.sh').read() == (ROOT / 'dairn.sh').read_bytes()
                 allowed = {'package/package.json', 'package/README.md', 'package/bin/dairn.cjs', 'package/dairn.sh',
                            'package/runtime/dairn-embedded.com', 'package/runtime/runtime-integrity.json'}
@@ -202,7 +205,7 @@ def verify():
             lock = json.loads((ROOT / 'quickjs.lock.json').read_text(encoding='utf-8'))
             bootstrap = Path(env['DAIRN_QUICKJS_CACHE']) / ('qjs-' + lock['binary_sha256'] + '.com')
             command = ([bootstrap] if os.name == 'nt' else ['/bin/sh', bootstrap]) + [
-                source / 'tools/build-zip.mjs', '--root', source, '--qjs', bootstrap]
+                source / 'tools/build-zip.mjs', '--root', source, '--qjs', bootstrap, '--version', VERSION]
             bare = {**env, 'PATH': ''}
             run('zip-no-language-tools', [*cli, 'version'], cwd=tmp, override=bare)
             native_out = tmp / 'native'

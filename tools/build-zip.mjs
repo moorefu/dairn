@@ -8,10 +8,16 @@ import {utf8,readBytes,writeBytes,zip,readZip} from './zip.mjs';
 try {
   const options={root:host.cwd()};
   for(let i=1;i<scriptArgs.length;i+=2){
-    const key=scriptArgs[i];if(!['--root','--out','--stage','--qjs'].includes(key)||!scriptArgs[i+1])throw Error('用法：build --qjs 已校验解释器 --out 输出目录 [--stage 全新暂存目录]');
+    const key=scriptArgs[i];if(!['--root','--out','--stage','--qjs','--version'].includes(key)||!scriptArgs[i+1])throw Error('用法：build --qjs 已校验解释器 --out 输出目录 --version 发布版本 [--stage 全新暂存目录]');
     options[key.slice(2)]=scriptArgs[i+1];
   }
   const root=host.realpath(options.root);
+  // 版本以标签为准；没有标签（本地构建）时使用 package.json。
+  let declared=(options.version||host.env('DAIRN_VERSION')||'').trim();
+  if(!declared&&host.env('GITHUB_REF_TYPE')==='tag')declared=(host.env('GITHUB_REF_NAME')||'').trim();
+  const pkg=JSON.parse(host.read(root+'/package.json'));
+  const version=(declared||pkg.version).replace(/^v/,'');
+  if(!/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(alpha|beta|rc)\.(?:0|[1-9][0-9]*))?$/.test(version))throw Error('发布版本格式无效：'+version);
   const absolute=p=>/^(?:[A-Za-z]:[\\/]|\/)/.test(p)?p:host.cwd()+'/'+p;
   const out=absolute(options.out||root+'/dist');host.mkdirs(out);
   if(!options.qjs)throw Error('缺少 --qjs，请通过 build.cmd、build.sh、Python 或 npm 入口获取 QuickJS');
@@ -19,10 +25,8 @@ try {
   const input=readBytes(absolute(options.qjs));
   if(sha256Bytes(input)!==quickjs.binary_sha256)throw Error('QuickJS SHA256 与下载锁不一致');
   const release=JSON.parse(host.read(root+'/tools/release.json'));
-  const pkg=JSON.parse(host.read(root+'/package.json'));
-  if(['version','npm_version','python_version'].some(key=>key in release))throw Error('版本只允许定义在 package.json 的 version 字段');
-  if(!/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(alpha|beta|rc)\.(?:0|[1-9][0-9]*))?$/.test(pkg.version))throw Error('package.json 发布版本格式无效');
-  release.version=pkg.version;
+  if(['version','npm_version','python_version'].some(key=>key in release))throw Error('版本只由标签或 package.json 的 version 决定，release.json 不得定义');
+  release.version=version;
   const excluded=new Set(['dist','node_modules','__pycache__','.git','.pytest_cache']);
   const files=new Map();
   function walk(relative){

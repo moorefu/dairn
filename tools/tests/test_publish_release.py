@@ -1,6 +1,7 @@
 """离线验证发布门禁和重跑行为，不访问或修改 GitHub。"""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -54,6 +55,38 @@ class PublishReleaseTests(unittest.TestCase):
     def test_tag_version_must_match(self):
         with self.assertRaisesRegex(ValueError, '触发标签'):
             release.plan_release(self.artifacts, self.config, self.commit, 'tag', 'v1.0.0')
+
+    def test_release_requires_version_tag(self):
+        with self.assertRaisesRegex(ValueError, '版本标签触发'):
+            release.plan_release(self.artifacts, self.config, self.commit, 'branch', 'main',
+                                 require_tag=True)
+        plan = release.plan_release(self.artifacts, self.config, self.commit,
+                                    'tag', 'v' + self.config['version'], require_tag=True)
+        self.assertEqual(plan['tag'], 'v' + self.config['version'])
+        self.assertEqual(plan['version'], self.config['version'])
+
+    def test_main_requires_version_tag(self):
+        argv = ['publish-release.py', '--artifacts', str(self.artifacts), '--repo', self.repo,
+                '--commit', self.commit]
+        env = {'GITHUB_REF_TYPE': 'branch', 'GITHUB_REF_NAME': 'main'}
+        with patch.object(sys, 'argv', argv), patch.dict(os.environ, env), \
+                patch.object(release, 'load_release', return_value=self.config), \
+                patch.object(release, 'publish') as publish, patch.object(release, 'publish_latest') as latest:
+            with self.assertRaisesRegex(ValueError, '版本标签触发'):
+                release.main()
+        publish.assert_not_called()
+        latest.assert_not_called()
+
+    def test_dry_run_does_not_require_tag(self):
+        argv = ['publish-release.py', '--artifacts', str(self.artifacts), '--repo', self.repo,
+                '--commit', self.commit, '--dry-run']
+        env = {'GITHUB_REF_TYPE': 'branch', 'GITHUB_REF_NAME': 'main'}
+        with patch.object(sys, 'argv', argv), patch.dict(os.environ, env), \
+                patch.object(release, 'load_release', return_value=self.config), \
+                patch.object(release, 'publish') as publish, patch.object(release, 'publish_latest') as latest:
+            release.main()
+        publish.assert_not_called()
+        latest.assert_not_called()
 
     def test_invalid_version_blocks_publish_plan(self):
         with self.assertRaisesRegex(ValueError, '发布版本'):

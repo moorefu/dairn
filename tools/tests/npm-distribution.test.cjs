@@ -17,7 +17,8 @@ if (fixture) {
   fs.copyFileSync(path.join(repo,'package.json'),path.join(fixture,'package.json'));
   fs.copyFileSync(path.join(repo,'dairn.sh'),path.join(fixture,'dairn.sh'));
   for (const name of ['dairn-embedded.com','runtime-integrity.json']) fs.copyFileSync(path.join(repo,'runtime',name),path.join(fixture,'runtime',name));
-  if (process.platform !== 'win32') fs.chmodSync(path.join(fixture,'runtime','dairn-embedded.com'),0o755);
+  // 模拟丢失执行位的安装结果，验证启动器会补齐元数据。
+  if (process.platform !== 'win32') fs.chmodSync(path.join(fixture,'runtime','dairn-embedded.com'),0o644);
   after(() => fs.rmSync(fixture,{recursive:true,force:true}));
 }
 const launcher = path.join(source,'bin','dairn.cjs');
@@ -42,6 +43,32 @@ test('版本和参数透传不修改源二进制', () => {
   assert.equal(p.status,0,p.stderr);
   assert.ok(p.stdout.startsWith('Dairn '+version+' —'),p.stdout);
   assert.equal(hash(ape),before);
+});
+
+test('缺少执行位的运行时在 bash 下仍可启动并补齐执行位', {skip:process.platform === 'win32'}, t => {
+  if (spawnSync('bash',['-c','exit 0'],{stdio:'ignore'}).error) {
+    t.skip('当前环境没有 bash');
+    return;
+  }
+  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'dairn npm exec bit '));
+  try {
+    const target=path.join(temp,'package');
+    fs.mkdirSync(path.join(target,'runtime'),{recursive:true});
+    fs.cpSync(path.join(source,'bin'),path.join(target,'bin'),{recursive:true});
+    fs.copyFileSync(path.join(source,'dairn.sh'),path.join(target,'dairn.sh'));
+    for(const name of ['dairn-embedded.com','runtime-integrity.json']) fs.copyFileSync(path.join(source,'runtime',name),path.join(target,'runtime',name));
+    const runtime=path.join(target,'runtime','dairn-embedded.com');
+    fs.chmodSync(runtime,0o644);
+    const before=hash(runtime);
+    // macOS 的 /bin/sh 是 bash，对无执行位的路径 command -v 会失败。
+    const p=spawnSync('bash',[path.join(target,'dairn.sh'),'version'],{
+      encoding:'utf8',timeout:20000,env:{...process.env,DAIRN_FAST_RUNTIME:'0'},
+    });
+    assert.equal(p.status,0,p.stderr);
+    assert.ok(p.stdout.startsWith('Dairn '+version+' —'),p.stdout);
+    assert.notEqual(fs.statSync(runtime).mode & 0o111,0,'启动器必须补齐执行位');
+    assert.equal(hash(runtime),before,'启动器不得改写运行时内容');
+  } finally { fs.rmSync(temp,{recursive:true,force:true}); }
 });
 
 test('CLI 非零退出码传递至 npm 启动器', () => {

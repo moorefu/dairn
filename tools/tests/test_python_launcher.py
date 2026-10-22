@@ -46,6 +46,16 @@ class PythonLauncherTests(unittest.TestCase):
         self.assertFalse(self.cache.exists(), '默认启动不得创建 Python 专属运行时副本')
         self.assertEqual(hashlib.sha256(self.binary.read_bytes()).hexdigest(), self.checksum)
 
+    @unittest.skipIf(sys.platform == 'win32', 'POSIX 执行位修复验证')
+    def test_missing_execute_bit_is_repaired_without_rewriting_content(self):
+        self.binary.chmod(0o644)
+        result = self.cli('version')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith('Dairn ' + self.version + ' —'), result.stdout)
+        self.assertTrue(self.binary.stat().st_mode & 0o111, '启动器必须补齐执行位')
+        self.assertEqual(hashlib.sha256(self.binary.read_bytes()).hexdigest(), self.checksum)
+        self.assertFalse(self.cache.exists())
+
     def test_corrupt_and_missing_runtime_are_rejected_before_launch(self):
         self.binary.write_bytes(self.binary.read_bytes() + b'corrupt')
         result = self.cli('version')

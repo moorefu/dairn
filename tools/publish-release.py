@@ -19,12 +19,15 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def plan_release(artifacts, config, commit, ref_type='', ref_name=''):
+def plan_release(artifacts, config, commit, ref_type='', ref_name='', require_tag=False):
+    # config['version'] 已按标签解析：有标签取标签版本，没有才用 package.json。
     version = config['version']
     info = version_info(version)
     if not re.fullmatch(r'[0-9a-f]{40}', commit):
         raise ValueError('发布必须绑定本次验证的完整提交 SHA')
     tag = 'v' + version
+    if require_tag and ref_type != 'tag':
+        raise ValueError('发布必须由版本标签触发，普通推送和分支手动运行只做验证')
     if ref_type == 'tag' and ref_name != tag:
         raise ValueError(f'触发标签 {ref_name} 与发布版本 {tag} 不一致')
     names = set(artifact_names(config).values())
@@ -208,7 +211,8 @@ def main():
     args = parser.parse_args()
     config = load_release(ROOT)
     plan = plan_release(args.artifacts.resolve(), config, args.commit,
-                        os.environ.get('GITHUB_REF_TYPE', ''), os.environ.get('GITHUB_REF_NAME', ''))
+                        os.environ.get('GITHUB_REF_TYPE', ''), os.environ.get('GITHUB_REF_NAME', ''),
+                        require_tag=not args.dry_run)
     repo = args.repo
     if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo):
         raise ValueError('缺少有效的 GITHUB_REPOSITORY')

@@ -1,12 +1,14 @@
-"""验证跨生态版本转换和唯一版本入口。"""
+"""验证跨生态版本转换和标签优先的版本入口。"""
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from release_config import artifact_names, load_release, version_info
+from release_config import artifact_names, load_release, tag_version, version_info
 
 
 class ReleaseConfigTests(unittest.TestCase):
@@ -23,7 +25,42 @@ class ReleaseConfigTests(unittest.TestCase):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 version_info(version)
 
-    def test_only_package_json_controls_version(self):
+    def test_tag_version_accepts_v_prefix_only(self):
+        self.assertEqual(tag_version('v2.3.4-rc.5'), '2.3.4-rc.5')
+        self.assertEqual(tag_version('2.3.4'), '2.3.4')
+        for name in ['release-2.3.4', 'v2.3', 'v2.3.4rc5']:
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, '不是有效的发布版本'):
+                tag_version(name)
+
+    def release_root(self, temp, version='2.3.4'):
+        root = Path(temp)
+        (root / 'tools').mkdir()
+        (root / 'tools/release.json').write_text(
+            json.dumps({'name': 'dairn', 'python_name': 'dairn'}), encoding='utf-8')
+        (root / 'package.json').write_text(json.dumps({'version': version}), encoding='utf-8')
+        return root
+
+    def test_tag_version_overrides_package_json(self):
+        with tempfile.TemporaryDirectory(prefix='dairn-version-') as temp:
+            root = self.release_root(temp)
+            with patch.dict(os.environ, {'DAIRN_VERSION': 'v9.1.2-rc.3'}, clear=True):
+                release = load_release(root)
+            self.assertEqual(release['version'], '9.1.2-rc.3')
+            self.assertEqual(release['python_version'], '9.1.2rc3')
+            self.assertEqual(artifact_names(release), {
+                'npm': 'dairn-9.1.2-rc.3.tgz',
+                'wheel': 'dairn-9.1.2rc3-py3-none-any.whl',
+                'zip': 'dairn-9.1.2-rc.3.zip'})
+            env = {'GITHUB_REF_TYPE': 'tag', 'GITHUB_REF_NAME': 'v7.8.9'}
+            with patch.dict(os.environ, env, clear=True):
+                self.assertEqual(load_release(root)['version'], '7.8.9')
+            with patch.dict(os.environ, {'GITHUB_REF_TYPE': 'branch', 'GITHUB_REF_NAME': 'main'}, clear=True):
+                self.assertEqual(load_release(root)['version'], '2.3.4')
+            with patch.dict(os.environ, {'DAIRN_VERSION': '1.2'}, clear=True):
+                with self.assertRaisesRegex(ValueError, '不是有效的发布版本'):
+                    load_release(root)
+
+    def test_package_json_is_the_fallback_version(self):
         with tempfile.TemporaryDirectory(prefix='dairn-version-') as temp:
             root = Path(temp)
             (root / 'tools').mkdir()
@@ -31,13 +68,15 @@ class ReleaseConfigTests(unittest.TestCase):
             (root / 'tools/release.json').write_text(json.dumps(config), encoding='utf-8')
             for version, wheel_version in [('2.3.4-rc.5', '2.3.4rc5'), ('3.0.0', '3.0.0')]:
                 (root / 'package.json').write_text(json.dumps({'version': version}), encoding='utf-8')
-                release = load_release(root)
+                with patch.dict(os.environ, {}, clear=True):
+                    release = load_release(root)
                 self.assertEqual(artifact_names(release), {
                     'npm': f'dairn-{version}.tgz', 'wheel': f'dairn-{wheel_version}-py3-none-any.whl',
                     'zip': f'dairn-{version}.zip'})
             for field in ('version', 'python_version', 'npm_version'):
                 (root / 'tools/release.json').write_text(json.dumps({**config, field: '3.0.0'}), encoding='utf-8')
-                with self.assertRaisesRegex(ValueError, '只允许定义在 package.json'):
+                with patch.dict(os.environ, {}, clear=True), \
+                        self.assertRaisesRegex(ValueError, '标签或 package.json'):
                     load_release(root)
 
 

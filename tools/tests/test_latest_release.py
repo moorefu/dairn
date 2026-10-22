@@ -1,6 +1,7 @@
 """离线验证 latest 别名、滚动发布顺序和防回退行为。"""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -128,7 +129,9 @@ class LatestReleaseTests(unittest.TestCase):
 
     def test_versioned_failure_prevents_latest_publication(self):
         argv = ['publish-release.py', '--artifacts', str(self.artifacts), '--repo', self.repo, '--commit', self.commit]
-        with patch.object(sys, 'argv', argv), patch.object(release, 'load_release', return_value=self.config), \
+        env = {'GITHUB_REF_TYPE': 'tag', 'GITHUB_REF_NAME': 'v' + self.config['version']}
+        with patch.object(sys, 'argv', argv), patch.dict(os.environ, env), \
+                patch.object(release, 'load_release', return_value=self.config), \
                 patch.object(release, 'publish', side_effect=ValueError('版本发布失败')), patch.object(release, 'publish_latest') as latest:
             with self.assertRaisesRegex(ValueError, '版本发布失败'):
                 release.main()

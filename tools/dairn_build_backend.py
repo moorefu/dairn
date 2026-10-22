@@ -30,7 +30,8 @@ def native_zip(destination, stage=None):
               str(ROOT / 'tools/bootstrap.ps1'), '-FetchOnly'] if sys.platform == 'win32'
              else ['/bin/sh', str(ROOT / 'tools/bootstrap.sh'), '--fetch-only'])
     binary = subprocess.check_output(fetch, cwd=ROOT, text=True, encoding='utf-8').strip()
-    args = [str(ROOT / 'tools/build-zip.mjs'), '--root', str(ROOT), '--qjs', binary, '--out', str(destination)]
+    args = [str(ROOT / 'tools/build-zip.mjs'), '--root', str(ROOT), '--qjs', binary,
+            '--out', str(destination), '--version', RELEASE['version']]
     if stage is not None:
         args.extend(['--stage', str(Path(stage).resolve())])
     if sys.platform == 'win32':
