@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 已通过矩阵验证并发布到 GitHub Release 的版本标签，例如 v0.1.0-rc.1
+        description: 已通过矩阵验证并发布到 GitHub Release 的版本标签，例如 v0.1.0-rc.2（不能填 latest）
         required: true
       target:
         description: 发布目标注册表
@@ -23,6 +23,12 @@ jobs:
     timeout-minutes: 10
     environment: npm
     steps:
+      - name: 校验标签输入
+        run: |
+          if ! printf '%s' "${{ inputs.tag }}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
+            echo "::error::tag 输入必须是版本标签（如 v0.1.0-rc.2），不能使用 latest 等别名"
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -59,12 +65,15 @@ jobs:
           set -e
           printf '%s\n' "$output"
           if [ "$code" -ne 0 ]; then
-            detail=$(printf '%s\n' "$output" | grep -m1 -i 'npm error' || printf '%s\n' "$output" | head -n 1)
+            detail=$(printf '%s\n' "$output" | grep -i 'npm error' | head -n 4 | paste -sd ' ' - | cut -c1-800)
+            [ -n "$detail" ] || detail=$(printf '%s\n' "$output" | head -n 1)
             echo "::error::npm publish 失败（$name@$version）：$detail"
             case "$output" in
               *EOTP*|*"one-time password"*) echo '提示：账号开启了 2FA，请改用 Automation token，或为 Granular token 勾选 Bypass 2FA。' ;;
               *E401*|*uthenticat*) echo '提示：NPM_TOKEN 无效或已过期。' ;;
-              *E403*|*orbidden*) echo '提示：NPM_TOKEN 缺少发布权限，或作用域/包名不匹配。' ;;
+              *erify*mail*|*mail*erif*) echo '提示：先在 npm 账号完成邮箱验证。' ;;
+              *"too similar"*) echo '提示：包名被 npm 判定与现有包过于相似，需要换名。' ;;
+              *E403*|*orbidden*) echo '提示：令牌没有发布权限。Granular token 选 Read and write + All packages（新包还无法单独勾选）并勾选 Bypass 2FA；或改用 Classic Automation token。' ;;
             esac
             exit "$code"
           fi
@@ -76,6 +85,12 @@ jobs:
     timeout-minutes: 10
     environment: pypi
     steps:
+      - name: 校验标签输入
+        run: |
+          if ! printf '%s' "${{ inputs.tag }}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
+            echo "::error::tag 输入必须是版本标签（如 v0.1.0-rc.2），不能使用 latest 等别名"
+            exit 1
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -103,14 +118,22 @@ jobs:
             echo "$name $version 已存在于 PyPI，跳过上传（版本不可覆盖）。"
             exit 0
           fi
+          if [ "$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/$name/json")" = "404" ]; then
+            echo "提示：PyPI 上还没有 $name 项目（可能已删除）。PyPI 不允许重用已上传过的文件名，若该版本以前上传过，必须发布新版本。"
+          fi
           python -m pip install --quiet --disable-pip-version-check twine
           set +e
-          output=$(python -m twine upload --non-interactive "$wheel" 2>&1)
+          output=$(python -m twine upload --non-interactive --verbose "$wheel" 2>&1)
           code=$?
           set -e
           printf '%s\n' "$output"
           if [ "$code" -ne 0 ]; then
-            detail=$(printf '%s\n' "$output" | grep -m1 -iE 'error|HTTPError' || printf '%s\n' "$output" | head -n 1)
+            detail=$(printf '%s\n' "$output" | grep -iE 'HTTPError|error|already|invalid|forbidden|400|403' | head -n 4 | paste -sd ' ' - | cut -c1-800)
+            [ -n "$detail" ] || detail=$(printf '%s\n' "$output" | head -n 1)
             echo "::error::twine 上传失败（$name $version）：$detail"
+            case "$output" in
+              *"already been used"*|*"File already exists"*|*"already exists"*|*"410"*) echo '提示：该版本文件名已被 PyPI 使用过，不能重用；请升版本并发新 tag。' ;;
+              *uthenticat*|*"403"*) echo '提示：PYPI_TOKEN 无效、过期或没有该项目权限。' ;;
+            esac
             exit "$code"
           fi

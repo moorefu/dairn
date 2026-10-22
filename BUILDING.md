@@ -78,7 +78,7 @@ npm view dairn version                                  # 404 表示未被占用
 curl -s -o /dev/null -w '%{http_code}\n' https://pypi.org/pypi/dairn/json
 ```
 
-两个名称中 PyPI 的 `dairn` 已建立，npm 首次发布前仍需确认名称可用。工作流入口：Actions → **发布到 npm 与 PyPI** → Run workflow，填写已发布的标签（如 `v0.1.0-rc.1`），选择 `both`/`npm`/`pypi`。工作流会先检查目标版本是否已存在，已存在则跳过，因此发布成功后可以安全重跑 `both`；失败时会输出 `::error::` 注解和常见令牌问题提示，便于直接定位。
+两个名称中 PyPI 的 `dairn` 已建立，npm 首次发布前仍需确认名称可用。工作流入口：Actions → **发布到 npm 与 PyPI** → Run workflow，填写**版本标签**（如 `v0.1.0-rc.2`，不能填 `latest` 这类滚动别名），选择 `both`/`npm`/`pypi`。工作流会先检查目标版本是否已存在，已存在则跳过，因此发布成功后可以安全重跑 `both`；失败时会输出 `::error::` 注解和常见令牌问题提示，便于直接定位。
 
 ### npm（npmjs.com）
 
@@ -92,7 +92,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://pypi.org/pypi/dairn/json
 1. 在 pypi.org 注册账号并创建 API token（首次发布可先用账号级 token，项目建立后收紧到 `dairn` 项目），存为仓库 Secret `PYPI_TOKEN`。
 2. 发布命令与工作流等价：`python -m twine upload dist/dairn-0.1.0rc1-py3-none-any.whl`（用户名 `__token__`，密码为 token）。工作流使用 `TWINE_USERNAME=__token__` 与 `PYPI_TOKEN`。
 3. PyPI 上预发布版本默认可下载但不被 `pip install dairn` 选中，需要 `pip install --pre dairn`；正式版正常安装。
-4. 版本不可覆盖：同一版本重复上传会失败，需先升版本（新标签）。
+4. 版本不可覆盖：同一版本重复上传会失败；此外 **PyPI 不允许重用已上传过的文件名，即使删除了项目或该版本也不行**，删除后必须升版本（新 tag）重新构建上传。
 5. 可选升级：PyPI → Publishing 添加 GitHub trusted publisher（仓库 `moorefu/dairn`、工作流 `registry-publish.yml`、环境 `pypi`），再把工作流里的 twine 步骤换成 `pypa/gh-action-pypi-publish@release/v1`，无需长期 token。
 
 GitHub Release 与注册表发布互相独立：Release 永远先发；注册表发布会因名称被占用、版本已存在或令牌缺失而失败，此时补新版本再发，不要覆盖已发布字节。
