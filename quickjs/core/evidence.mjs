@@ -99,8 +99,19 @@ export function verifyBundle(h, root, bundlePath) {
   }
   const runEntry = files.find(x => x.name === 'run_json');
   let runErrors = [];
-  if (runEntry?.ok) { try { runErrors = validateCheckRun(JSON.parse(h.read(filePath(h, root, runEntry.path)))); } catch (e) { runErrors = [String(e.message || e)]; } }
+  let fileRun = null;
+  if (runEntry?.ok) { try { fileRun = JSON.parse(h.read(filePath(h, root, runEntry.path))); runErrors = validateCheckRun(fileRun); } catch (e) { runErrors = [String(e.message || e)]; } }
   else runErrors = ['run evidence not verifiable'];
+  // The embedded run must be the exact object recorded in the run_json bytes;
+  // a bundle edited after the fact must not survive as "verified" (T38).
+  if (fileRun && JSON.stringify(fileRun) !== JSON.stringify(bundle.run))
+    runErrors.push('embedded run differs from the run_json member bytes');
+  // Self-declared digest must cover the bundle content it accompanies.
+  if (typeof bundle.bundle_sha256 === 'string' && /^[0-9a-f]{64}$/.test(bundle.bundle_sha256)) {
+    const {bundle_sha256, ...rest} = bundle;
+    if (bundle_sha256 !== sha256(JSON.stringify(rest)))
+      runErrors.push('bundle_sha256 does not match bundle content');
+  }
   return {schema:'dairn.evidence-bundle.v1', status: valid && !runErrors.length ? 'verified' : 'failed',
     run_id: bundle.run?.run_id ?? null,
     files, run_validation:runErrors};

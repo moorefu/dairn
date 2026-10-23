@@ -201,6 +201,25 @@ test('RUN-06 bundle verification flags tampered member files (ATST-01 semantics)
   const report = verifyBundle(realHost, dir, 'bundle.json');
   assert(report.status === 'failed' && report.files.some(x => !x.ok), 'tampered run.json accepted');
 });
+test('RUN-08/T38 edited bundles fail: embedded run drift and stale self digest', () => {
+  const dir = workdir('run8');
+  const ref = writeRunEvidence(realHost, dir, sampleRun());
+  const bundle = bundleFor(realHost, dir, ref.path);
+  realHost.write(dir + '/bundle.json', JSON.stringify(bundle, null, 2) + '\n');
+  assert(verifyBundle(realHost, dir, 'bundle.json').status === 'verified', 'clean bundle failed');
+  // Edit the embedded run without touching the member bytes.
+  const drift = JSON.parse(JSON.stringify(bundle));
+  drift.run.declared_assurance = 'ci-verified';
+  realHost.write(dir + '/bundle.json', JSON.stringify(drift, null, 2) + '\n');
+  const driftReport = verifyBundle(realHost, dir, 'bundle.json');
+  assert(driftReport.status === 'failed' && driftReport.run_validation.some(x => x.includes('differs from the run_json member bytes')), 'embedded run drift accepted');
+  // Keep a matching embedded run but leave the stale self digest.
+  const stale = JSON.parse(JSON.stringify(bundle));
+  stale.bundle_sha256 = 'e'.repeat(64);
+  realHost.write(dir + '/bundle.json', JSON.stringify(stale, null, 2) + '\n');
+  const staleReport = verifyBundle(realHost, dir, 'bundle.json');
+  assert(staleReport.status === 'failed' && staleReport.run_validation.some(x => x.includes('bundle_sha256 does not match')), 'stale self digest accepted');
+});
 
 /* ---------- runChecks 端到端（mock git/命令；RUN-01/02 语义 + invalidated） ---------- */
 const POLICY = {schema_version: 1, project: 'service', modules: [
