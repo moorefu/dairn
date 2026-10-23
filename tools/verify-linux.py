@@ -42,7 +42,8 @@ with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
     subprocess.run(['/bin/sh', str(native), '--assimilate'], check=True)
     env = {**os.environ, 'DAIRN_QJS_BIN': str(native)}
     for name, script in [('policy', 'test_native.mjs'), ('host', 'test_host_native.mjs'),
-                         ('governance', 'test_governance_native.mjs')]:
+                         ('governance', 'test_governance_native.mjs'),
+                         ('handoff', 'test_handoff_native.mjs')]:
         result = subprocess.run([str(native), str(root / 'quickjs/tests' / script)],
                                 env=env, capture_output=True, timeout=40)
         (out / ('linux-' + name + '.log')).write_bytes(result.stdout + result.stderr)
@@ -64,6 +65,7 @@ with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
         'quickjs.tests.test_stub_ci_review',
         'quickjs.tests.test_trusted_ci_stubs',
         'quickjs.tests.test_project_lifecycle',
+        'quickjs.tests.test_handoff',
     ])
     def flatten(suite):
         for case in suite:
@@ -79,11 +81,12 @@ with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
                    errors=len(regression.errors), skipped=len(regression.skipped), excluded=[])
 evidence = out / 'linux-go-checks.json'
 if evidence.exists():
-    results['go_checks'] = [{k: c.get(k) for k in ['gate', 'status', 'returncode', 'argv']}
+    results['go_checks'] = [{k: c.get(k) for k in ['id', 'module', 'status', 'exit_code', 'argv']}
                             for c in json.loads(evidence.read_text(encoding='utf-8'))['checks']]
 results['ape_sha256'] = before
 results['original_unchanged'] = hashlib.sha256(binary.read_bytes()).hexdigest() == before
 (out / 'linux-summary.json').write_text(json.dumps(results, indent=2) + '\n', encoding='utf-8')
 print(json.dumps(results, indent=2), flush=True)
 sys.exit(0 if regression.wasSuccessful() and not regression.skipped and evidence.exists()
-         and results['host'] == results['policy'] == 0 and results['original_unchanged'] else 1)
+         and results['host'] == results['policy'] == results['governance'] == results['handoff'] == 0
+         and results['original_unchanged'] else 1)

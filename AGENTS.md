@@ -16,13 +16,14 @@
 ```sh
 ./dairn.sh version
 ./dairn.sh docs check                    # 分发资产（specs/skills）门禁
+./dairn.sh handoff                       # 只读接手摘要（任意 Git 仓库可用；--json 供 Agent 解析）
 python -m unittest quickjs.tests.test_assets_lint
 python tools/verify-linux.py /tmp/dairn-verify   # Linux，需 go/git/gcc
 python tools/verify-packages.py                  # 制品验收（可选，耗时）
 python tools/checksums.py
 ```
 
-`dairn validate/check/work` 等需要已初始化的项目根（`.dairn/lock.json`）；在本仓库根执行会报结构错误，属预期。
+`dairn validate/check/work` 等需要已初始化的项目根（`.dairn/lock.json`）；在本仓库根执行会报结构错误，属预期。`dairn handoff` 是唯一无需项目初始化即可运行的工作命令：接手本仓库时先跑它获取只读摘要（HEAD、脏文件、本地证据、进行中任务），再用 `--json` 比对 `handoff_fingerprint_sha256` 检测会话间工作区变化。
 
 ## 修改规则
 

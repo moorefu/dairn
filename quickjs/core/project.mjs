@@ -8,6 +8,8 @@ import {verifyBundle,verifyRunBytes} from './evidence.mjs';
 import {evaluate as gateEvaluate} from './gate.mjs';
 import {prepareAttestation,verifyAttestation} from './attestation.mjs';
 import {platformVerdict as approvalPlatformVerdict} from './approval.mjs';
+import {captureHandoff} from './handoff.mjs';
+import {renderHandoff} from './handoff-render.mjs';
 import {LAUNCHER_POSIX,LAUNCHER_WINDOWS,LAUNCHER_CONFIG,RUNTIME_DIR,launcherScripts,defaultLauncherConfig,readLauncherConfig,launcherInfo,vendorRuntime,verifyLauncher} from './launcher.mjs';
 import {configuredStubs,stubInit,stubDoctor,stubTemplates} from './stubs.mjs';
 import {captureFacts,acceptFacts,factSnapshotPath} from './facts.mjs';
@@ -42,7 +44,7 @@ export function runtimeIdentity(h){
   for(const x of m.assets||[]) invariant(sha256(read(h,ASSETS+x.type+'/'+x.path))===x.sha256,'Embedded asset checksum mismatch: '+x.path);
   return sha256(raw);
 }
-const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--precision','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin'];
+const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--precision','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars'];
 const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
 function argsParse(args){
   const out={cmd:args[0]||'help',pos:[],root:'.',stack:'auto',ci:'none',timeout:120};
@@ -683,7 +685,30 @@ function attestCmd(h,o,root){  const op=o.pos[0];
   throw Error('Usage: dairn attest prepare --bundle <p> --context <c.json> [--out <s.json>] | attest verify --statement <s> --signature <sig> --key <pub>');
 }
 
-export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','stubs','doctor','version','--version','tasks','hooks','notes','evidence','gate','attest','approval'].includes(args[0]);}
+/* 零仪式交接（§23）：只读派生视图，无需 .dairn/lock.json、无需 Work、默认零写盘。 */
+function handoffCmd(h,o,root){
+  const view=captureHandoff(h,root,{base:o.base||null,task:o.task||null,note:o.note||null,timeout:30});
+  const maxChars=Math.max(500,Number(o.max_chars)||12000);
+  if(o.json)h.log(fmt(view));
+  else{
+    const rendered=renderHandoff(view,{maxChars});
+    h.log(rendered.text.replace(/\n$/,''));
+    if(rendered.truncated)h.error('NOTE: handoff output truncated to fit '+maxChars+' characters; core facts, sources and unknowns were kept');
+  }
+  if(o.out){
+    const rel=String(o.out);
+    const outPath=safeRelInside(h,root,rel);
+    invariant(!file(h,outPath),'refuse to overwrite existing file: '+rel);
+    invariant(!rel.startsWith('.dairn/governance/evidence/'),'refuse to write handoff into the evidence tree: '+rel);
+    h.mkdirs(outPath.slice(0,outPath.lastIndexOf('/')));
+    const content=o.json?fmt(view):renderHandoff(view,{maxChars}).text;
+    h.writeExclusive(outPath,content);
+    h.log('handoff written: '+rel+' (explicitly requested; advisory view, not evidence)');
+  }
+  return 0;
+}
+
+export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','stubs','doctor','version','--version','tasks','hooks','notes','evidence','gate','attest','approval','handoff'].includes(args[0]);}
 export function dispatch(h,args){
   try{
     const o=argsParse(args),root=o.root==='.'?h.cwd():o.root;
@@ -739,6 +764,7 @@ export function dispatch(h,args){
     if(o.cmd==='gate'){const r=checkedRoot(h,root,false);return gateCmd(h,o,r);}
     if(o.cmd==='attest'){const r=checkedRoot(h,root,false);return attestCmd(h,o,r);}
     if(o.cmd==='approval'){const r=checkedRoot(h,root,false);return approvalCmd(h,o,r);}
+    if(o.cmd==='handoff'){const r=checkedRoot(h,root,false);return handoffCmd(h,o,r);}
     if(o.cmd==='stubs'){
       const rr=checkedRoot(h,root,false);verifyRuntimeLock(h,rr,true);
       const op=o.pos[0]||'list';

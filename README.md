@@ -34,6 +34,8 @@ dairn hooks install --apply --root "示例 项目"   # 生成 pre-push / turn-en
 
 任务流程使用 `dairn work start/list/status/next/record/advance/skip/verify/finish/cancel/reopen`（普通变更新增 Grill 阶段，必须先消除未决问题；`skip` 只允许规划阶段并留下理由）；`dairn hook turn-end` 把当前会话锚定到活跃任务，`dairn hook pre-push` 在推送前复跑结构治理、风险门禁并校验活跃任务证据是否对应当前 HEAD。发布构建会执行 `dairn docs check` 与资产 lint 回归，把 Skill/Spec 与 CLI 的命令漂移挡在发布之前。
 
+**零仪式交接。** `dairn handoff` 在任意 Git 仓库（无需 `.dairn/`、无需任务）生成只读的接手摘要：当前 HEAD/分支/基线、staged/unstaged/untracked、基线以来的提交与变更路径、本地可见的检查证据（明确区分本地观察/陈旧/未知，绝不冒充 CI 通过）、活跃任务引用、证据支持的阻塞项与推断建议。默认只输出到 stdout、不落盘、不读文件内容；`--json` 供 Agent 解析，`--base`/`--max-chars`/`--note`/`--out` 按需使用。接手者重新运行并比对 `handoff_fingerprint_sha256` 即可检测交接后工作区是否已变化。
+
 项目检查需要项目自己的工具链；Go `-race` 需要 CGO 和 C 编译器。Windows 支持中文和空格路径，拒绝目录联接与符号链接；批处理门禁需显式配置 `cmd.exe`。POSIX 首次启动 APE 使用系统基础命令初始化加载器，macOS ARM64 还需 Xcode Command Line Tools 的 `cc`。
 
 ## 在仓库中调用 Dairn（无安装/离线）
