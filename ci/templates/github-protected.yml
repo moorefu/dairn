@@ -70,7 +70,7 @@ jobs:
           # its members (origin_json/run_json), so signer/publisher verification
           # can re-hash them inside the checkout.
           path: .dairn/governance/evidence
-      - name: Sign without running source tests or Stubs
+      - name: Sign without running source tests or Analyzers
         env:
           DAIRN_CI_BIN: /opt/dairn/dairn.sh
           DAIRN_CI_APE_PATH: /opt/dairn/runtime/dairn-embedded.com

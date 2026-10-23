@@ -16,7 +16,12 @@ import {locateContract, locateRun, compareDebt, verifyExitConditions, writeContr
 import {validateRefactorContract} from './project-context.mjs';
 import {collectRunHistory, recommendAdaptations} from './governance-feedback.mjs';
 import {LAUNCHER_POSIX,LAUNCHER_WINDOWS,LAUNCHER_CONFIG,RUNTIME_DIR,launcherScripts,defaultLauncherConfig,readLauncherConfig,launcherInfo,vendorRuntime,verifyLauncher} from './launcher.mjs';
-import {configuredStubs,stubInit,stubDoctor,stubTemplates} from './stubs.mjs';
+import {configuredAnalyzers,analyzerInit,analyzerDoctor,analyzerTemplates,resolveAnalysisSuite} from './analyzers.mjs';
+import {executeAnalyzer,importAnalysisReport} from './analyzer-runner.mjs';
+import {loadQualityGoals} from './quality-goals.mjs';
+import {evaluateFitness} from './quality-fitness.mjs';
+import {discoverCapabilities,buildParticipationPlan} from './capability-registry.mjs';
+import {configuredAnalyzers as _cfgAnalyzers} from './analyzers.mjs';
 import {captureFacts,acceptFacts,factSnapshotPath} from './facts.mjs';
 /* Dairn QuickJS 项目生命周期与分发层；写入前规划全部项目变更。 */
 import {sha256} from './sha256.mjs';
@@ -49,8 +54,8 @@ export function runtimeIdentity(h){
   for(const x of m.assets||[]) invariant(sha256(read(h,ASSETS+x.type+'/'+x.path))===x.sha256,'Embedded asset checksum mismatch: '+x.path);
   return sha256(raw);
 }
-const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--precision','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars','--window','--file'];
-const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--discover':'discover','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
+const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--analyzer','--suite','--artifact','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars','--window','--file'];
+const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--discover':'discover','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--refresh':'refresh','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
 function argsParse(args){
   const out={cmd:args[0]||'help',pos:[],root:'.',stack:'auto',ci:'none',timeout:120};
   for(let i=1;i<args.length;i++){
@@ -123,7 +128,7 @@ function navigation(){return BEGIN+'\nDairn — AI-Native Software Engineering T
   'Project-specific context: `README.md` and `docs/PROJECT_GUIDE.md`; run `dairn guide plan` to enrich with observed facts.\n'+
   'For task continuity use `dairn work start <task> --id <id>` and `dairn work next --id <id>`; inspect impact using `dairn guide impact`.\n'+
   'Task slices: `dairn tasks check` / `dairn tasks ready`; release asset consistency: `dairn docs check`; local hooks: `dairn hooks install --apply`.\n'+
-  'For language-specific analysis run `dairn stubs templates` then `dairn stubs init --template LANGUAGE --id NAME --apply` and `dairn guide impact --precision <stub-id>`.\n'+
+  'For language-specific analysis run `dairn analyzers templates` then `dairn analyzers init --template LANGUAGE --id NAME --apply` and `dairn guide impact --analyzer <analyzer-id>`.\n'+
   'AI Agents call Dairn; Dairn does not invoke a model. Codex and DeepSeek Harness use AGENTS.md; Claude Code follows CLAUDE.md.\n'+END;}
 function ciTemplate(provider){
   if(provider==='github')return `name: Dairn governance quality gate
@@ -222,7 +227,7 @@ function makeDesired(h,root,config,prior){
     entries['.dairn/governance/project.json']=fmt(policy);
     entries['.agents/notes/archived/sha256.json']='{}\n';
     if(!file(h,j(root,'.gitignore')))entries['.gitignore']='# Dairn transient analyzer and runtime cache\n.dairn/cache/\n.dairn/tmp/\n';
-    entries['.dairn/stubs.json']=fmt({schema:1,stubs:[]});
+    entries['.dairn/analyzers.json']=fmt({schema:'dairn.analyzers.v1',analyzers:[]});
     if(!file(h,j(root,'CLAUDE.md')))entries['CLAUDE.md']='# Claude Code\n\nSee [AGENTS.md](AGENTS.md) for the authoritative, provider-neutral Dairn instructions.\nUse the project launcher `./.dairn/bin/dairn` (Windows: `.dairn\\bin\\dairn.cmd`) instead of a globally installed `dairn`; do not install Dairn, and use the `dairn-agent-workflow` Skill in `.agents/skills/` for deterministic checks.\n';
     if(config.sample){
       invariant(config.modules.length===1&&JSON.stringify(config.modules[0].profiles)==='["go"]','--sample requires a Go-only project');
@@ -276,7 +281,7 @@ function planFor(h,root,entries,lock){
       next[rel]=sha256(navigation());
     }else{
       status=unsafe?'conflict':old===null?'create':old===content?'unchanged':!before[rel]||sha256(old)!==before[rel]?'conflict':'update';
-      if(!['.dairn/governance/project.json','.dairn/stubs.json','.gitignore','CLAUDE.md','.agents/notes/archived/sha256.json','README.md','docs/PROJECT_GUIDE.md',LAUNCHER_CONFIG].includes(rel) &&
+      if(!['.dairn/governance/project.json','.dairn/analyzers.json','.gitignore','CLAUDE.md','.agents/notes/archived/sha256.json','README.md','docs/PROJECT_GUIDE.md',LAUNCHER_CONFIG].includes(rel) &&
         // Sample source code and build manifests become project-owned immediately.
         !(rel==='go.mod'||rel==='hello.go'||rel==='hello_test.go'||/^[^/]+\/(?:go\.mod|hello(?:_test)?\.go)$/.test(rel))) next[rel]=sha256(content);
     }
@@ -344,7 +349,7 @@ function layoutDirs(root){
   dirs.push(j(root,'.dairn/bin'));
   dirs.push(j(root,'.dairn/runtime'));
   dirs.push(j(root,'.dairn/cache'));
-  dirs.push(j(root,'.dairn/cache/stubs'));
+  dirs.push(j(root,'.dairn/cache/analyzers'));
   dirs.push(j(root,'.dairn/tmp'));
   return dirs;
 }
@@ -370,7 +375,7 @@ function layout(h,root){
   h.mkdirs(j(root,'.dairn/work'));
   h.mkdirs(j(root,'.dairn/bin'));
   h.mkdirs(j(root,'.dairn/runtime'));
-  h.mkdirs(j(root,'.dairn/cache/stubs'));
+  h.mkdirs(j(root,'.dairn/cache/analyzers'));
   h.mkdirs(j(root,'.dairn/tmp'));
 }
 function apply(h,root,planned,nextLock){
@@ -848,9 +853,10 @@ function refactorCmd(h,o,root){
   throw Error('Usage: dairn refactor plan --id <id> --file <contract.json> [--apply] | refactor compare|verify|status --id <id> [--run <run-id>] [--json]');
 }
 
-export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','stubs','doctor','version','--version','tasks','hooks','notes','evidence','gate','attest','approval','handoff','governance','refactor'].includes(args[0]);}
+export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','analyzers','analyze','quality','capability','stubs','doctor','version','--version','tasks','hooks','notes','evidence','gate','attest','approval','handoff','governance','refactor'].includes(args[0]);}
 export function dispatch(h,args){
   try{
+    if(args[0]==='stubs'){h.error('Dairn ERROR: unsupported legacy command "stubs"; it was replaced by "dairn analyzers" (breaking rename, no alias)');return 2;}
     const o=argsParse(args),root=o.root==='.'?h.cwd():o.root;
     if(o.cmd==='version'||o.cmd==='--version'){h.log('Dairn '+runtimeVersion(h)+' — Cosmopolitan QuickJS');return 0;}
     if(o.cmd==='init'||o.cmd==='adopt')return provision(h,o);
@@ -907,16 +913,118 @@ export function dispatch(h,args){
     if(o.cmd==='handoff'){const r=checkedRoot(h,root,false);return handoffCmd(h,o,r);}
     if(o.cmd==='governance'){const r=checkedRoot(h,root,false);return governanceCmd(h,o,r);}
     if(o.cmd==='refactor'){const r=checkedRoot(h,root,false);return refactorCmd(h,o,r);}
-    if(o.cmd==='stubs'){
+    if(o.cmd==='analyzers'){
       const rr=checkedRoot(h,root,false);verifyRuntimeLock(h,rr,true);
       const op=o.pos[0]||'list';
-      if(op==='templates'){h.log(fmt(stubTemplates()));return 0;}
-      if(op==='init'){h.log(fmt(stubInit(h,rr,{template:o.template||'go',id:o.id||'surface',apply:!!o.apply})));return 0;}
-      if(op==='doctor'){const report=stubDoctor(h,rr);h.log(fmt(report));return report.ready?0:2;}
-      invariant(op==='list','Usage: stubs [list|templates|doctor|init --template LANGUAGE --id NAME [--apply]]');
-      h.log(fmt({schema:1,configured:configuredStubs(h,rr).map(s=>({id:s.id,kind:s.kind,argv:s.argv,cwd:s.cwd||'.'}))}));return 0;
+      if(op==='templates'){h.log(fmt(analyzerTemplates()));return 0;}
+      if(op==='init'){h.log(fmt(analyzerInit(h,rr,{template:o.template||'go',id:o.id||'surface',apply:!!o.apply})));return 0;}
+      if(op==='doctor'){const report=analyzerDoctor(h,rr);h.log(fmt(report));return report.ready?0:2;}
+      invariant(op==='list','Usage: analyzers [list|templates|doctor|init --template LANGUAGE --id NAME [--apply]]');
+      h.log(fmt({schema:1,configured:configuredAnalyzers(h,rr).analyzers.map(s=>((s.mode||'execute')==='import')?{id:s.id,domain:s.domain,mode:'import',report:{path:s.report.path,format:s.report.format}}:{id:s.id,domain:s.domain,mode:'execute',argv:s.execution.argv,cwd:s.execution.cwd||'.'}),suites:configuredAnalyzers(h,rr).suites.map(x=>({id:x.id,analyzers:x.analyzers}))}));return 0;
     }
-    if(o.cmd==='guide')return guidance(h,checkedRoot(h,root,false),o.pos[0]||'plan',{strict:!!o.strict,apply:!!o.apply,base:o.base||null,precision:o.precision||null,templates:{readme:projectReadme,guide:projectGuide},verify:()=>verifyRuntimeLock(h,checkedRoot(h,root,false),true)});
+    if(o.cmd==='quality'){
+      const rr=checkedRoot(h,root,false);verifyRuntimeLock(h,rr,true);
+      invariant((o.pos[0]||'fitness')==='fitness','Usage: dairn quality fitness [--json]');
+      const goalsDoc=loadQualityGoals(h,rr,p=>{const f=j(rr,p);return h.exists(f)&&!h.isDirectory(f)&&!h.isSymlink(f)?h.read(f):null;});
+      if(!goalsDoc){
+        h.log(fmt({schema:'dairn.quality-fitness.v1',status:'NO-GOALS',results:[],
+          note:'no .dairn/governance/quality-goals.json configured; nothing is enforced or claimed'}));
+        return 0;
+      }
+      const registry=configuredAnalyzers(h,rr);
+      const producers=[...new Set(goalsDoc.objectives.map(g=>g.producer).filter(Boolean))];
+      const runs=[];
+      for(const id of producers){
+        const def=registry.analyzers.find(x=>x.id===id);
+        if(!def){runs.push({analyzer_id:id,status:'not-run',error:'producer not configured'});continue;}
+        runs.push((def.mode||'execute')==='import'?importAnalysisReport(h,rr,id,{artifact:null}):executeAnalyzer(h,rr,id,{base:o.base||null}));
+      }
+      const observations=runs.map(r=>r.observation).filter(x=>x&&x.schema==='dairn.quality-observation.v1');
+      const verdict=evaluateFitness(goalsDoc,observations);
+      if(o.json)h.log(fmt({...verdict,runs:runs.map(r=>({analyzer_id:r.analyzer_id,status:r.status}))}));
+      else{
+        h.log('quality fitness: '+verdict.status);
+        for(const r of verdict.results)h.log('  '+r.objective_id+' ['+r.enforcement+'] '+r.status+(r.value!==undefined&&r.value!==null?' value='+r.value:'')+(r.reason?' — '+r.reason:''));
+        h.log('  note: '+verdict.note);
+      }
+      return verdict.status==='FAIL'?1:verdict.status==='UNKNOWN'?3:0;
+    }
+    if(o.cmd==='capability'){
+      const rr=checkedRoot(h,root,false);verifyRuntimeLock(h,rr,true);
+      invariant((o.pos[0]||'plan')==='plan','Usage: dairn capability plan [--base <ref>] [--json]');
+      let subject=null,changePaths=[],gitNote=null;
+      try{
+        const head=h.run(['git','rev-parse','--verify','HEAD^{commit}'],rr,15);
+        if(head.code===0&&!head.timedOut){
+          subject=head.output.trim();
+          if(o.base){
+            const b=h.run(['git','rev-parse','--verify',o.base+'^{commit}'],rr,15);
+            if(b.code===0&&!b.timedOut)changePaths=h.run(['git','diff','--name-only',b.output.trim(),head.output.trim()],rr,20).output.split('\n').filter(Boolean).slice(0,200);
+          }
+        }else{gitNote='git HEAD unavailable: change paths unknown; plan degrades to goals-only';}
+      }catch(_){gitNote='git unavailable: change paths unknown; plan degrades to goals-only';}
+      const registry=configuredAnalyzers(h,rr);
+      const skills=discoverCapabilities(h,rr,(kind,rel)=>{const f=j(rr,'.agents/skills/'+rel);return h.exists(f)&&!h.isDirectory(f)&&!h.isSymlink(f)?h.read(f):null;});
+      const goalsDoc=loadQualityGoals(h,rr,p=>{const f=j(rr,p);return h.exists(f)&&!h.isDirectory(f)&&!h.isSymlink(f)?h.read(f):null;});
+      const planDoc=buildParticipationPlan({subject,goalsDoc,registry,plan:{change_paths:changePaths},gitNote,skills:skills.skills});
+      if(o.json)h.log(fmt(planDoc));
+      else{
+        h.log('capability plan: '+planDoc.needs.length+' needs, '+planDoc.gaps.length+' gaps');
+        for(const n of planDoc.needs)h.log('  NEED '+n.capability+(n.provider?' -> '+n.provider:'')+' — '+n.reason);
+        for(const g of planDoc.gaps)h.log('  GAP '+g.capability+' — '+g.gap);
+      }
+      return planDoc.gaps.length?3:0;
+    }
+    if(o.cmd==='analyze'){
+      const rr=checkedRoot(h,root,false);verifyRuntimeLock(h,rr,true);
+      invariant(o.pos[0]==='run'||o.pos[0]==='import','Usage: dairn analyze run <analyzer-id> | --suite <suite-id> [--base <ref>] | analyze import <analyzer-id> [--artifact PATH] [--json] [--out PATH]');
+      if(o.pos[0]==='import'){
+        const id=o.pos[1];
+        invariant(id&&/^[a-z][a-z0-9-]{1,48}$/.test(id),'analyze import requires an analyzer id');
+        const run=importAnalysisReport(h,rr,id,{artifact:o.artifact||null});
+        if(o.json||o.out)h.log(fmt(run));
+        else h.log('analyze import '+id+': '+run.status+' ('+(run.observation?.findings?.length||0)+' findings) — '+run.imported_artifact.path+' — run '+run.run_id);
+        if(o.out){
+          const rel=String(o.out);const outPath=safeRelInside(h,rr,rel);
+          invariant(!file(h,outPath),'refuse to overwrite existing file: '+rel);
+          h.mkdirs(outPath.slice(0,outPath.lastIndexOf('/')));
+          h.writeExclusive(outPath,fmt(run)+'\n');
+          h.log('analysis import written: '+rel+' (unverified observation, not evidence)');
+        }
+        return 0;
+      }
+      const registry=configuredAnalyzers(h,rr);
+      let targets;
+      if(o.suite!==undefined&&o.suite!==null){targets=resolveAnalysisSuite(registry,{suite:o.suite});}
+      else{
+        const id=o.pos[1];
+        invariant(id&&/^[a-z][a-z0-9-]{1,48}$/.test(id),'Usage: dairn analyze run <analyzer-id> | --suite <suite-id>');
+        const def=registry.analyzers.find(x=>x.id===id);
+        invariant(def,'unconfigured analyzer '+id);
+        targets=[def];
+      }
+      // 串行执行（默认只读，避免未声明写入冲突）；失败记录为对应 status，不中断其他 analyzer。
+      const runs=targets.map(def=>executeAnalyzer(h,rr,def.id,{base:o.base||null}));
+      const summary={schema:1,command:'analyze run',analyzer_count:runs.length,
+        completed:runs.filter(x=>x.status==='completed').length,
+        statuses:runs.map(x=>({analyzer_id:x.analyzer_id,status:x.status}))};
+      if(o.json||o.out){h.log(fmt({summary,runs}));}
+      else{
+        for(const x of runs)h.log('analyze '+x.analyzer_id+': '+x.status+(x.from_cache?' (cache)':'')+' — run '+x.run_id+(x.error?' — '+x.error:''));
+        h.log(fmt(summary));
+      }
+      if(o.out){
+        const rel=String(o.out);const outPath=safeRelInside(h,rr,rel);
+        invariant(!file(h,outPath),'refuse to overwrite existing file: '+rel);
+        invariant(!rel.startsWith('.dairn/governance/'),'refuse to write analysis runs into the governance evidence tree: '+rel);
+        h.mkdirs(outPath.slice(0,outPath.lastIndexOf('/')));
+        h.writeExclusive(outPath,fmt({summary,runs})+'\n');
+        h.log('analysis runs written: '+rel+' (advisory observation, not evidence)');
+      }
+      const failed=runs.filter(x=>x.status!=='completed');
+      return failed.length?2:0;
+    }
+    if(o.cmd==='guide')return guidance(h,checkedRoot(h,root,false),o.pos[0]||'plan',{strict:!!o.strict,apply:!!o.apply,base:o.base||null,analyzer:o.analyzer||null,templates:{readme:projectReadme,guide:projectGuide},verify:()=>verifyRuntimeLock(h,checkedRoot(h,root,false),true)});
     if(o.cmd==='skills'){
       if(o.pos[0]==='catalog'){
         const m=assetIndex(h);for(const s of m.assets.filter(x=>x.type==='skills'&&x.path.endsWith('/SKILL.md')))h.log(s.path.split('/')[0]);return 0;

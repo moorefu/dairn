@@ -153,6 +153,26 @@ function referencesView(h, root, taskId, limitations) {
   }
   else if (taskId) limitations.push('no work ledger directory; --task ' + taskId + ' cannot be resolved');
   if (taskId && !refs.tasks.some(x => x.id === taskId)) limitations.push('task not found: ' + taskId);
+  /* I-02: 质量概况（只读摘要）。分析器注册表与质量目标只描述配置状态，
+   * 不代表任何检查已通过；无 .dairn 时整段省略。 */
+  const analyzersFile = join(root, '.dairn/analyzers.json');
+  if (h.exists(analyzersFile) && !h.isDirectory(analyzersFile) && !h.isSymlink(analyzersFile)) {
+    try {
+      const doc = JSON.parse(h.read(analyzersFile));
+      const list = Array.isArray(doc.analyzers) ? doc.analyzers : [];
+      refs.analyzers = {
+        configured: list.length,
+        execute: list.filter(x => (x.mode || 'execute') === 'execute').map(x => x.id),
+        import: list.filter(x => x.mode === 'import').map(x => x.id),
+        suites: Array.isArray(doc.suites) ? doc.suites.map(x => x.id) : [],
+        note: 'registry facts only; registration never means a check passed'};
+    } catch (e) { refs.analyzers = {parse_error: String(e && e.message || e).slice(0, 160)}; }
+  }
+  const goalsFile = join(root, '.dairn/governance/quality-goals.json');
+  if (h.exists(goalsFile) && !h.isDirectory(goalsFile)) {
+    refs.quality_goals = {configured: true,
+      note: 'goals configured; run dairn quality fitness for an advisory verdict — never a gate result'};
+  }
   const refactors = join(root, '.dairn/governance/refactors');
   if (h.exists(refactors)) for (const name of h.list(refactors) || [])
     if (name.endsWith('.json')) refs.refactors.push('.dairn/governance/refactors/' + name);

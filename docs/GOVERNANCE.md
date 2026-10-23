@@ -38,17 +38,17 @@ Agent 与 CI 约定：
 
 `dairn docs check` 校验发行版内嵌的 `specs/` 与 `skills/` 资产：frontmatter 必填字段、稳定 ID 唯一性、`related` 与相对链接、Skill 与 `agents/openai.yaml` 的权限声明一致性，以及正文引用的 CLI 命令是否真实存在；任何 `make`/`scripts/*.py` 旧命令引用都会失败。发布构建依次执行 `python tools/build.py`、`npm run build`、`sh ./dairn.sh docs check` 与 `python -m unittest quickjs.tests.test_assets_lint`，制品矩阵的各类安装包也会执行 `docs check`，失败即阻断发布。`dairn docs find/show/context` 从 spec frontmatter 读取稳定 ID，不依赖手工清单。
 
-## 项目自有分析模板
+## 项目自有分析模板（Dairn Analyzers）
 
 ```sh
-dairn stubs templates --root ./service
-dairn stubs init --root ./service --template go --id surface
-dairn stubs init --root ./service --template go --id surface --apply
-dairn stubs doctor --root ./service
-dairn guide impact --root ./service --base origin/main --precision surface
+dairn analyzers templates --root ./service
+dairn analyzers init --root ./service --template go --id surface
+dairn analyzers init --root ./service --template go --id surface --apply
+dairn analyzers doctor --root ./service
+dairn guide impact --root ./service --base origin/main --analyzer surface
 ```
 
-默认只规划，`--apply` 才复制到 `tools/dairn/stubs/` 并更新项目自有的 `.dairn/stubs.json`。Dairn 不下载分析器工具链；项目可以审查、修改或替换模板。
+默认只规划，`--apply` 才复制到 `tools/dairn/analyzers/` 并更新项目自有的 `.dairn/analyzers.json`（`dairn.analyzers.v1`）。Dairn 不下载分析器工具链；项目可以审查、修改或替换模板。旧 `dairn stubs` 命令与 `.dairn/stubs.json` 协议已按破坏性更名移除：旧命令直接报错，旧配置出现即拒绝（`UNSUPPORTED_LEGACY_ANALYZER_CONFIG`），无兼容别名、无自动迁移。
 
 | 模板 | 依赖与分析方式 |
 | --- | --- |
@@ -65,7 +65,13 @@ dairn guide impact --root ./service --base origin/main --precision surface
 
 这些模板输出分析线索，不构成语义兼容证明或签名信任依据。`doctor` 只探测本地依赖；缺少显式请求的分析器、超时或无效响应会失败。
 
-分析协议为 `dairn-stub-v1`。内核直接执行配置的 argv，追加绝对路径的请求和响应 JSON，不拼接 shell 命令。请求包含 `schema`、`kind`、`stub_id`、`root`、`base_commit`、`head_commit`、`protocol`；响应回传身份并提供 `changes`。内核验证结构、路径、大小与超时。脏工作区不复用分析缓存，缓存不作为签名门禁证据。Windows 的 `.cmd/.bat` 分析器需显式经过 `cmd.exe`。
+分析协议为 `dairn.analyzer-request.v1` / `dairn.surface-result.v1`。内核直接执行配置的 argv，追加绝对路径的请求和响应 JSON，不拼接 shell 命令。请求包含 `schema`、`analyzer_id`、`domain`（当前仅 `surface`）、`subject{source_commit,base_commit}`、`root`、`scope`、`limits`；响应回传身份并提供 `changes`。内核验证结构、路径、大小与超时。受信 CI 环境要求外部固定的 `DAIRN_EXPECTED_ANALYZERS_SHA256`。脏工作区不复用分析缓存（`.dairn/cache/analyzers/`），缓存不作为签名门禁证据。Windows 的 `.cmd/.bat` 分析器需显式经过 `cmd.exe`。
+
+## 分析执行与质量判定（advisory 层）
+
+`dairn analyze run <id> | --suite <id> [--base <ref>]` 受控执行分析器并生成 `dairn.analysis-run.v1` 记录（completed/tool-error/timeout/report-error/invalidated/not-run）；`dairn analyze import <id> [--artifact PATH]` 只读导入 SARIF 2.1.0 / JUnit XML / Dairn JSON 报告，来源恒为 `unverified-import`。Analysis Run 与 Quality Observation 都是机器观察，不是 Check Run，更不是 Gate 结论。
+
+`dairn quality fitness [--json]` 读取可选的 `.dairn/governance/quality-goals.json`（`dairn.quality-goals.v1`），对每个目标的 producer 现场执行或导入并输出 PASS/FAIL/UNKNOWN/ADVISORY；缺数据输出 UNKNOWN 而非猜 PASS。`dairn capability plan [--base <ref>]` 输出 advisory 的 `dairn.participation-plan.v1`（needs/gaps），必需能力缺失时退出码 3；计划不含 gate_override/approved 之类可提升信任的字段，也不启动任何模型。
 
 ## 受保护 CI
 
@@ -86,7 +92,7 @@ dairn guide impact --root ./service --base origin/main --precision surface
 - `DAIRN_EXPECTED_APE_SHA256`：APE 文件摘要。
 - `DAIRN_EXPECTED_RUNTIME_SHA256`：经审查初始化得到的嵌入式 manifest 指纹。
 - `DAIRN_EXPECTED_POLICY_SHA256`：获准的 `.dairn/governance/project.json` 摘要。
-- `DAIRN_EXPECTED_STUBS_SHA256`：需要执行获准项目分析器时的 manifest 摘要。
+- `DAIRN_EXPECTED_ANALYZERS_SHA256`：需要执行获准项目分析器时的 `.dairn/analyzers.json` 摘要（旧 `DAIRN_EXPECTED_STUBS_SHA256` 已随破坏性更名移除）。
 - `DAIRN_TASK_ID`、`DAIRN_TRUSTED_BASE_REF`：任务与可信差异基线。
 
 生成的 CI 模板以 `DAIRN_BIN_VALUE="${DAIRN_CI_BIN:-./.dairn/bin/dairn}"` 为入口并调用 `sh "$DAIRN_BIN_VALUE" …`。受保护构建/签名任务应由管理员提供外部 `DAIRN_CI_BIN`，并用外部 `DAIRN_EXPECTED_APE_SHA256` / `DAIRN_EXPECTED_RUNTIME_SHA256` pin 覆盖项目内 vendored 运行时；PR 中提交或替换的 `.dairn/runtime/` 二进制不可信，不能作为受保护任务的执行来源。

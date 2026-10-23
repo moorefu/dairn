@@ -38,12 +38,12 @@ function audit(h,root,config){
   }
   return {missing,warnings,errors};
 }
-export function guidance(h,root,mode,{strict=false,verify,apply=false,base=null,precision=null,templates}={}){
+export function guidance(h,root,mode,{strict=false,verify,apply=false,base=null,analyzer=null,templates}={}){
   if(!['plan','audit','scaffold','facts','drift','impact'].includes(mode))throw Error('Usage: dairn guide plan | audit [--strict] | scaffold [--apply] | facts [--apply] | drift [--strict]');
   verify?.();
   const config=JSON.parse(h.read(join(root,'.dairn/lock.json'))).config;
   if(mode==='impact'){
-    const report=impactReport(h,root,config,{base,precision});
+    const report=impactReport(h,root,config,{base,analyzer});
     h.log(JSON.stringify({mode,project:config.name,...report},null,2));
     return strict&&['unbaselined','review-required','contract-impact'].includes(report.status)?2:0;
   }

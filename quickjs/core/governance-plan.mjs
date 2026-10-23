@@ -164,11 +164,31 @@ export function planForChange(h, root, {base, head = 'HEAD', timeout = 30, polic
   const contracts = readRefactorContracts(h, root);
   const subject = {schema: 'dairn.subject.v1', repository: change_repository(h, root, timeout), kind: 'git-commit',
     source_commit: scope.head, tree_sha: scope.tree, base_commit: scope.base, comparison: 'base-to-source'};
-  return planGovernance({trustedPolicy: policyJsonValue, projectContext: context,
+  const result = planGovernance({trustedPolicy: policyJsonValue, projectContext: context,
     change: {paths: scope.paths, modules: scope.modules, risk: scope.risk, risk_floor: scope.risk,
       governance_mode: scope.governance_mode, triggers: scope.triggers, subject,
       policy_sha256: sha256(raw), authority_source: 'project-config'},
     refactorContracts: contracts});
+  /* I-01: 附加质量目标概览（advisory 摘要，不进 requirements 矩阵，
+   * 也不参与 plan_sha256——计划层永不获得放行语义）。 */
+  result.plan.quality_goals = qualityGoalsSummary(h, root);
+  return result;
+}
+
+/* I-01: 治理计划展示质量目标概览。仅 advisory 摘要，不进入 requirements
+ * 矩阵，也不参与 plan_sha256——Analyzer/Quality 永不在计划层获得放行语义。 */
+function qualityGoalsSummary(h, root) {
+  const file = join(root, '.dairn/governance/quality-goals.json');
+  if (!h.exists(file) || h.isDirectory(file)) return {configured: false};
+  try {
+    const doc = JSON.parse(h.read(file));
+    const objectives = Array.isArray(doc.objectives) ? doc.objectives : [];
+    return {configured: true, objectives: objectives.length,
+      required: objectives.filter(o => o && o.enforcement === 'required').map(o => o.id),
+      note: 'advisory summary only; enforcement still requires trusted Check/Evidence chains (dairn quality fitness)'};
+  } catch (e) {
+    return {configured: true, parse_error: String(e && e.message || e).slice(0, 160)};
+  }
 }
 
 function change_repository(h, root, timeout) {

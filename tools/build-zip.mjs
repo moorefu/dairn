@@ -42,8 +42,8 @@ try {
   for(const p of release.source_paths){if(p.includes('..')||p.startsWith('/'))throw Error('非法构建路径');walk(p);}
   const manifest=JSON.parse(host.read(root+'/quickjs/assets/manifest.json'));
   manifest.version=release.version;
-  // 资产清单从源码树自动发现：新增 Skill/Spec/Stub 模板无需再手工维护 manifest.assets。
-  const assetTypes=['skills','specs','stub-templates'];
+  // 资产清单从源码树自动发现：新增 Skill/Spec/Analyzer 模板无需再手工维护 manifest.assets。
+  const assetTypes=['skills','specs','analyzer-templates'];
   function specId(path){ // Spec 稳定 ID 来自 frontmatter，供 `dairn docs find/show` 检索。
     const lines=host.read(root+'/'+path).split(/\r?\n/);
     if(!lines.length||lines[0].trim()!=='---')return null;

@@ -15,7 +15,7 @@ symbols: ["dairn attest prepare", "dairn attest verify", "dairn evidence verify"
 PR/MR 使用不带秘密的质量门禁；仅受保护主分支 Push 才能进入下面的后合并签名链路：
 
 1. **Keyless Build**：受保护构建 Runner 以哈希固定的 Dairn APE、受信策略、固定基线运行真实质量门禁，写入 `machine-evidence`、任务状态及包含源提交、仓库/分支、流水线/Job 的 build-origin 元数据。
-2. **Separated Signer**：通过 CI 平台从同一流水线取得证据，独立校验来源、HEAD、策略、运行时和成功检查，不执行任何项目编译、测试或 Stub。私钥仅可在这个隔离的 Runner/密钥服务中访问。签署并附加与证据哈希绑定的 Ed25519 声明。
+2. **Separated Signer**：通过 CI 平台从同一流水线取得证据，独立校验来源、HEAD、策略、运行时和成功检查，不执行任何项目编译、测试或 Analyzer。私钥仅可在这个隔离的 Runner/密钥服务中访问。签署并附加与证据哈希绑定的 Ed25519 声明。
 3. **Verify/Gate**：`dairn attest verify` 使用外部受信公钥（必须在项目检出之外）验签 statement 原始字节并绑定受信 CI 上下文；`dairn evidence verify` 独立复核 bundle 成员摘要；`dairn gate evaluate` 组合 Check/Approval/Attestation 输出 PASS/FAIL/INDETERMINATE。任务账本只通过 `dairn work link-check --run <run-id>` 引用已有 Run，不产生可信声明；人工审批和合并策略仍独立生效。
 4. **Keyless Publisher**：专用发布身份仅可写同仓库受保护 `refs/heads/dairn-evidence`。发布前必须依次完成：bundle 成员摘要复核、bundle 内 Run Subject 与当前检出 commit 的绑定、CI origin 属性校验（passed 且 source_commit 一致），以及用 CI 受信公钥对 statement 的**真实 Ed25519 验签**并与记录的 CI origin 上下文交叉比对——bundle 摘要正确但签名未验不得发布。发布以 fast-forward CAS 重试并发冲突，成功后从远端 evidence ref 读回签名字节比对，读回不一致不得宣布归档完成；遍历 bundle 成员不得使用 shell 单词拆分，成员路径仅限纯相对 POSIX 白名单。
 

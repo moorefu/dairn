@@ -38,7 +38,7 @@ dairn:protected-build:
       - .dairn/governance/evidence/
 
 # Separate protected signing runner; key mounted ONLY here, not as a protected
-# pipeline-wide variable. Never execute project tests or project Stubs here.
+# pipeline-wide variable. Never execute project tests or project Analyzers here.
 dairn:sign:
   stage: attestation
   tags: [dairn-protected-sign]
