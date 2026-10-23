@@ -1,5 +1,5 @@
 """Official Cosmo QuickJS integration: project stubs and external Ed25519 CI evidence."""
-import json,os,subprocess,tempfile,unittest
+import json,os,subprocess,tempfile,time,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 CLI=ROOT/'dairn.sh'
@@ -16,6 +16,24 @@ class StubCIReview(unittest.TestCase):
  def obj(self,*args,env=None):return json.loads(self.call(*args,'--root',self.project,env=env,ok=True).stdout)
  def git(self,*args):return subprocess.run(['git',*args],cwd=self.project,capture_output=True,text=True,check=True).stdout.strip()
  def base(self):self.git('add','.');self.git('commit','-qm','baseline');return self.git('rev-parse','HEAD')
+ def runtime_sha(self):
+  import hashlib
+  return hashlib.sha256((ROOT/'runtime/dairn-embedded.com').read_bytes()).hexdigest()
+ def fast_env(self,cache,extra=None):
+  # 快速缓存用例显式清空受保护 CI 标记；负例再单独设置。
+  return {'GITHUB_ACTIONS':'','GITLAB_CI':'','DAIRN_PROTECTED_CI':'',
+          'DAIRN_FAST_RUNTIME':'1','DAIRN_CACHE_HOME':str(cache),**(extra or {})}
+ def fast_store(self,cache):return cache/('native-'+self.runtime_sha())
+ def assert_fast_cache_valid(self,cache):
+  import hashlib
+  store=self.fast_store(cache);native=store/'dairn-native';meta=store/'dairn-native.sha256'
+  self.assertTrue(native.is_file());self.assertTrue(meta.is_file())
+  self.assertFalse(native.is_symlink());self.assertFalse(meta.is_symlink())
+  self.assertEqual(sorted(p.name for p in store.iterdir()),['dairn-native','dairn-native.sha256'])
+  self.assertEqual(hashlib.sha256(native.read_bytes()).hexdigest(),meta.read_text(encoding='utf-8').strip())
+  self.assertFalse((store/'.dairn-native.lock').exists())
+  self.assertFalse(list(store.glob('*.tmp')))
+  return native,meta
  def task(self):
   self.obj('work','start','Implement authentication feature','--id','auth')
   (self.project/'grill.json').write_text(json.dumps({'schema':1,'task_id':'auth','questions':[
@@ -96,14 +114,53 @@ class StubCIReview(unittest.TestCase):
   res=self.obj('guide','impact','--base',base,'--precision','surface',env=env)
   self.assertTrue(res['stub_analysis']['changes'])
  def test_ape_fast_cache_does_not_mutate_source(self):
-  import hashlib
-  original=hashlib.sha256((ROOT/'runtime/dairn-embedded.com').read_bytes()).hexdigest()
-  env={'DAIRN_FAST_RUNTIME':'1','DAIRN_CACHE_HOME':str(self.dir/'runtime-cache')}
-  p=self.call('version',env=env,ok=True)
+  original=self.runtime_sha();cache=self.dir/'runtime-cache'
+  p=self.call('version',env=self.fast_env(cache),ok=True)
   version=json.loads((ROOT/'package.json').read_text(encoding='utf-8'))['version']
   self.assertIn('Dairn '+version+' —',p.stdout)
-  self.assertEqual(hashlib.sha256((ROOT/'runtime/dairn-embedded.com').read_bytes()).hexdigest(),original)
-  self.assertTrue(list((self.dir/'runtime-cache').rglob('dairn-native')))
+  self.assert_fast_cache_valid(cache)
+  self.assertEqual(self.runtime_sha(),original)
+ def test_plain_ci_true_still_uses_fast_cache(self):
+  cache=self.dir/'plain-ci-cache';env=self.fast_env(cache,{'CI':'true'})
+  self.call('version',env=env,ok=True)
+  native,_=self.assert_fast_cache_valid(cache)
+  before=(native.read_bytes(),native.stat().st_mtime_ns)
+  self.call('version',env=env,ok=True)
+  self.assertEqual((native.read_bytes(),native.stat().st_mtime_ns),before,'仅 CI=true 时快速缓存仍应命中复用')
+ def test_fast_cache_disabled_on_protected_ci(self):
+  original=self.runtime_sha()
+  version=json.loads((ROOT/'package.json').read_text(encoding='utf-8'))['version']
+  cases=[('GITHUB_ACTIONS','true'),('GITHUB_ACTIONS','1'),('GITLAB_CI','true'),('DAIRN_PROTECTED_CI','1')]
+  for index,(name,value) in enumerate(cases):
+   with self.subTest(name+'='+value):
+    cache=self.dir/('protected-cache-'+str(index))
+    p=self.call('version',env=self.fast_env(cache,{name:value}),ok=True)
+    self.assertIn('Dairn '+version+' —',p.stdout)
+    self.assertFalse(cache.exists(),name+'='+value+' 下不得创建快速缓存')
+  self.assertEqual(self.runtime_sha(),original)
+ def test_fast_cache_self_heals_tampered_artifact(self):
+  original=self.runtime_sha();cache=self.dir/'heal-cache';env=self.fast_env(cache)
+  self.call('version',env=env,ok=True);native,_=self.assert_fast_cache_valid(cache)
+  marker=self.dir/'tampered-cache-was-executed'
+  native.write_text('#!/bin/sh\ntouch "'+str(marker)+'"\nexit 42\n',encoding='utf-8');native.chmod(0o700)
+  self.call('version',env=env,ok=True)
+  self.assertFalse(marker.exists(),'不得执行摘要校验失败的缓存文件')
+  self.assert_fast_cache_valid(cache)
+  self.assertEqual(self.runtime_sha(),original)
+ def test_fast_cache_recovers_from_stale_lock(self):
+  cache_home=self.dir/'stale-lock-cache';env=self.fast_env(cache_home)
+  store=self.fast_store(cache_home);store.mkdir(parents=True)
+  lock=store/'.dairn-native.lock';lock.mkdir();old=time.time()-15*60;os.utime(lock,(old,old))
+  self.call('version',env=env,ok=True)
+  self.assert_fast_cache_valid(cache_home)
+  self.assertFalse(lock.exists(),'陈旧锁必须被清理')
+ def test_fast_cache_concurrent_launches(self):
+  cache_home=self.dir/'concurrent-cache';env={**os.environ,**self.fast_env(cache_home)}
+  procs=[subprocess.Popen([str(CLI),'version'],cwd=self.dir,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True) for _ in range(2)]
+  outputs=[proc.communicate(timeout=150) for proc in procs]
+  for proc,(out,err) in zip(procs,outputs):self.assertEqual(proc.returncode,0,out+'\n'+err)
+  self.assertEqual(outputs[0][0],outputs[1][0])
+  self.assert_fast_cache_valid(cache_home)
  def test_adopt_existing_claude_instructions_preserved(self):
   other=self.dir/'existing';other.mkdir();(other/'CLAUDE.md').write_text('Custom team Claude instructions.\n')
   (other/'go.mod').write_text('module example.com/test\n\ngo 1.20\n')

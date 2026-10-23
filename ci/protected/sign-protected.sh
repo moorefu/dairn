@@ -23,6 +23,12 @@ ACTUAL_APE_SHA256=$(sha256sum "$DAIRN_CI_APE_PATH" | cut -d ' ' -f1)
 [ "$ACTUAL_APE_SHA256" = "$DAIRN_EXPECTED_APE_SHA256" ] || { echo 'APE binary pin mismatch' >&2;exit 2; }
 HEAD=$(git rev-parse --verify 'HEAD^{commit}')
 [ -n "$HEAD" ] || exit 2
+# 洁净检查：签名 job 会先把同流水线构建证据 artifact 恢复到 .dairn/，这些文件
+# 由后续 work verify/attest 的 SHA256 与任务账本绑定，因此不参与“无关变更”判断；
+# 其余未提交改动或未追踪文件仍拒绝签名。
+CLEAN=$(git status --porcelain=v1 --untracked-files=all -- . \
+  ':(exclude,literal).dairn/governance/evidence' ':(exclude,literal).dairn/work') || exit 2
+[ -z "$CLEAN" ] || { echo 'Protected signer requires a clean source checkout; refusing unrelated worktree changes' >&2; exit 2; }
 if [ "${GITLAB_CI:-}" = true ]; then
   [ "${CI_PIPELINE_SOURCE:-}" = push ] && [ "${CI_COMMIT_REF_PROTECTED:-}" = true ] && [ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH:-not-default}" ] || { echo 'GitLab: protected default-branch push required' >&2; exit 2; }
   [ "$HEAD" = "${CI_COMMIT_SHA:-}" ] || { echo 'GitLab: checkout mismatch' >&2; exit 2; }

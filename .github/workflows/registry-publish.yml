@@ -15,17 +15,209 @@ on:
 permissions:
   contents: read
 
+# 同一版本标签的注册表发布串行执行，避免两个手动运行同时上传同一版本。
+concurrency:
+  group: dairn-registry-publish-${{ inputs.tag }}
+  cancel-in-progress: false
+
 jobs:
+  # 发布前身份校验：只接受指向受保护 main 历史、已公开且制品摘要一致的版本标签。
+  # workflow_dispatch 输入只经 env 传入脚本，禁止把 inputs 插值进 shell 源码。
+  validate:
+    name: 校验 Release 与版本标签身份
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      commit: ${{ steps.identity.outputs.commit }}
+    steps:
+      - name: 校验标签输入格式
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
+            echo "::error::tag 输入必须是版本标签（如 v0.1.0-rc.4），不能使用 latest 等别名"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 校验 Release、标签对象与受保护 main 身份
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+
+          # 1. Release 必须存在、tagName 与输入一致且已公开（非草稿），记录资产清单。
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+               --json tagName,isDraft,targetCommitish,assets > "$work/release.json"; then
+            echo "::error::GitHub Release $RELEASE_TAG 不存在或无法读取"
+            exit 1
+          fi
+          python3 - "$work/release.json" "$RELEASE_TAG" "$work/identity.json" <<'PY'
+          import json
+          import sys
+
+          release = json.load(open(sys.argv[1], encoding="utf-8"))
+          tag = sys.argv[2]
+          problems = []
+          if release.get("tagName") != tag:
+              problems.append("Release.tagName=" + repr(release.get("tagName")) + " 与输入标签 " + repr(tag) + " 不一致")
+          if release.get("isDraft") is not False:
+              problems.append("目标 Release 仍是草稿；草稿制品未经发布审批，拒绝推送注册表")
+          assets = release.get("assets") or []
+          names = [asset.get("name") for asset in assets]
+          if len(names) != len(set(names)):
+              problems.append("Release 资产名称重复：" + repr(names))
+          print("Release 资产：" + (", ".join(sorted(names)) if names else "（空）"))
+          if problems:
+              for problem in problems:
+                  print("::error::" + problem)
+              sys.exit(1)
+          identity = {"tag": release["tagName"], "target_commitish": release["targetCommitish"],
+                      "assets": {asset["name"]: asset for asset in assets}}
+          with open(sys.argv[3], "w", encoding="utf-8") as handle:
+              json.dump(identity, handle, ensure_ascii=False)
+          PY
+
+          # 2. 解析标签 ref；annotated tag 需要逐层 peel 到 commit。
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" > "$work/ref.json"; then
+            echo "::error::标签 $RELEASE_TAG 不存在或无法读取"
+            exit 1
+          fi
+          object_type=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["object"]["type"])' "$work/ref.json")
+          tag_commit=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["object"]["sha"])' "$work/ref.json")
+          while [ "$object_type" = tag ]; do
+            gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_commit" > "$work/object.json"
+            object_type=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["object"]["type"])' "$work/object.json")
+            tag_commit=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["object"]["sha"])' "$work/object.json")
+          done
+          if [ "$object_type" != commit ]; then
+            echo "::error::标签 $RELEASE_TAG 指向 $object_type 对象而不是提交"
+            exit 1
+          fi
+
+          # 3. 标签提交必须等于 Release 的 targetCommitish 所指提交（分支名或 SHA 均可解析）。
+          release_target=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_commitish"])' "$work/identity.json")
+          target_commit=$(git rev-parse --verify --quiet "${release_target}^{commit}" \
+            || git rev-parse --verify --quiet "refs/remotes/origin/${release_target}^{commit}" \
+            || true)
+          if [ -z "$target_commit" ]; then
+            echo "::error::无法解析 Release targetCommitish=$release_target 对应的提交"
+            exit 1
+          fi
+          if [ "$tag_commit" != "$target_commit" ]; then
+            echo "::error::标签 $RELEASE_TAG 指向提交 $tag_commit，与 Release targetCommitish=$release_target（$target_commit）不一致"
+            exit 1
+          fi
+
+          # 4. 标签提交必须已在受保护 main 的历史内，防止发布未合入的旁支提交。
+          git rev-parse --verify --quiet origin/main >/dev/null \
+            || git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "::error::标签提交 $tag_commit 不在 origin/main 历史内，拒绝发布"
+            exit 1
+          fi
+          echo "身份校验通过：标签 $RELEASE_TAG 指向提交 $tag_commit，该提交位于 origin/main 历史内。"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "commit=$tag_commit" >> "$GITHUB_OUTPUT"
+      - name: 校验 Release 制品清单与 checksums.json 摘要
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.identity.outputs.tag }}
+        run: |
+          set -eu
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          mkdir -p "$work/release"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets > "$work/assets.json"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$work/release"
+          python3 - "$work/release" "$work/assets.json" <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import re
+          import sys
+
+          sha256 = re.compile(r"[0-9a-f]{64}")
+          directory = pathlib.Path(sys.argv[1])
+          assets = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")).get("assets") or []
+          problems = []
+          checksums_path = directory / "checksums.json"
+          if not checksums_path.is_file():
+              print("::error::Release 未提供 checksums.json，无法复核制品摘要")
+              sys.exit(1)
+          record = json.loads(checksums_path.read_text(encoding="utf-8"))
+          artifacts = record.get("artifacts")
+          if not isinstance(artifacts, dict) or not artifacts:
+              print("::error::checksums.json 缺少 artifacts 映射")
+              sys.exit(1)
+          for name, digest in artifacts.items():
+              if not isinstance(digest, str) or not sha256.fullmatch(digest):
+                  problems.append("checksums.json 中 " + repr(name) + " 的 sha256 格式无效")
+          digest_ape = record.get("ape_sha256")
+          if digest_ape is not None and (not isinstance(digest_ape, str) or not sha256.fullmatch(digest_ape)):
+              problems.append("checksums.json 中 ape_sha256 格式无效")
+
+          asset_names = [asset.get("name") for asset in assets]
+          asset_index = {asset.get("name"): asset for asset in assets}
+          expected_names = set(artifacts) | {"checksums.json"}
+          if len(asset_names) != len(set(asset_names)):
+              problems.append("Release 资产名称重复：" + repr(asset_names))
+          if set(asset_names) != expected_names:
+              problems.append("Release 资产 " + repr(sorted(set(asset_names))) + " 与 checksums.json 期望的 " + repr(sorted(expected_names)) + " 不一致")
+          downloaded = {entry.name for entry in directory.iterdir() if entry.is_file()}
+          if downloaded != expected_names:
+              problems.append("实际下载文件 " + repr(sorted(downloaded)) + " 与期望的 " + repr(sorted(expected_names)) + " 不一致")
+          if len(expected_names) != 4:
+              problems.append("期望资产数应为 4（三类制品 + checksums.json），实际为 " + str(len(expected_names)))
+
+          for name in sorted(set(artifacts) & downloaded):
+              path = directory / name
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              if actual != artifacts[name]:
+                  problems.append("制品 " + name + " 的实际 SHA256 " + actual + " 与 checksums.json 的 " + artifacts[name] + " 不一致")
+              asset = asset_index.get(name) or {}
+              digest = asset.get("digest")
+              if digest:
+                  if digest != "sha256:" + artifacts[name]:
+                      problems.append("制品 " + name + " 的 Release 资产摘要 " + digest + " 与 checksums.json 不一致")
+              else:
+                  print("::warning::Release 资产 " + name + " 未返回 digest 字段，已用实际下载字节与 checksums.json 复核")
+              size = asset.get("size")
+              if isinstance(size, int) and path.stat().st_size != size:
+                  problems.append("制品 " + name + " 下载后大小 " + str(path.stat().st_size) + " 与 Release 资产大小 " + str(size) + " 不一致")
+
+          if problems:
+              for problem in problems:
+                  print("::error::" + problem)
+              sys.exit(1)
+          for name in sorted(expected_names):
+              print("checksums.json OK  " + name)
+          print("Release 制品清单与摘要校验通过。")
+          PY
+
   npm:
     name: 发布 ${{ inputs.tag }} 到 npm
+    needs: [validate]
     if: inputs.target != 'pypi'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: npm
     steps:
       - name: 校验标签输入
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         run: |
-          if ! printf '%s' "${{ inputs.tag }}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
+          if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
             echo "::error::tag 输入必须是版本标签（如 v0.1.0-rc.4），不能使用 latest 等别名"
             exit 1
           fi
@@ -33,12 +225,33 @@ jobs:
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-      - name: 下载 GitHub Release 中已验证的 npm tarball
+      - name: 下载并复核 GitHub Release 中已验证的 npm tarball
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         run: |
-          mkdir -p incoming
-          gh release download "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --pattern '*.tgz' --dir incoming
+          set -eu
+          mkdir -p incoming release-checksums
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'checksums.json' --dir release-checksums
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.tgz' --dir incoming
+          tgz=$(ls "$PWD"/incoming/*.tgz)
+          python3 - "$tgz" release-checksums/checksums.json > incoming/SHA256SUMS <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import sys
+
+          tarball = pathlib.Path(sys.argv[1])
+          record = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+          expected = record.get("artifacts", {}).get(tarball.name)
+          if not expected:
+              sys.exit("checksums.json 缺少 " + tarball.name)
+          actual = hashlib.sha256(tarball.read_bytes()).hexdigest()
+          if actual != expected:
+              sys.exit("npm tarball SHA256 与 Release checksums.json 不一致：" + tarball.name)
+          print(expected + "  " + str(tarball))
+          PY
+          sha256sum -c incoming/SHA256SUMS
       - name: 发布 tarball（预发布用 next，正式版用 latest）
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -89,26 +302,50 @@ jobs:
 
   pypi:
     name: 发布 ${{ inputs.tag }} 到 PyPI
+    needs: [validate]
     if: inputs.target != 'npm'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: pypi
     steps:
       - name: 校验标签输入
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         run: |
-          if ! printf '%s' "${{ inputs.tag }}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
+          if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
             echo "::error::tag 输入必须是版本标签（如 v0.1.0-rc.4），不能使用 latest 等别名"
             exit 1
           fi
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: 下载 GitHub Release 中已验证的 Wheel
+      - name: 下载并复核 GitHub Release 中已验证的 Wheel
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         run: |
-          mkdir -p dist
-          gh release download "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --pattern '*.whl' --dir dist
+          set -eu
+          mkdir -p dist release-checksums
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'checksums.json' --dir release-checksums
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.whl' --dir dist
+          wheel=$(ls "$PWD"/dist/*.whl)
+          python3 - "$wheel" release-checksums/checksums.json > dist/SHA256SUMS <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import sys
+
+          wheel = pathlib.Path(sys.argv[1])
+          record = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+          expected = record.get("artifacts", {}).get(wheel.name)
+          if not expected:
+              sys.exit("checksums.json 缺少 " + wheel.name)
+          actual = hashlib.sha256(wheel.read_bytes()).hexdigest()
+          if actual != expected:
+              sys.exit("Wheel SHA256 与 Release checksums.json 不一致：" + wheel.name)
+          print(expected + "  " + str(wheel))
+          PY
+          sha256sum -c dist/SHA256SUMS
       - name: 发布 Wheel
         env:
           TWINE_USERNAME: __token__

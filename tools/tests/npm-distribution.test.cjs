@@ -15,6 +15,7 @@ if (fixture) {
   fs.mkdirSync(path.join(fixture,'runtime'));
   fs.cpSync(path.join(repo,'bin'),path.join(fixture,'bin'),{recursive:true});
   fs.copyFileSync(path.join(repo,'package.json'),path.join(fixture,'package.json'));
+  fs.copyFileSync(path.join(repo,'LICENSE'),path.join(fixture,'LICENSE'));
   fs.copyFileSync(path.join(repo,'dairn.sh'),path.join(fixture,'dairn.sh'));
   for (const name of ['dairn-embedded.com','runtime-integrity.json']) fs.copyFileSync(path.join(repo,'runtime',name),path.join(fixture,'runtime',name));
   // 模拟丢失执行位的安装结果，验证启动器会补齐元数据。
@@ -25,6 +26,15 @@ const launcher = path.join(source,'bin','dairn.cjs');
 const ape = path.join(source,'runtime','dairn-embedded.com');
 const version = JSON.parse(fs.readFileSync(path.join(source,'package.json'),'utf8')).version;
 const hash = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+const CACHE_ENTRIES = ['dairn-native','dairn-native.sha256'];
+const PROTECTED_CI_KEYS = ['GITHUB_ACTIONS','GITLAB_CI','DAIRN_PROTECTED_CI'];
+// 快速缓存用例必须显式清除受保护 CI 标记，否则在 GitHub/GitLab CI 上会按
+// 设计禁用缓存而误报失败；受保护语义由下面的负例单独覆盖。
+function fastEnv(extra={}) {
+  const env = {...process.env};
+  for (const key of PROTECTED_CI_KEYS) delete env[key];
+  return {...env, DAIRN_FAST_RUNTIME:'1', ...extra};
+}
 function run(args=[], options={}) {
   return spawnSync(process.execPath,[launcher,...args],{
     encoding:'utf8', timeout:20000, ...options,
@@ -35,6 +45,14 @@ test('运行时 SHA256 与包内 APE 一致', () => {
   const meta = JSON.parse(fs.readFileSync(path.join(source,'runtime','runtime-integrity.json')));
   assert.equal(hash(ape),meta.sha256);
   assert.equal(meta.engine_version,version);
+});
+
+test('npm 包元数据与 MIT 许可证一致', () => {
+  const pkg=JSON.parse(fs.readFileSync(path.join(source,'package.json'),'utf8'));
+  assert.equal(pkg.license,'MIT');
+  const license=fs.readFileSync(path.join(source,'LICENSE'),'utf8');
+  assert.match(license,/^MIT License/);
+  assert.match(license,/Permission is hereby granted/);
 });
 
 test('版本和参数透传不修改源二进制', () => {
@@ -84,20 +102,49 @@ test('POSIX npm 与 shell 共用快速运行时缓存并保留退出码', {skip:
   const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'dairn 共享缓存 '));
   try {
     const before=hash(ape);
-    const env={...process.env,DAIRN_FAST_RUNTIME:'1',DAIRN_CACHE_HOME:tmp};
+    const env=fastEnv({DAIRN_CACHE_HOME:tmp});
     const p=run(['version'],{env,cwd:tmp});
     assert.equal(p.status,0,p.stderr);
     const cache=path.join(tmp,'native-'+before);
     const native=path.join(cache,'dairn-native');
+    const metadata=path.join(cache,'dairn-native.sha256');
     assert.ok(fs.statSync(native).isFile());
+    assert.equal(fs.statSync(native).mode & 0o777,0o700,'缓存可执行文件权限必须是 0700');
+    assert.equal(fs.statSync(metadata).mode & 0o777,0o600,'校验元数据权限必须是 0600');
+    assert.equal(hash(native),fs.readFileSync(metadata,'utf8').trim());
     const cached=hash(native);
+    const mtime=fs.statSync(native).mtimeMs;
     const shell=spawnSync('/bin/sh',[path.join(source,'dairn.sh'),'version'],{env,cwd:tmp,encoding:'utf8',timeout:20000});
     assert.equal(shell.status,0,shell.stderr);
     assert.equal(shell.stdout,p.stdout);
+    assert.equal(hash(native),cached,'缓存命中不得重建');
+    assert.equal(fs.statSync(native).mtimeMs,mtime,'缓存命中不得重建');
     assert.equal(run(['invalid-command-for-test'],{env,cwd:tmp}).status,2);
     assert.equal(hash(native),cached);
-    assert.deepEqual(fs.readdirSync(cache),['dairn-native']);
+    assert.deepEqual(fs.readdirSync(cache).sort(),CACHE_ENTRIES);
+    assert.ok(!fs.existsSync(path.join(cache,'.dairn-native.lock')),'不得残留锁目录');
+    assert.ok(!fs.readdirSync(cache).some(name=>name.endsWith('.tmp')),'不得残留临时文件');
     assert.equal(hash(ape),before);
+  } finally { fs.rmSync(tmp,{recursive:true,force:true}); }
+});
+
+test('受保护 CI（GITHUB_ACTIONS=true）禁用快速缓存并回退源 APE', {skip:process.platform === 'win32'}, t => {
+  if (spawnSync('/bin/sh',['-c','command -v sha256sum'],{stdio:'ignore'}).status !== 0) {
+    t.skip('当前环境使用默认 APE 启动路径');
+    return;
+  }
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'dairn protected ci '));
+  try {
+    const before=hash(ape);
+    const p=spawnSync('/bin/sh',[path.join(source,'dairn.sh'),'version'],{
+      encoding:'utf8',timeout:20000,cwd:tmp,
+      env:{...process.env,DAIRN_FAST_RUNTIME:'1',DAIRN_CACHE_HOME:tmp,
+           GITHUB_ACTIONS:'true',GITLAB_CI:'',DAIRN_PROTECTED_CI:''},
+    });
+    assert.equal(p.status,0,p.stderr);
+    assert.ok(p.stdout.startsWith('Dairn '+version+' —'),p.stdout);
+    assert.equal(hash(ape),before);
+    assert.deepEqual(fs.readdirSync(tmp),[],'受保护 CI 下不得创建快速缓存');
   } finally { fs.rmSync(tmp,{recursive:true,force:true}); }
 });
 

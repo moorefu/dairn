@@ -66,6 +66,8 @@ class AgentProtocol(unittest.TestCase):
         raw=json.loads((self.root/runs[-1]['path']).read_text())
         self.assertEqual(raw['task_id'],'auth');self.assertEqual(raw['head'],self.git('rev-parse','HEAD'))
         self.assertEqual(raw['base_commit'],base);self.assertEqual(raw['trust'],'local-unattested')
+        self.assertEqual(raw['worktree']['status'],'clean')
+        self.assertEqual(len(raw['worktree']['identity_sha256']),64)
         self.assertEqual(len(raw['checks']),4);self.assertTrue(all(c['output_sha256'] for c in raw['checks']))
         self.assertTrue(self.work('verify','auth','--require-machine-gates')['machine_gates_required'])
         self.assertEqual(self.work('advance','auth')['next']['id'],'review')
@@ -84,6 +86,102 @@ class AgentProtocol(unittest.TestCase):
         self.git('add','hello.go');self.git('commit','-qm','new commit')
         self.assertNotEqual(self.cmd('work','verify','auth','--require-machine-gates','--root',self.root).returncode,0)
         self.assertNotEqual(self.cmd('work','advance','auth','--root',self.root).returncode,0)
+
+    def test_passing_machine_evidence_rejects_dirty_worktree(self):
+        self.implement();base=self.commit_base();self.go_change()
+        self.cmd('check','--base',base,'--task','auth','--root',self.root,ok=True)
+        self.assertEqual(self.cmd('work','verify','auth','--require-machine-gates','--root',self.root).returncode,0)
+        # 已跟踪源码（非任务证据文件）的未提交改动：HEAD 未变也必须让证据失效。
+        hello=self.root/'hello.go'
+        hello.write_text(hello.read_text()+'\n// uncommitted source context\n')
+        result=self.cmd('work','verify','auth','--require-machine-gates','--root',self.root)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('Worktree changed',result.stdout+result.stderr)
+        self.assertNotEqual(self.cmd('work','advance','auth','--root',self.root).returncode,0)
+
+    def test_passing_machine_evidence_rejects_new_untracked_source_file(self):
+        self.implement();base=self.commit_base();self.go_change()
+        self.cmd('check','--base',base,'--task','auth','--root',self.root,ok=True)
+        # 未绑定、非 Dairn 数据的未追踪源码文件也必须让证据失效。
+        (self.root/'late.go').write_text('package hello\n')
+        result=self.cmd('work','verify','auth','--require-machine-gates','--root',self.root)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('Worktree changed',result.stdout+result.stderr)
+
+    def test_machine_evidence_survives_task_records_and_advance(self):
+        self.implement();base=self.commit_base();self.go_change()
+        self.cmd('check','--base',base,'--task','auth','--root',self.root,ok=True)
+        # attachCheckRun 会改写任务账本、写证据与日志；这些 Dairn 数据与已按 sha256
+        # 绑定的证据不得让刚通过的运行自我失效。
+        self.assertTrue(self.work('verify','auth','--require-machine-gates')['machine_gates_required'])
+        self.assertEqual(self.work('advance','auth')['next']['id'],'review')
+        head=self.git('rev-parse','HEAD')
+        review=self.root/'review.json'
+        review.write_text(json.dumps({'standards':'pass','spec_fidelity':'not-applicable','head':head}))
+        self.work('record','auth','review.json','--kind','review')
+        # 推进离开 review 时会再次核对 machine gate；未追踪的 review.json 已被账本绑定。
+        handed=self.work('advance','auth')
+        self.assertEqual(handed['next']['id'],'synchronize')
+
+    def test_policy_change_invalidates_machine_evidence(self):
+        self.implement();base=self.commit_base();self.go_change()
+        self.cmd('check','--base',base,'--task','auth','--root',self.root,ok=True)
+        policy=self.root/'.dairn/governance/project.json'
+        policy.write_text(policy.read_text()+'\n')
+        result=self.cmd('work','verify','auth','--require-machine-gates','--root',self.root)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('Policy changed',result.stdout+result.stderr)
+
+    def gate_reason(self,project,gate='lint'):
+        evidence=json.loads((project/'.dairn/governance/evidence/all-qjs-checks.json').read_text(encoding='utf-8'))
+        record=next(c for c in evidence['checks'] if c['gate']==gate)
+        return record.get('reason') or ''
+    def test_go_lint_git_mode_empty_list_fails_closed(self):
+        empty=Path(self.tmp.name)/'empty-go'
+        self.cmd('init','--path',empty,'--stack','go',ok=True)
+        (empty/'.gitignore').write_text('ignored.go\n')
+        (empty/'ignored.go').write_text('package ignored\n')
+        subprocess.run(['git','init','-q'],cwd=empty,check=True)
+        subprocess.run(['git','config','user.name','Tester'],cwd=empty,check=True)
+        subprocess.run(['git','config','user.email','tester@example.com'],cwd=empty,check=True)
+        subprocess.run(['git','add','.'],cwd=empty,check=True)
+        subprocess.run(['git','commit','-qm','empty go baseline'],cwd=empty,check=True)
+        result=self.cmd('check','--all','--root',empty)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('No Go files available in Git',self.gate_reason(empty))
+
+    def test_go_lint_non_git_symlink_directory_refused(self):
+        non_git=Path(self.tmp.name)/'linked-go'
+        self.cmd('init','--path',non_git,'--stack','go','--sample',ok=True)
+        outside=Path(self.tmp.name)/'outside-go';outside.mkdir()
+        (outside/'outside.go').write_text('package outside\n')
+        try:
+            (non_git/'linked').symlink_to(outside,target_is_directory=True)
+        except OSError as error:
+            self.skipTest('symlink unavailable: '+str(error))
+        result=self.cmd('check','--all','--root',non_git)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('Go lint refuses symlink path',self.gate_reason(non_git))
+
+    def test_go_lint_tracked_symlink_file_refused(self):
+        project=Path(self.tmp.name)/'tracked-link-go'
+        self.cmd('init','--path',project,'--stack','go','--sample',ok=True)
+        outside=Path(self.tmp.name)/'outside-target.go';outside.write_text('package outside\n')
+        try:
+            (project/'link.go').symlink_to(outside)
+        except OSError as error:
+            self.skipTest('symlink unavailable: '+str(error))
+        subprocess.run(['git','init','-q'],cwd=project,check=True)
+        subprocess.run(['git','config','user.name','Tester'],cwd=project,check=True)
+        subprocess.run(['git','config','user.email','tester@example.com'],cwd=project,check=True)
+        subprocess.run(['git','add','-A'],cwd=project,check=True)
+        subprocess.run(['git','commit','-qm','tracked go symlink'],cwd=project,check=True)
+        mode=subprocess.run(['git','ls-files','-s','link.go'],cwd=project,text=True,capture_output=True,check=True).stdout
+        if not mode.startswith('120000'):
+            self.skipTest('git checkout does not preserve symlinks: '+mode.strip())
+        result=self.cmd('check','--all','--root',project)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('Go lint refuses symlink path',self.gate_reason(project))
     def add_relation(self):
         folder=self.root/'docs/specs/app';folder.mkdir(parents=True,exist_ok=True)
         (folder/'auth.md').write_text('---\nid: project.auth\ntitle: Auth\nsummary: Contract\nkind: spec\nmodule: app\nkeywords: ["authentication", "API"]\naliases: []\nrelated: []\n---\n\n# Auth\n')

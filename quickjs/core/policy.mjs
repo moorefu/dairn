@@ -44,10 +44,31 @@ export function policyValidate(data) {
 }
 const riskHigh = /(?:^|[/_.-])(?:auth|security|permission|protocol|wire|migration|schema|transaction|payment|crypto|state.?machine|persistence|database|session|credential|access.?control)(?:[/_.-]|$)/i;
 const govPrefixes = ['quickjs/', 'dairn/', 'scripts/', '.agents/skills/', '.github/workflows/', '.gitlab/', 'docs/specs/governance/', 'docs/specs/ci/'];
+// 这些入口不一定都属于 QuickJS 内核，但一旦被修改就会改变构建、启动、发布或
+// 受保护 CI 的信任边界（由谁生成制品、制品包含什么、哪段代码会被执行）。
+// 它们统一按治理-critical 处理：L2/G2 且触发全模块检查。这里保持精确清单，
+// 普通低信任工具（tools/verify-*.py 只做制品验收、tools/checksums.py 只对既有
+// 产物计算校验清单、tools/prepare-regression.py 与 tools/source_workspace.py
+// 只服务回归暂存）与 examples/** 仍保持 L1，避免把整个 tools/ 目录无差别升级为
+// L2 而丧失分级意义。
+const criticalPrefixes = ['ci/protected/', 'ci/templates/', '.github/rulesets/'];
+const criticalFiles = new Set([
+  // 仓库治理入口。
+  'AGENTS.md', 'Makefile', '.gitlab-ci.yml',
+  // 启动器与运行时版本锁：改动会替换用户实际执行的代码或下载的二进制。
+  'bin/dairn.cjs', 'dairn.sh', 'dairn.cmd', 'src/dairn/cli.py', 'src/dairn/__init__.py', 'quickjs.lock.json',
+  // 构建/发布入口：生成、打包并上传发布制品（tools/build* 由 criticalPatterns 覆盖）。
+  'tools/zip.mjs', 'tools/dairn_build_backend.py', 'tools/release_config.py', 'tools/release.json', 'tools/publish-release.py',
+  // 各语言安装元数据：决定安装入口、版本解析与发布内容。
+  'package.json', 'pyproject.toml',
+  // 根构建/安装脚本：构建或安装时直接执行。
+  'build.sh', 'build.cmd', 'install.sh',
+]);
+const criticalPatterns = [/^tools\/bootstrap\.[^/]+$/, /^tools\/build(?:[.-][^/]+)?$/];
 const dataPaths = ['.dairn/governance/changes/', '.dairn/governance/operations/', '.dairn/governance/evidence/', '.dairn/work/', '.dairn/facts/', '.dairn/cache/'];
 export function isCritical(p) {
   return p.startsWith('.dairn/') && !dataPaths.some(x => p.startsWith(x)) ||
-    ['AGENTS.md', 'Makefile', '.gitlab-ci.yml'].includes(p) || govPrefixes.some(x => p.startsWith(x));
+    criticalFiles.has(p) || govPrefixes.some(x => p.startsWith(x)) || criticalPrefixes.some(x => p.startsWith(x)) || criticalPatterns.some(x => x.test(p));
 }
 export function classify(paths, readJsonIfExists = () => null) {
   let risk = 'L0', mode = 'G0'; const reasons = [];
@@ -68,9 +89,8 @@ export function classify(paths, readJsonIfExists = () => null) {
   return {risk, governance_mode: mode, risk_triggers: [...new Set(reasons)].sort()};
 }
 export function moduleSelection(policy, paths) {
-  const globalChange = paths.some(p => p.startsWith('.dairn/') && !dataPaths.some(x => p.startsWith(x)) ||
-    ['.agents/skills/', 'quickjs/', 'dairn/', 'scripts/', '.github/workflows/', '.gitlab/'].some(x => p.startsWith(x)) ||
-    ['AGENTS.md', 'Makefile', '.gitlab-ci.yml'].includes(p));
+  // 信任边界变更必须检查全部模块（globalChange），不能按模块目录缩减检查面。
+  const globalChange = paths.some(isCritical);
   if (globalChange) return policy.modules;
   return policy.modules.filter(m => paths.some(p => m.path === '.' || p === m.path || p.startsWith(m.path.replace(/\/$/, '') + '/')));
 }

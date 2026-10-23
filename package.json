@@ -2,7 +2,7 @@
   "name": "@moorefu/dairn",
   "version": "0.1.0-rc.1",
   "description": "基于原生 QuickJS 的开发治理内核",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "commonjs",
   "bin": {
     "dairn": "./bin/dairn.cjs"
@@ -14,7 +14,8 @@
     "bin/dairn.cjs",
     "dairn.sh",
     "runtime/",
-    "licenses/"
+    "licenses/",
+    "LICENSE"
   ],
   "scripts": {
     "build": "node tools/build.cjs",

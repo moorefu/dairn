@@ -11,6 +11,7 @@ BASE=${2:-${DAIRN_TRUSTED_BASE_REF:-HEAD^}}
 command -v jq >/dev/null && command -v sha256sum >/dev/null || { echo 'jq and sha256sum required' >&2; exit 2; }
 [ "$(sha256sum "$DAIRN_CI_APE_PATH" | cut -d ' ' -f1)" = "$DAIRN_EXPECTED_APE_SHA256" ] || { echo 'APE mismatch' >&2; exit 2; }
 HEAD=$(git rev-parse --verify 'HEAD^{commit}')
+[ -z "$(git status --porcelain=v1 --untracked-files=all)" ] || { echo 'Protected build requires a clean checkout; refusing unrelated worktree changes' >&2; exit 2; }
 if [ "${GITLAB_CI:-}" = true ]; then
   [ "${CI_PIPELINE_SOURCE:-}" = push ] && [ "${CI_COMMIT_REF_PROTECTED:-}" = true ] && [ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH:-_}" ] && [ "$HEAD" = "${CI_COMMIT_SHA:-}" ] || { echo 'Unprotected GitLab build refused' >&2; exit 2; }
   PROVIDER=gitlab;REPO=${CI_PROJECT_PATH:?};REF=refs/heads/${CI_COMMIT_BRANCH};PIPELINE=${CI_PIPELINE_ID:?};JOB_ID=${CI_JOB_ID:?}

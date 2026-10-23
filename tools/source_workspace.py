@@ -9,7 +9,7 @@ from release_config import load_release
 
 
 def zip_paths(root):
-    return {'dairn.cmd', 'dairn.sh', 'runtime/dairn-embedded.com', 'runtime/runtime-integrity.json'} | {
+    return {'LICENSE', 'dairn.cmd', 'dairn.sh', 'runtime/dairn-embedded.com', 'runtime/runtime-integrity.json'} | {
         p.relative_to(root).as_posix() for p in (root / 'licenses').rglob('*') if p.is_file()}
 
 

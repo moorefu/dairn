@@ -93,6 +93,7 @@ try {
   const mode=name=>/\.(sh|com)$/.test(name)||name==='bin/dairn.cjs'?0o100755:0o100644;
   const names=[...files.keys()].sort(),prefix=release.name+'-'+release.version+'/';
   const distribution=new Map([
+    ['LICENSE',files.get('LICENSE')],
     ['dairn.cmd',files.get('dairn.cmd')],
     ['dairn.sh',files.get('dairn.sh')],
     ['runtime/dairn-embedded.com',runtime],

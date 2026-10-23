@@ -64,6 +64,7 @@ try {
     if (!stageOnly) {
       for (const name of ['bin', 'licenses']) fs.cpSync(path.join(stage, name), path.join(target, name), {recursive: true});
       fs.copyFileSync(path.join(stage, 'README.md'), path.join(target, 'README.md'));
+      fs.copyFileSync(path.join(stage, 'LICENSE'), path.join(target, 'LICENSE'));
       fs.copyFileSync(path.join(stage, 'dairn.sh'), path.join(target, 'dairn.sh'));
       const pkg = JSON.parse(fs.readFileSync(path.join(stage, 'package.json'), 'utf8'));
       pkg.version = version;

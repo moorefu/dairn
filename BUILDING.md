@@ -10,11 +10,11 @@ Python 工程采用 `pyproject.toml` + `src/dairn/` 布局；npm 入口为 `pack
 
 | latest 下载入口 | 内容 |
 | --- | --- |
-| `dairn-latest.tgz` | npm 启动器、`runtime/`、元数据、README 与许可证 |
-| `wheels.html` → 对应 Wheel | Python 启动器、`dairn/runtime/`、元数据与许可证 |
-| `dairn-latest.zip` | `dairn.cmd`、`dairn.sh`、`runtime/` 与许可证，不含完整源码 |
+| `dairn-latest.tgz` | npm 启动器、`runtime/`、元数据、README、`LICENSE`（MIT）与第三方声明 |
+| `wheels.html` → 对应 Wheel | Python 启动器、`dairn/runtime/`、元数据、`LICENSE`（MIT）与第三方声明 |
+| `dairn-latest.zip` | `dairn.cmd`、`dairn.sh`、`runtime/`、`LICENSE`（MIT）与第三方声明，不含完整源码 |
 
-三者携带相同 APE，治理代码、模板、规则、技能与 manifest 全部嵌入 `/zip/quickjs/`。Wheel 不依赖 CPython 扩展 ABI；实际运行范围仍由下面的平台矩阵验证。`checksums.json` 是三类制品的校验清单。PEP 517 后端保留内部 sdist 协议兼容性，发布流程不生成或上传 sdist。
+三者携带相同 APE，治理代码、模板、规则、技能与 manifest 全部嵌入 `/zip/quickjs/`。Wheel 不依赖 CPython 扩展 ABI；实际运行范围仍由下面的平台矩阵验证。`checksums.json` 是三类制品的校验清单。Dairn 自有代码采用 MIT 许可证（根目录 `LICENSE`），`licenses/` 只放第三方声明；构建、Wheel METADATA 与 npm `package.json` 会同步该声明。PEP 517 后端保留内部 sdist 协议兼容性，发布流程不生成或上传 sdist。
 
 本地 `dist/` 和版本 Release 使用真实版本文件名；发布阶段另外生成 `latest` 别名，直接复制已验证制品。Wheel 的文件名保留 PEP 440 版本，通过固定的 `latest/wheels.html` 下载索引安装。索引链接到对应版本 Release，附带 SHA256，避免滚动更新时下载到其他版本。
 
@@ -30,7 +30,7 @@ python tools/checksums.py      # 校验发布目录仅有三类制品并写入�
 
 在仓库中，Windows 执行 `build.cmd`，POSIX 执行 `sh build.sh`，先获取现成 QuickJS，再由它生成运行 ZIP。三种入口共用下载锁和缓存，重复构建字节一致；每次把当前 JS/资源嵌入新 APE，并更新 `runtime/`。ZIP 解压即可运行，不携带源码或构建脚本；源码自举需使用仓库。Python/npm 使用内部暂存区构建。
 
-根目录的 `dairn.sh`、`dairn.cmd` 是唯一启动器来源，ZIP 原样收录，安装脚本也使用同一份。npm 与 Wheel 原样收录 `dairn.sh`，各自校验包内运行时后，在 POSIX 调用它，在 Windows 直接执行包内 APE；参数、工作目录和退出码透传。发布制品在 POSIX 构建时保留运行时的执行位；若安装或复制后丢失该位，POSIX 启动器只补执行位、不改写文件内容，因为 APE 的 sh 加载器用 `command -v "$0"` 定位自身，而 bash（macOS 的 `/bin/sh`）对不可执行路径会返回失败。默认启动保持安装目录原样；设置 `DAIRN_FAST_RUNTIME=1` 后，POSIX 共用按 APE 摘要命名的缓存，`DAIRN_CACHE_HOME` 可指定缓存位置。Python 不再单独复制或转换运行时。
+根目录的 `dairn.sh`、`dairn.cmd` 是唯一启动器来源，ZIP 原样收录，安装脚本也使用同一份。npm 与 Wheel 原样收录 `dairn.sh`，各自校验包内运行时后，在 POSIX 调用它，在 Windows 直接执行包内 APE；参数、工作目录和退出码透传。发布制品在 POSIX 构建时保留运行时的执行位；若安装或复制后丢失该位，POSIX 启动器只补执行位、不改写文件内容，因为 APE 的 sh 加载器用 `command -v "$0"` 定位自身，而 bash（macOS 的 `/bin/sh`）对不可执行路径会返回失败。默认启动保持安装目录原样；设置 `DAIRN_FAST_RUNTIME=1` 后，POSIX 共用按原始 APE SHA256 命名的缓存目录，`DAIRN_CACHE_HOME` 可指定缓存位置。快速模式只作为本地可选加速：缓存目录必须是当前用户私有（`0700`，拒绝符号链接），转换后的二进制为 `0700`、SHA256 元数据为 `0600`，每次执行前重新核对摘要；摘要不符、元数据缺失或被篡改的缓存在锁内原子重建，无法安全修复时回退不可变源 APE。GitHub Actions / GitLab CI（或显式 `DAIRN_PROTECTED_CI=1`）默认禁用快速模式，不读取也不写入共享缓存；普通 `CI=true` 不影响本地快速模式。Python 不再单独复制或转换运行时。
 
 POSIX 首次启动 APE 需要 `uname`、`mkdir`、`dd`、`gzip`、`chmod`、`mv` 初始化加载器缓存；macOS ARM64 还需要系统 `cc`。取得 QuickJS 后，嵌入和 ZIP 写入由它自身完成。
 
@@ -102,9 +102,11 @@ Linux 可在 `python:3.12-bookworm` 容器中执行该脚本。Windows Podman �
 
 发布使用草稿，附件齐全后公开。同一提交、相同文件重跑不改写 Release；同版本指向其他提交或已发布不同文件时失败，须先更新版本号。更新 `latest` 时先上传整套别名和索引，再移动标签并公开；旧工作流重跑不会回退 `latest`。GitHub 自动附带的源码归档独立于 Dairn 的运行 ZIP。
 
+分支/标签保护、Required Checks、受保护构建与签名 runner 的配置、导入命令、生效证据和未验收项见 [受保护发布验收清单](docs/PROTECTED_RELEASE_ACCEPTANCE.md)；其中 `.github/rulesets/*.json` 只是可导入物料，必须由仓库管理员在 GitHub 上实际导入并留存平台证据，源码测试通过不能替代这些平台控制。
+
 ## 发布到 npm 与 PyPI
 
-GitHub Release 只保存附件，注册表通过手动触发的 [注册表发布工作流](.github/workflows/registry-publish.yml) 发布：下载对应 Release 里**已验证的同一份** `.tgz`/`.whl`，不重新构建，因此注册表上的字节与矩阵验证一致。发布前确认名称仍可用：
+GitHub Release 只保存附件，注册表通过手动触发的 [注册表发布工作流](.github/workflows/registry-publish.yml) 发布：先由 `validate` job 校验输入标签格式、Release 存在且已公开、标签提交等于 Release 目标提交且已在受保护 `main` 历史内、Release 资产恰好为三类制品加 `checksums.json` 且摘要一致；随后 `npm`/`pypi` job 下载对应 Release 里**已验证的同一份** `.tgz`/`.whl` 并按 `checksums.json` 再次复核 SHA256，不重新构建，因此注册表上的字节与矩阵验证一致。发布前确认名称仍可用：
 
 ```sh
 npm view @moorefu/dairn version                          # 404 表示该 scoped 包尚未创建

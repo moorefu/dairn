@@ -9,6 +9,11 @@ dynamic = ["version"]
 description = "基于原生 QuickJS 的开发治理内核"
 readme = "README.md"
 requires-python = ">=3.10"
+license = {text = "MIT"}
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+]
 
 [project.scripts]
 dairn = "dairn.cli:main"

@@ -152,7 +152,9 @@ def verify():
                     assert ape_member.mode & 0o111, 'npm 包内运行时必须带执行位，否则 bash 无法执行 APE 加载器'
                 assert tar.extractfile(ape_member).read() == runtime.read_bytes()
                 assert tar.extractfile('package/dairn.sh').read() == (ROOT / 'dairn.sh').read_bytes()
-                allowed = {'package/package.json', 'package/README.md', 'package/bin/dairn.cjs', 'package/dairn.sh',
+                assert tar.extractfile('package/LICENSE').read() == (ROOT / 'LICENSE').read_bytes()
+                assert package_meta.get('license') == 'MIT', 'npm 包许可证元数据必须是 MIT'
+                allowed = {'package/package.json', 'package/README.md', 'package/LICENSE', 'package/bin/dairn.cjs', 'package/dairn.sh',
                            'package/runtime/dairn-embedded.com', 'package/runtime/runtime-integrity.json'}
                 assert all(e.name in allowed or e.name.startswith('package/licenses/') for e in tar.getmembers())
             installed = tmp / 'npm-installed'
@@ -175,7 +177,10 @@ def verify():
                 assert zipped.read('dairn/dairn.sh') == (ROOT / 'dairn.sh').read_bytes()
                 assert zipped.read('dairn/runtime/dairn-embedded.com') == runtime.read_bytes()
                 assert b'Tag: py3-none-any' in zipped.read(f'dairn-{WHEEL_VERSION}.dist-info/WHEEL')
-                assert f'Version: {WHEEL_VERSION}' in zipped.read(f'dairn-{WHEEL_VERSION}.dist-info/METADATA').decode().splitlines()
+                assert zipped.read(f'dairn-{WHEEL_VERSION}.dist-info/licenses/LICENSE') == (ROOT / 'LICENSE').read_bytes()
+                metadata = zipped.read(f'dairn-{WHEEL_VERSION}.dist-info/METADATA').decode()
+                assert f'Version: {WHEEL_VERSION}' in metadata.splitlines()
+                assert 'License: MIT' in metadata.splitlines(), 'Wheel METADATA 必须声明 MIT 许可证'
                 for name, digest, length in csv.reader(io.StringIO(zipped.read(f'dairn-{WHEEL_VERSION}.dist-info/RECORD').decode())):
                     if digest:
                         data = zipped.read(name)
@@ -197,6 +202,7 @@ def verify():
                 summary['pep517_reproducible'] = True
 
         if 'zip' in selected:
+            assert (extracted / 'LICENSE').read_bytes() == (ROOT / 'LICENSE').read_bytes(), 'ZIP 必须携带 MIT LICENSE'
             cli = [extracted / 'dairn.cmd'] if os.name == 'nt' else ['/bin/sh', extracted / 'dairn.sh']
             cli_cases('zip', cli)
             summary['zip_source_free'] = True

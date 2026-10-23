@@ -123,11 +123,48 @@ class PreviewCases(unittest.TestCase):
     def test_runtime_source_treated_as_governance_critical(self):
         for name in ('quickjs/core/engine.mjs','dairn/cli.py'):
             p=HOME/'quickjs'/'_critical_policy_probe_temp.mjs'
-            p.write_text("import {classify} from './core/policy.mjs'; print(JSON.stringify(classify("+json.dumps([name])+")));")
+            # 显式 std.exit(0)：Windows 原生 APE 在脚本自然结束时可能崩溃，退出码不可信。
+            p.write_text("import * as std from 'std'; import {classify} from './core/policy.mjs'; print(JSON.stringify(classify("+json.dumps([name])+"))); std.exit(0);",encoding='utf-8')
             try: r=subprocess.run([str(QJS),str(p)],capture_output=True,text=True)
             finally: p.unlink()
             self.assertEqual(r.returncode,0,r.stderr)
             self.assertEqual(json.loads(r.stdout)['risk'],'L2')
+
+    def test_security_sensitive_entrypoints_are_critical_but_tools_allowlist_stays_narrow(self):
+        critical=('ci/protected/build-protected.sh','ci/templates/github-protected.yml','tools/bootstrap.sh',
+                  'tools/bootstrap.ps1','tools/build.py','tools/build.cjs','tools/build-npm.sh','tools/build-zip.mjs',
+                  'tools/zip.mjs','tools/dairn_build_backend.py','tools/release_config.py','tools/release.json',
+                  'tools/publish-release.py','bin/dairn.cjs','dairn.sh','dairn.cmd','build.sh','build.cmd','install.sh',
+                  'package.json','pyproject.toml','src/dairn/cli.py','src/dairn/__init__.py','quickjs.lock.json',
+                  'AGENTS.md','Makefile','.gitlab-ci.yml','.github/rulesets/main-branch.json')
+        ordinary=('tools/verify-linux.py','tools/verify-packages.py','tools/checksums.py',
+                  'tools/prepare-regression.py','tools/source_workspace.py','examples/stubs/go-surface/main.go')
+        data=('.dairn/governance/evidence/run-qjs-checks.json','.dairn/work/task-1.json')
+        probe=HOME/'quickjs'/'_critical_allowlist_probe_temp.mjs'
+        program=("import * as std from 'std'; import {classify,moduleSelection} from './core/policy.mjs';"
+                 "const critical="+json.dumps(list(critical))+",ordinary="+json.dumps(list(ordinary))+",data="+json.dumps(list(data))+";"
+                 "const policy={schema_version:1,modules:[{path:'.'},{path:'tools'}]};"
+                 "print(JSON.stringify({critical:critical.map(p=>classify([p])),"
+                 "selected:critical.map(p=>moduleSelection(policy,[p]).length),"
+                 "ordinary:ordinary.map(p=>classify([p])),data:data.map(p=>classify([p])),"
+                 "modules:policy.modules.length}));std.exit(0);")
+        try:
+            probe.write_text(program,encoding='utf-8')
+            result=subprocess.run([str(QJS),str(probe)],capture_output=True,text=True)
+        finally:
+            probe.unlink(missing_ok=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        report=json.loads(result.stdout)
+        for name,value in zip(critical,report['critical']):
+            self.assertEqual((value['risk'],value['governance_mode']),('L2','G2'),name)
+            self.assertIn('governance-critical:'+name,value['risk_triggers'],name)
+        for name,selected in zip(critical,report['selected']):
+            self.assertEqual(selected,report['modules'],name)
+        for name,value in zip(ordinary,report['ordinary']):
+            self.assertEqual((value['risk'],value['governance_mode']),('L1','G1'),name)
+            self.assertEqual(value['risk_triggers'],[],name)
+        for name,value in zip(data,report['data']):
+            self.assertEqual((value['risk'],value['governance_mode']),('L0','G0'),name)
     def test_all_baseline_check(self):
         p=self.js('check','--all')
         self.assertEqual(p.returncode,0,p.stderr)

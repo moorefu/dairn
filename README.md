@@ -78,4 +78,8 @@ npm run build
 
 发布由 `v<版本>` 标签触发：标签版本会写入三类制品，矩阵验证通过后先发布 GitHub Release，再通过手动工作流把同一套已验证字节发布到 npm 与 PyPI。下载环境、六种平台的制品矩阵和注册表发布步骤见 [构建指南](https://github.com/moorefu/dairn/blob/main/BUILDING.md)；模板、工作流和受保护 CI 见 [治理指南](https://github.com/moorefu/dairn/blob/main/docs/GOVERNANCE.md)。
 
-仓库自身的文档集中在这三处。`quickjs/assets/` 下的 Markdown 是分发给目标项目的规则与技能资源。项目目前为 `UNLICENSED`，第三方声明位于 `licenses/`。
+仓库自身的文档集中在这三处。`quickjs/assets/` 下的 Markdown 是分发给目标项目的规则与技能资源。
+
+## 许可证
+
+Dairn 采用 [MIT 许可证](https://github.com/moorefu/dairn/blob/main/LICENSE)。内嵌的 Cosmopolitan 与 QuickJS 等第三方组件声明位于 `licenses/`，随三类发布制品一并分发。

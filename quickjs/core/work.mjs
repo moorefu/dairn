@@ -6,6 +6,7 @@ import {recommendWorkflow} from './workflow.mjs';
 import {validateTaskObject} from './tasks.mjs';
 import {statementFor,prepareAttestation,verifyAttestation} from './attestation.mjs';
 import {launcherInfo,LAUNCHER_POSIX,LAUNCHER_WINDOWS} from './launcher.mjs';
+import {captureWorktree,sameWorktree,taskExclusions} from './worktree.mjs';
 const at=(a,b)=>a.replace(/\/$/,'')+'/'+b;
 const ok=(c,m)=>{if(!c)throw Error(m);};
 const idRe=/^[a-z][a-z0-9-]{1,63}$/;
@@ -77,6 +78,12 @@ export function prepareCheckTask(h,root,id){
 }
 function machineProblems(h,root,t,requirePassed=false){
   const errors=[];
+  // Worktree capture and policy hashing are comparison-wide, not per-run: compute
+  // them lazily once so a task with several historical runs stays linear.
+  const exclusions=taskExclusions(t);
+  let currentWorktree=null,currentPolicy=null;
+  const worktree=()=>currentWorktree??(currentWorktree=captureWorktree(h,root,120,exclusions));
+  const policyHash=()=>{if(currentPolicy===null)currentPolicy=sha256(h.read(root.replace(/\/$/,'')+'/.dairn/governance/project.json'));return currentPolicy;};
   for(const stage of t.stages)for(const link of stage.machine_runs||[]){
     try{
       ok(stage.id==='implement','Machine runs may only be linked to implement');
@@ -86,6 +93,16 @@ function machineProblems(h,root,t,requirePassed=false){
       const evidence=JSON.parse(raw);
       ok(evidence.schema_version===2&&evidence.run_id===link.run_id&&evidence.task_id===t.id,'Machine run id/task mismatch');
       ok(evidence.head===link.commit&&evidence.policy_sha256===link.policy_sha256,'Machine run commit/policy mismatch');
+      ok(evidence.worktree&&evidence.worktree.schema===1&&typeof evidence.worktree.identity_sha256==='string','Machine run missing worktree identity');
+      // A passing run is eligible for progression only when the policy and the
+      // complete working-tree snapshot still describe the checkout being verified.
+      // Dairn-managed data and sha256-bound task evidence are excluded by
+      // captureWorktree, so recording evidence cannot invalidate its own machine run.
+      // Historical failed runs remain inspectable after a later fix.
+      if(evidence.status==='passed'){
+        ok(evidence.policy_sha256===policyHash(),'Policy changed since machine run: '+link.path);
+        ok(sameWorktree(evidence.worktree,worktree()),'Worktree changed since machine run: '+link.path);
+      }
       ok(evidence.trust==='local-unattested'&&link.trust==='local-unattested','Unexpected trust declaration');
       ok(['passed','failed'].includes(evidence.status),'Invalid run status');
       ok(evidence.status===link.status,'Machine status mismatch');
@@ -111,6 +128,7 @@ export function attachCheckRun(h,root,id,run,rel){
   ok(t.status==='active'&&active?.id==='implement','Task left implement stage while checks ran');
   ok(run.head===gitHead(h,root),'HEAD changed during check; refusing to attach stale run');
   ok(run.schema_version===2&&run.task_id===id,'Invalid task binding in check run');
+  ok(run.worktree&&run.worktree.schema===1&&typeof run.worktree.identity_sha256==='string','Machine run missing worktree identity');
   ok(run.modules?.length&&run.required_checks?.length,'Cannot attach empty check result');
   const file=safe(h,root,rel),raw=h.read(file),hash=sha256(raw);
   const link={run_id:run.run_id,path:rel,sha256:hash,commit:run.head,base_commit:run.base,policy_sha256:run.policy_sha256,status:run.status,trust:'local-unattested',recorded_at:h.now()};

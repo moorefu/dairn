@@ -11,9 +11,13 @@ import {prChangeMeta,isCiPullRequest} from './ci-context.mjs';
 import {captureFacts} from './facts.mjs';
 import {readRelations} from './relations.mjs';
 import {configuredStubs} from './stubs.mjs';
+import {captureWorktree,taskExclusions} from './worktree.mjs';
 const slash = x => x.replace(/\\/g, '/');
 const join = (a,b) => b === '.' ? a : a.replace(/\/$/,'') + '/' + b;
 const within = (root, path) => path === root || path.startsWith(root.replace(/\/$/,'') + '/');
+// Git 输出的相对路径不能含盘符/反斜杠/..；host 会把反斜杠归一化为分隔符。
+const safeRelative = p => typeof p === 'string' && p.length > 0 && !p.startsWith('/') &&
+  !p.includes('\\') && !/^[A-Za-z]:/.test(p) && !p.split('/').some(x => x === '..' || x === '' || x === '.');
 const COMMANDS = ['doctor','validate','validate-core','scope','check','help','hook'];
 const HOOKS = ['pre-push','turn-end'];
 const VALUE_FLAGS = new Map([['--root','root'],['--base','base'],['--head','head'],['--timeout','timeout'],['--task','task'],
@@ -146,17 +150,56 @@ function runStackCheck(h,stack,step,cwd,timeout) {
   if(stack==='go' && step==='lint') {
     const repo=h.run(['git','rev-parse','--is-inside-work-tree'],cwd,timeout);
     // `git rev-parse --is-inside-work-tree` 在仓库外也会以 0 退出并打印 false，
-    // 必须看输出；非 Git 项目回退到文件系统遍历。
-    const inRepo=repo.code===0 && /^true$/i.test(String(repo.output||'').trim());
+    // 必须看输出；只有 Git 明确回答“不是仓库”时才允许文件系统回退。权限、
+    // dubious ownership、超时等其它错误必须 fail closed，不能静默退化为扫描。
+    invariant(!repo.timedOut,'Go lint Git worktree probe timed out');
+    const probe=String(repo.output||'').trim();
+    const inRepo=repo.code===0 && /^true$/i.test(probe);
+    const notRepo=repo.code!==0 && /not a git repository/i.test(String(repo.output||''));
+    invariant(inRepo||notRepo,'Cannot determine Git worktree for Go lint: '+(probe||'git exit '+repo.code));
     let goFiles=[];
-    if(inRepo) goFiles=command(h,['git','ls-files','--cached','--others','--exclude-standard','-z','--','*.go'],cwd,timeout).split('\0').filter(Boolean);
-    if(!goFiles.length) {
-      const walk=(d,prefix,depth)=>{if(depth>8)return;for(const name of h.list(d)){if(name.startsWith('.')||['vendor','node_modules','target','dist'].includes(name))continue;const abs=join(d,name),rel=prefix+name;if(h.isDirectory(abs))walk(abs,rel+'/',depth+1);else if(name.endsWith('.go'))goFiles.push(rel);}};
+    if(inRepo) {
+      // Git 工程必须尊重 .gitignore；空列表不能退化成文件系统扫描，否则
+      // 会把被忽略的文件或工程外链接目标带入门禁。
+      goFiles=command(h,['git','ls-files','-z','--cached','--others','--exclude-standard','--','*.go'],cwd,timeout).split('\0').filter(Boolean);
+      invariant(goFiles.length>0,'No Go files available in Git for gofmt');
+      invariant(goFiles.length<=20000,'Go lint file list exceeds limit');
+      for(const file of goFiles) {
+        invariant(safeRelative(file),'Unsafe Go file path from Git: '+JSON.stringify(file));
+        invariant(!h.isSymlink(join(cwd,file)),'Go lint refuses symlink path: '+file);
+      }
+    } else {
+      const repoRoot=h.realpath(cwd);
+      const maxDepth=8,maxFiles=20000,maxDirs=5000,deadline=Date.now()+timeout*1000;
+      let dirs=0;
+      const walk=(d,prefix,depth)=>{
+        invariant(Date.now()<=deadline,'Go lint file discovery timed out');
+        invariant(depth<=maxDepth,'Go lint directory depth exceeded '+maxDepth);
+        invariant(!h.isSymlink(d),'Go lint refuses symlink directory: '+prefix);
+        const canonical=h.realpath(d);
+        invariant(within(repoRoot,canonical),'Go lint path escapes repository: '+prefix);
+        invariant(++dirs<=maxDirs,'Go lint directory limit exceeded');
+        for(const name of h.list(d)){
+          if(name.startsWith('.')||['vendor','node_modules','target','dist'].includes(name))continue;
+          const abs=join(d,name),rel=prefix+name;
+          invariant(!h.isSymlink(abs),'Go lint refuses symlink path: '+rel);
+          const resolved=h.realpath(abs);
+          invariant(within(repoRoot,resolved),'Go lint path escapes repository: '+rel);
+          if(h.isDirectory(abs)) walk(abs,rel+'/',depth+1);
+          else if(name.endsWith('.go')) { invariant(goFiles.length<maxFiles,'Go lint file limit exceeded'); goFiles.push(rel); }
+        }
+      };
       walk(cwd,'',0);
     }
     invariant(goFiles.length>0,'No Go files available for gofmt');
-    const invalid=command(h,['gofmt','-l',...goFiles],cwd,timeout).trim();
-    invariant(!invalid,'gofmt found unformatted files: '+invalid);
+    // 拆分批次，避免参数列表超过平台命令行长度上限；`--` 防止文件名被当作
+    // gofmt 选项（例如被跟踪的 `-e.go`）。
+    const invalid=[];
+    for(let i=0;i<goFiles.length;i+=500){
+      const output=command(h,['gofmt','-l','--',...goFiles.slice(i,i+500)],cwd,timeout).trim();
+      if(output)invalid.push(output);
+    }
+    invariant(!invalid.length,'gofmt found unformatted files: '+invalid.join('\n'));
     command(h,['go','vet','./...'],cwd,timeout);
     return {code:0,output:'gofmt and go vet passed',duration_sec:0};
   }
@@ -218,10 +261,13 @@ function checks(h,root,opts,st,raw,validation,stats) {
   const evidenceDir=join(root,'.dairn/governance/evidence');
   const logRunKey=gateLogKey(opts);
   const logsRel='.dairn/governance/evidence/logs/'+logRunKey;
+  // 工作树身份只在会成为门禁证据的运行里捕获（任务检查、hook、baseline）。
+  // 纯预览证据不参与任何门禁，避免在大型未追踪目录上做无意义的全量摘要。
+  const worktree=(opts.task||opts.hook||opts.all)?captureWorktree(h,root,opts.timeout,opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[]):null;
   const report={schema_version:opts.task?2:1,engine:'dairn-quickjs',assurance:'technical-checks-only',mode:opts.all?'baseline-all':opts.hook?'pre-push-gate':'risk-gate-preview',
     risk,governance_mode:opts.all?'G2':st.governance_mode,review_pending:opts.all?true:st.review_pending,
     base:opts.all?null:st.base,head:opts.all?null:st.head,utc:h.now(),changed_paths:opts.all?[]:st.paths,
-    policy_sha256:sha256(raw),governance_validation:{status:'passed',validators:Object.keys(validation.detail).sort(),error_count:0},checks:[],logs_dir:logsRel};
+    policy_sha256:sha256(raw),...(worktree?{worktree}:{}),governance_validation:{status:'passed',validators:Object.keys(validation.detail).sort(),error_count:0},checks:[],logs_dir:logsRel};
   if(opts.hook) report.trust='local-unattested';
   let failed=false;
   if (!opts.all && !st.paths.length) {

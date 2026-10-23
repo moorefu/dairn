@@ -49,6 +49,8 @@ def source_files(stage):
 def metadata():
     return (f'Metadata-Version: 2.1\nName: {RELEASE["python_name"]}\nVersion: {VERSION}\n'
             'Summary: 基于原生 QuickJS 的开发治理内核\nRequires-Python: >=3.10\n'
+            'License: MIT\n'
+            'Classifier: License :: OSI Approved :: MIT License\n'
             'Description-Content-Type: text/markdown\n\n' + (ROOT / 'README.md').read_text(encoding='utf-8')).encode('utf-8')
 
 def wheel_from_files(files, destination):
@@ -58,6 +60,7 @@ def wheel_from_files(files, destination):
         f'{DIST}/dairn.sh': files['dairn.sh'],
         f'{DIST}/runtime/dairn-embedded.com': files['dairn-embedded.com'],
         f'{DIST}/runtime/runtime-integrity.json': files['runtime-integrity.json'],
+        f'{META}/licenses/LICENSE': files['LICENSE'],
         f'{META}/METADATA': metadata(),
         f'{META}/WHEEL': f'Wheel-Version: 1.0\nGenerator: Dairn\nRoot-Is-Purelib: true\nTag: {TAG}\n'.encode(),
         f'{META}/entry_points.txt': b'[console_scripts]\ndairn = dairn.cli:main\n',

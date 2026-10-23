@@ -2,6 +2,7 @@
   "name": "dairn",
   "python_name": "dairn",
   "source_paths": [
+    "LICENSE",
     "pyproject.toml",
     "package.json",
     "quickjs.lock.json",
