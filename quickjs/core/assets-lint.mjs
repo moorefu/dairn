@@ -18,7 +18,7 @@ const REPO_SEGMENTS = /^(?:docs|\.dairn|\.agents|\.github|quickjs|tools|tests|ru
 const REPO_FILES = /^(?:AGENTS|README|CLAUDE|BUILDING|CHANGELOG|CONTRIBUTING|LICENSE|GOVERNANCE|pyproject|package|Makefile)\b/;
 const TOP_COMMANDS = ['version', '--version', 'init', 'adopt', 'detect', 'upgrade', 'doctor', 'validate',
   'validate-core', 'scope', 'check', 'help', 'docs', 'skills', 'guide', 'workflow', 'work', 'stubs', 'tasks', 'hooks', 'hook', 'notes',
-  'evidence', 'gate', 'attest'];
+  'evidence', 'gate', 'attest', 'approval', 'handoff', 'governance', 'refactor'];
 const SUBCOMMANDS = {
   docs: ['find', 'show', 'context', 'check'],
   skills: ['catalog', 'list', 'add'],
@@ -35,6 +35,8 @@ const SUBCOMMANDS = {
   gate: ['evaluate'],
   attest: ['prepare', 'verify'],
   approval: ['evaluate'],
+  governance: ['plan', 'explain', 'assess', 'recommend'],
+  refactor: ['plan', 'compare', 'verify', 'status'],
 };
 
 /* 权威 CLI 命令面；测试与迁移工具可据此断言引用合法。每次返回独立副本。 */

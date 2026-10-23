@@ -10,6 +10,11 @@ import {prepareAttestation,verifyAttestation} from './attestation.mjs';
 import {platformVerdict as approvalPlatformVerdict} from './approval.mjs';
 import {captureHandoff} from './handoff.mjs';
 import {renderHandoff} from './handoff-render.mjs';
+import {planForChange} from './governance-plan.mjs';
+import {assessCapabilities, discoverRepository} from './capabilities.mjs';
+import {locateContract, locateRun, compareDebt, verifyExitConditions, writeContract} from './refactor.mjs';
+import {validateRefactorContract} from './project-context.mjs';
+import {collectRunHistory, recommendAdaptations} from './governance-feedback.mjs';
 import {LAUNCHER_POSIX,LAUNCHER_WINDOWS,LAUNCHER_CONFIG,RUNTIME_DIR,launcherScripts,defaultLauncherConfig,readLauncherConfig,launcherInfo,vendorRuntime,verifyLauncher} from './launcher.mjs';
 import {configuredStubs,stubInit,stubDoctor,stubTemplates} from './stubs.mjs';
 import {captureFacts,acceptFacts,factSnapshotPath} from './facts.mjs';
@@ -44,8 +49,8 @@ export function runtimeIdentity(h){
   for(const x of m.assets||[]) invariant(sha256(read(h,ASSETS+x.type+'/'+x.path))===x.sha256,'Embedded asset checksum mismatch: '+x.path);
   return sha256(raw);
 }
-const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--precision','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars'];
-const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
+const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--precision','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars','--window','--file'];
+const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--discover':'discover','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
 function argsParse(args){
   const out={cmd:args[0]||'help',pos:[],root:'.',stack:'auto',ci:'none',timeout:120};
   for(let i=1;i<args.length;i++){
@@ -429,7 +434,10 @@ function provision(h,o){
   invariant(['none','github','gitlab','both'].includes(config.ci),'Invalid --ci value');
   const plan=planFor(h,evaluationRoot,makeDesired(h,evaluationRoot,config,null),null);
   preflightLayout(h,evaluationRoot);
-  if(o.plan){h.log(fmt({mode:o.cmd,root:evaluationRoot,modules:config.modules.map(x=>({name:x.name,path:x.path,profiles:x.profiles})),actions:plan.actions,launcher:launcherSummary(h,evaluationRoot,o)}));return plan.actions.some(x=>x.status==='conflict')?2:0;}
+  if(o.plan){h.log(fmt({mode:o.cmd,root:evaluationRoot,modules:config.modules.map(x=>({name:x.name,path:x.path,profiles:x.profiles})),
+    ...(o.discover?{discovery:{repository:discoverRepository(h,evaluationRoot),
+      note:'suggestions only; existing CI/tests are reused, never overwritten — apply requires --apply'}}:{}),
+    actions:plan.actions,launcher:launcherSummary(h,evaluationRoot,o)}));return plan.actions.some(x=>x.status==='conflict')?2:0;}
   // Validate an explicitly requested vendored runtime BEFORE the first write (fail closed).
   const vendorConfig=launcherConfigFor(h,evaluationRoot,o);
   const lock={schema:2,version:runtimeVersion(h),runtime_sha256:runtimeIdentity(h),config,managed:plan.managed};
@@ -708,7 +716,139 @@ function handoffCmd(h,o,root){
   return 0;
 }
 
-export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','stubs','doctor','version','--version','tasks','hooks','notes','evidence','gate','attest','approval','handoff'].includes(args[0]);}
+/* 治理计划（§5/§7）：确定性解释计划。Plan 描述待执行工作，不宣告门禁通过。 */
+function governanceCmd(h,o,root){
+  const op=o.pos[0]||'plan';
+  if(op==='plan'||op==='explain'){
+    invariant(o.base,'governance '+op+' requires --base <trusted-ref>');
+    const {plan,plan_sha256}=planForChange(h,root,{base:o.base});
+    if(op==='plan'){
+      if(o.json)h.log(fmt({plan,plan_sha256}));
+      else{
+        h.log('governance plan: risk='+plan.classification.effective_risk+' mode='+(plan.classification.governance_mode||'?')+
+          ' status='+plan.status);
+        h.log('  subject: '+(plan.subject?plan.subject.source_commit.slice(0,12)+' (base '+(plan.subject.base_commit?plan.subject.base_commit.slice(0,12):'none')+')':'n/a'));
+        for(const r of plan.requirements)h.log('  require '+r.id+' ['+r.origin+']');
+        for(const e of plan.executors)h.log('  executor '+e.module_id+':'+e.check_id+' phase='+e.phase);
+        h.log('  local-fast: '+(plan.execution.local_fast.join(', ')||'none')+'; ci-required: '+plan.execution.ci_required.length);
+        h.log('  approvals: '+(plan.approvals.length?'scm-native natural person':'none'));
+        h.log('  advisory: '+(plan.advisory_workflow.join(' > ')||'none')+'; work required: '+plan.work_required);
+        for(const g of plan.gaps)h.error('GAP '+g.kind+' '+g.module_id+':'+g.check_id+' — '+g.reason);
+        h.log('  plan_sha256: '+plan_sha256);
+      }
+      return plan.gaps.length?1:0;
+    }
+    /* explain：给接手者的解释链——为什么是这些要求、谁授权、缺什么。 */
+    const lines=[];
+    lines.push('Governance plan explanation (advisory; gates are evaluated independently)');
+    lines.push('Change: '+plan.classification.effective_risk+' (floor '+plan.classification.risk_floor+')'+
+      (plan.classification.governance_mode?' in '+plan.classification.governance_mode:''));
+    for(const reason of plan.classification.reasons)
+      lines.push('  because: '+reason.rule+' ['+reason.source+']');
+    lines.push('Requirements come from the trusted policy for '+plan.classification.effective_risk+
+      ' plus approved refactor contracts; module context can only add, never lower.');
+    for(const r of plan.requirements)lines.push('  - '+r.id+' required by '+r.origin);
+    for(const g of plan.gaps)lines.push('  - MISSING capability '+g.module_id+':'+g.check_id+' — CI must fail until an executor exists');
+    lines.push('Local fast feedback ('+(plan.execution.local_fast.join(', ')||'none')+') is speed advice; CI required set is complete: '+plan.execution.ci_required.length+' items.');
+    lines.push('Approvals: '+(plan.approvals.length?'SCM-native, natural person — granted by the platform, never by this plan':'not required at this risk level'));
+    lines.push('No work ledger is required for any of this (work_required=false).');
+    for(const line of lines)h.log(line);
+    if(o.json)h.log(fmt({plan,plan_sha256}));
+    return plan.gaps.length?1:0;
+  }
+  if(op==='assess'){
+    /* 能力评估（§12）：declared/detected 分级，绝不自报 ci-verified。 */
+    const policyJson=JSON.parse(read(h,j(root,'.dairn/governance/project.json')));
+    const report=assessCapabilities(h,root,policyJson,{risk:o.risk||'L1'});
+    report.discovery_timestamp=h.now();
+    if(o.json)h.log(fmt(report));
+    else{
+      h.log('capability assessment (risk '+report.risk+'): declared='+report.summary.declared+
+        ' detected='+report.summary.detected+' missing-tools='+report.summary.missing_tools+
+        ' unconfigured='+report.summary.unconfigured);
+      for(const m of report.modules)for(const c of m.checks)
+        h.log('  '+m.name+':'+c.check_id+' '+c.status+(c.required?' [required]':''));
+      for(const note of report.notes)h.log('  note: '+note);
+      for(const g of report.gaps)h.error('GAP '+g.kind+' '+g.module+':'+g.check_id+' — '+g.reason);
+    }
+    return report.gaps.length?1:0;
+  }
+  if(op==='recommend'){
+    /* 治理反馈（§15）：只给有证据的建议，绝不自动应用；样本不足如实说明。 */
+    const days=Math.min(Math.max(Number(o.window)||90,1),365);
+    const nowMs=Date.parse(h.now());
+    ok(Number.isFinite(nowMs),'cannot determine current time');
+    const windowStart=new Date(nowMs-days*86400000).toISOString();
+    const runs=collectRunHistory(h,root,{windowStart});
+    const report=recommendAdaptations({runs,windowStart,windowEnd:h.now(),minSamples:10});
+    if(o.json)h.log(fmt(report));
+    else{
+      h.log('governance feedback: '+report.status+' — '+runs.length+' runs in the last '+days+'d');
+      for(const r of report.recommendations){
+        h.log('  propose '+r.proposal+' ['+r.kind+'] observed '+JSON.stringify(r.observed));
+        h.log('    action: '+r.proposed_action+' (preserves: '+r.requirements_preserved.join(', ')+'; requires approval)');
+      }
+      h.log('  note: '+report.note);
+    }
+    return 0;
+  }
+  throw Error('Usage: dairn governance plan|explain --base <ref> | governance assess [--risk L0|L1|L2] | governance recommend [--window 90d] [--json]');
+}
+
+/* 重构还债（§13）：可选跨 PR 契约、债务基线与阶段关闭；只追加保证，绝不降级。 */
+function refactorCmd(h,o,root){
+  const op=o.pos[0];
+  if(op==='plan'){
+    invariant(o.id&&o.file,'refactor plan requires --id <id> --file <contract.json> [--apply]');
+    const contractPath=safeRelInside(h,root,o.file);
+    const contract=validateRefactorContract(JSON.parse(read(h,contractPath)),o.file);
+    ok(contract.id===o.id,'--id must match the contract id: '+contract.id);
+    const result=writeContract(h,root,contract,{apply:!!o.apply});
+    h.log(fmt(result));
+    return result.applied?0:2;
+  }
+  invariant(o.id,'refactor '+op+' requires --id <contract-id>');
+  const {contract,rel}=locateContract(h,root,o.id);
+  if(op==='status'){
+    const runs=h.exists(j(root,'.dairn/governance/evidence/runs'))
+      ? (h.list(j(root,'.dairn/governance/evidence/runs'))||[]).filter(x=>/^[0-9a-f]{40,64}$/i.test(x)).length : 0;
+    h.log(fmt({schema:'dairn.refactor-status.v1',id:contract.id,intent:contract.intent,
+      path:rel,baseline:contract.baseline,paths:contract.paths||null,
+      known_failures:(contract.debt||{}).known_failures.length,
+      exit_conditions:(contract.migration||{}).exit_conditions,
+      local_run_commits:runs}));
+    return 0;
+  }
+  const {run,rel:runRel}=locateRun(h,root,{runId:o.run||null});
+  if(op==='compare'){
+    const report=compareDebt(contract,run);
+    report.run_path=runRel;
+    if(o.json)h.log(fmt(report));
+    else{
+      h.log('refactor compare '+contract.id+': '+report.status+' (run '+report.run_id+')');
+      for(const f of report.known_failures)h.log('  known debt: '+f.module+':'+f.check_id+' ('+f.status+')');
+      for(const f of report.new_failures)h.error('NEW failure beyond baseline: '+f.module+':'+f.check_id+' ('+f.status+')');
+      for(const f of report.signature_drift)h.error('SIGNATURE DRIFT: '+f.module+':'+f.check_id+' — the known failure changed shape');
+      for(const f of report.retired_failures)h.log('  retired debt: '+(f.module?f.module+':':'')+f.check_id);
+    }
+    return report.status==='within-baseline'?0:1;
+  }
+  if(op==='verify'){
+    const comparison=compareDebt(contract,run);
+    const verdict=verifyExitConditions(contract,run,comparison);
+    verdict.compare=comparison;
+    if(o.json)h.log(fmt(verdict));
+    else{
+      h.log('refactor verify '+contract.id+': '+verdict.status);
+      for(const c of verdict.checked)h.log('  checked '+c.condition+': '+c.status);
+      for(const u of verdict.unverified)h.log('  unverified '+(u.condition||'(none)')+' — '+u.reason);
+    }
+    return verdict.status==='pass'?0:verdict.status==='fail'?1:3;
+  }
+  throw Error('Usage: dairn refactor plan --id <id> --file <contract.json> [--apply] | refactor compare|verify|status --id <id> [--run <run-id>] [--json]');
+}
+
+export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','stubs','doctor','version','--version','tasks','hooks','notes','evidence','gate','attest','approval','handoff','governance','refactor'].includes(args[0]);}
 export function dispatch(h,args){
   try{
     const o=argsParse(args),root=o.root==='.'?h.cwd():o.root;
@@ -765,6 +905,8 @@ export function dispatch(h,args){
     if(o.cmd==='attest'){const r=checkedRoot(h,root,false);return attestCmd(h,o,r);}
     if(o.cmd==='approval'){const r=checkedRoot(h,root,false);return approvalCmd(h,o,r);}
     if(o.cmd==='handoff'){const r=checkedRoot(h,root,false);return handoffCmd(h,o,r);}
+    if(o.cmd==='governance'){const r=checkedRoot(h,root,false);return governanceCmd(h,o,r);}
+    if(o.cmd==='refactor'){const r=checkedRoot(h,root,false);return refactorCmd(h,o,r);}
     if(o.cmd==='stubs'){
       const rr=checkedRoot(h,root,false);verifyRuntimeLock(h,rr,true);
       const op=o.pos[0]||'list';
