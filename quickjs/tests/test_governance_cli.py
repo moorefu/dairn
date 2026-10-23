@@ -88,7 +88,9 @@ class GovernanceCLI(unittest.TestCase):
         self.assertEqual(out['schema'], 'dairn.capability-assessment.v1')
         checks = {c['check_id']: c for c in out['modules'][0]['checks']}
         self.assertEqual(checks['lint']['status'], 'detected')  # dairn stack-check is built-in
-        self.assertNotIn('ci-verified', json.dumps(out))
+        # No capability may be GRADED ci-verified locally (the note text
+        # mentioning the term is fine; a status value is not).
+        self.assertTrue(all(c['status'] != 'ci-verified' for c in out['modules'][0]['checks']))
 
     def test_recommend_is_honest_about_thin_history(self):
         out = self.obj('governance', 'recommend')

@@ -777,7 +777,7 @@ function governanceCmd(h,o,root){
     /* 治理反馈（§15）：只给有证据的建议，绝不自动应用；样本不足如实说明。 */
     const days=Math.min(Math.max(Number(o.window)||90,1),365);
     const nowMs=Date.parse(h.now());
-    ok(Number.isFinite(nowMs),'cannot determine current time');
+    invariant(Number.isFinite(nowMs),'cannot determine current time');
     const windowStart=new Date(nowMs-days*86400000).toISOString();
     const runs=collectRunHistory(h,root,{windowStart});
     const report=recommendAdaptations({runs,windowStart,windowEnd:h.now(),minSamples:10});
@@ -802,10 +802,10 @@ function refactorCmd(h,o,root){
     invariant(o.id&&o.file,'refactor plan requires --id <id> --file <contract.json> [--apply]');
     const contractPath=safeRelInside(h,root,o.file);
     const contract=validateRefactorContract(JSON.parse(read(h,contractPath)),o.file);
-    ok(contract.id===o.id,'--id must match the contract id: '+contract.id);
+    invariant(contract.id===o.id,'--id must match the contract id: '+contract.id);
     const result=writeContract(h,root,contract,{apply:!!o.apply});
     h.log(fmt(result));
-    return result.applied?0:2;
+    return 0;
   }
   invariant(o.id,'refactor '+op+' requires --id <contract-id>');
   const {contract,rel}=locateContract(h,root,o.id);
