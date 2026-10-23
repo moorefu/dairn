@@ -50,8 +50,10 @@ test('运行时 SHA256 与包内 APE 一致', () => {
 test('npm 包元数据与 MIT 许可证一致', () => {
   const pkg=JSON.parse(fs.readFileSync(path.join(source,'package.json'),'utf8'));
   assert.equal(pkg.license,'MIT');
+  assert.equal(pkg.author,'moorefu <chengmu.fu@gmail.com>');
   const license=fs.readFileSync(path.join(source,'LICENSE'),'utf8');
   assert.match(license,/^MIT License/);
+  assert.match(license,/Copyright \(c\) 2026 moorefu <chengmu\.fu@gmail\.com>/);
   assert.match(license,/Permission is hereby granted/);
 });
 

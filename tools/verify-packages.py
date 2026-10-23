@@ -181,6 +181,8 @@ def verify():
                 metadata = zipped.read(f'dairn-{WHEEL_VERSION}.dist-info/METADATA').decode()
                 assert f'Version: {WHEEL_VERSION}' in metadata.splitlines()
                 assert 'License: MIT' in metadata.splitlines(), 'Wheel METADATA 必须声明 MIT 许可证'
+                assert 'Author: moorefu' in metadata.splitlines(), 'Wheel METADATA 必须声明作者'
+                assert 'Author-email: chengmu.fu@gmail.com' in metadata.splitlines(), 'Wheel METADATA 必须声明作者邮箱'
                 for name, digest, length in csv.reader(io.StringIO(zipped.read(f'dairn-{WHEEL_VERSION}.dist-info/RECORD').decode())):
                     if digest:
                         data = zipped.read(name)

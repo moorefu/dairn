@@ -51,6 +51,7 @@ def metadata():
             'Summary: 基于原生 QuickJS 的开发治理内核\nRequires-Python: >=3.10\n'
             'License: MIT\n'
             'Classifier: License :: OSI Approved :: MIT License\n'
+            'Author: moorefu\nAuthor-email: chengmu.fu@gmail.com\n'
             'Description-Content-Type: text/markdown\n\n' + (ROOT / 'README.md').read_text(encoding='utf-8')).encode('utf-8')
 
 def wheel_from_files(files, destination):

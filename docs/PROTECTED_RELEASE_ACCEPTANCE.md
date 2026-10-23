@@ -192,10 +192,10 @@ gh api --method PUT "repos/$GITHUB_REPOSITORY/rulesets/$MAIN_RULESET_ID" --input
 
 ## 四、许可证
 
-2026-10-23 维护者决定 **Dairn 自有代码采用 MIT 许可证**；根目录 `LICENSE` 为授权文本，`licenses/` 仅保留 Cosmopolitan/QuickJS 等第三方声明。以下同步点已在源码中完成：
+2026-10-23 维护者决定 **Dairn 自有代码采用 MIT 许可证**，版权署名为 `moorefu <chengmu.fu@gmail.com>`；根目录 `LICENSE` 为授权文本，`licenses/` 仅保留 Cosmopolitan/QuickJS 等第三方声明。以下同步点已在源码中完成：
 
-- `package.json` `license: "MIT"`；npm tarball 自动包含根 `LICENSE`。
-- `pyproject.toml` 声明 MIT 与 MIT classifier；Wheel METADATA 写入 `License: MIT` 与 MIT classifier，并在 `dist-info/licenses/LICENSE` 附带授权文本；ZIP 根目录携带 `LICENSE`。
+- `package.json` `license: "MIT"`、`author: "moorefu <chengmu.fu@gmail.com>"`；npm tarball 自动包含根 `LICENSE`。
+- `pyproject.toml` 声明 MIT、MIT classifier 与 authors；Wheel METADATA 写入 `License: MIT`、MIT classifier、`Author`/`Author-email`，并在 `dist-info/licenses/LICENSE` 附带授权文本；ZIP 根目录携带 `LICENSE`。
 - README 增加许可证章节；`tools/release.json` 的源码白名单包含 `LICENSE`；`tools/verify-packages.py` 对 npm tarball、Wheel METADATA/`dist-info/licenses/LICENSE`、ZIP `LICENSE` 做字节与声明校验。
 
 仍需平台/发布侧证据（未完成前不得宣称已完成生产发布验收）：
