@@ -140,10 +140,15 @@ function run(argv, cwd, timeout = 120, capture = true) {
       if (output.length > 1048576) throw new Error('Command output exceeded 1 MiB');
     }
     // Git for Windows crashes with an access violation when its stdout/stderr
-    // handles are inherited file descriptors created by Cosmopolitan (exit code
-    // is a negative Windows exception). Python/node tolerate the same handles.
-    // Fall back to Git's own POSIX sh, which performs the redirection itself.
-    if (os.platform === 'win32' && capture && exitCode !== null && exitCode < 0 && isGitCommand(argv)) {
+    // handles are inherited file descriptors created by Cosmopolitan. Older
+    // builds surfaced that as a negative Windows exception code; newer builds
+    // (2.56+ observed 2026-10) truncate it to small positive codes such as 15.
+    // Git's legitimate exit space is tiny (0..3 plus 128..165 fatal codes), so
+    // on win32 any other code falls back to Git's own POSIX sh, which performs
+    // the redirection itself. Python/node tolerate the same handles.
+    const plausibleGitExit = code => (code >= 0 && code <= 3) || (code >= 128 && code <= 165);
+    if (os.platform === 'win32' && capture && isGitCommand(argv) && exitCode !== null &&
+        (exitCode < 0 || !plausibleGitExit(exitCode))) {
       const retried = runGitViaSh(argv, cwd, timeout);
       if (retried) return retried;
     }
