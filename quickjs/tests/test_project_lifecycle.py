@@ -36,7 +36,9 @@ class Lifecycle(unittest.TestCase):
         self.ok('doctor','--root',self.root)
         self.ok('validate','--root',self.root)
         self.ok('check','--root',self.root,'--all')
-        e=json.loads(sorted((self.root/'.dairn/governance/evidence/runs').glob('*/*/run.json'))[-1].read_text())
+        # No git repository here: the execution audit record (not a v1 run) is written.
+        e=json.loads(sorted((self.root/'.dairn/governance/evidence').glob('execution-*.json'))[-1].read_text())
+        self.assertEqual(e['schema'],'dairn.execution-record.v1')
         self.assertEqual(len(e['checks']),4)
         self.assertEqual({c['status'] for c in e['checks']},{'passed'})
     def test_auto_detect_multi_stack(self):

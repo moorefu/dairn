@@ -26,17 +26,21 @@ class AuditLogs(unittest.TestCase):
         return result
 
     def evidence(self):
-        runs=sorted((self.root/'.dairn/governance/evidence/runs').glob('*/*/run.json'))
-        self.assertTrue(runs,'no v1 run evidence written')
-        return json.loads(runs[-1].read_text(encoding='utf-8'))
+        # This project is intentionally not a git repository: the check writes
+        # an execution audit record (dairn.execution-record.v1), not a run.
+        records=sorted((self.root/'.dairn/governance/evidence').glob('execution-*.json'))
+        self.assertTrue(records,'no execution record written')
+        return json.loads(records[-1].read_text(encoding='utf-8'))
 
     def resolve(self,relative):
         path=Path(relative)
         return path if path.is_absolute() else self.root/path
 
     def assert_gate_logs(self,run):
-        logs_dir=self.resolve(run['execution']['logs_dir'])
-        self.assertTrue(logs_dir.is_dir(),run['execution']['logs_dir'])
+        # v1 runs keep logs_dir under execution; execution records put it at the top level.
+        logs_rel=run.get('execution',{}).get('logs_dir') or run.get('logs_dir')
+        logs_dir=self.resolve(logs_rel)
+        self.assertTrue(logs_dir.is_dir(),logs_rel)
         non_empty=[]
         for check in run['checks']:
             for key in ('log','log_sha256','log_truncated'):

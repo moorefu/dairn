@@ -8,7 +8,7 @@ set -eu
 : "${DAIRN_CI_BIN:?Path to externally provisioned trusted Dairn launcher required}"
 : "${DAIRN_TRUSTED_CI_PUBLIC_KEY:?Public-key file must be CI-controlled}"
 : "${DAIRN_EVIDENCE_DIR:?Restored evidence directory (with statement + signature) required}"
-: "${DAIRN_EVIDENCE_REF_NAME:-refs/heads/dairn-evidence}"
+DAIRN_EVIDENCE_REF_NAME=${DAIRN_EVIDENCE_REF_NAME:-refs/heads/dairn-evidence}
 EVIDENCE_BRANCH=${DAIRN_EVIDENCE_REF_NAME#refs/heads/}
 [ "${DAIRN_CI_BIN#/}" != "$DAIRN_CI_BIN" ] || { echo 'Trusted Dairn must have absolute path' >&2; exit 2; }
 case "$DAIRN_EVIDENCE_DIR" in "$PWD"/*) ;; *) echo 'DAIRN_EVIDENCE_DIR must live inside the project checkout' >&2; exit 2;; esac

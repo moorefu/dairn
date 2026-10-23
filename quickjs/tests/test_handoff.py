@@ -87,18 +87,19 @@ class HandoffE2E(unittest.TestCase):
         self.assertIn('--base', bad.stdout + bad.stderr)
 
     def test_hnd05_rename_and_since_base_changes(self):
-        (self.repo / 'src' ).mkdir()
+        (self.repo / 'src').mkdir()
         (self.repo / 'src' / 'a.go').write_text('package a\n')
         self.git('add', '.')
         self.git('commit', '-qm', 'add a.go')
+        base = self.git('rev-parse', 'HEAD')
         self.git('mv', 'src/a.go', 'src/b.go')
         self.git('commit', '-qm', 'rename a.go to b.go')
-        view = self.obj('handoff', '--base', self.baseline)
+        view = self.obj('handoff', '--base', base)
         self.assertEqual(view['activity']['range'], 'since-base')
         renames = [c for c in view['activity']['changes'] if c['status'] == 'R']
         self.assertEqual(len(renames), 1)
         self.assertEqual((renames[0]['path'], renames[0]['from']), ('src/b.go', 'src/a.go'))
-        self.assertEqual(len(view['activity']['commits']), 2)
+        self.assertEqual(len(view['activity']['commits']), 1)
 
     def test_hnd06_local_evidence_and_task_references(self):
         head = self.git('rev-parse', 'HEAD')

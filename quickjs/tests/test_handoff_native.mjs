@@ -100,7 +100,8 @@ test('HND-05 CJK paths, spaces and renames parse exactly', () => {
   const view = captureHandoff(handoffHost(defaultState({
     mergeBase: other,
     status: nul('?? 中文 目录/文件 名.txt|?? with space.txt|'),
-    nameStatus: nul('R100|renamed-new.go|renamed-old.go|') })), workdir('hnd5'), {});
+    /* git diff --name-status -z emits renames as R<score>\0<old>\0<new>\0. */
+    nameStatus: nul('R100|renamed-old.go|renamed-new.go|') })), workdir('hnd5'), {});
   assert(JSON.stringify(view.workspace.untracked) === JSON.stringify(['中文 目录/文件 名.txt', 'with space.txt']), 'cjk/space paths wrong: ' + JSON.stringify(view.workspace.untracked));
   assert(view.activity.range === 'since-base', 'expected a since-base range');
   assert(view.activity.changes[0].path === 'renamed-new.go' && view.activity.changes[0].from === 'renamed-old.go', 'rename wrong');

@@ -140,9 +140,15 @@ class AgentProtocol(unittest.TestCase):
         self.assertIn('Policy changed',result.stdout+result.stderr)
 
     def gate_reason(self,project,gate='lint'):
-        runs=sorted((Path(project)/'.dairn/governance/evidence/runs').glob('*/*/run.json'))
-        run=json.loads(runs[-1].read_text(encoding='utf-8'))
-        record=next(c for c in run['checks'] if c['id']==gate)
+        root=Path(project)
+        runs=sorted((root/'.dairn/governance/evidence/runs').glob('*/*/run.json'))
+        if runs:
+            data=json.loads(runs[-1].read_text(encoding='utf-8'))
+        else:
+            # Non-Git projects record an execution audit file instead of a run.
+            records=sorted((root/'.dairn/governance/evidence').glob('execution-*.json'))
+            data=json.loads(records[-1].read_text(encoding='utf-8'))
+        record=next(c for c in data['checks'] if c['id']==gate)
         return record.get('reason') or ''
     def test_go_lint_git_mode_empty_list_fails_closed(self):
         empty=Path(self.tmp.name)/'empty-go'

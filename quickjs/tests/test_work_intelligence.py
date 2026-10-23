@@ -150,8 +150,9 @@ class WorkIntelligence(unittest.TestCase):
     def test_validate_and_real_go_baseline(self):
         self.ok('validate','--root',self.repo)
         result=self.call('check','--all','--root',self.repo)
-        runs=sorted((self.repo/'.dairn/governance/evidence/runs').glob('*/*/run.json'))
-        evidence=runs[-1]
+        # Not a git repository: an execution audit record (not a v1 run) is written.
+        records=sorted((self.repo/'.dairn/governance/evidence').glob('execution-*.json'))
+        evidence=records[-1]
         output_dir=os.environ.get('DAIRN_TEST_EVIDENCE_DIR')
         if output_dir:
             output=Path(output_dir)
@@ -160,13 +161,13 @@ class WorkIntelligence(unittest.TestCase):
             (output/'linux-go-checks.json').write_bytes(evidence.read_bytes())
         self.assertEqual(result.returncode,0,result.stdout+'\n'+result.stderr)
         data=json.loads(evidence.read_text(encoding='utf-8'))
-        self.assertEqual(data['schema'],'dairn.check-run.v1')
-        self.assertEqual(data['declared_assurance'],'local-observed')
+        self.assertEqual(data['schema'],'dairn.execution-record.v1')
+        self.assertEqual(data['status'],'passed')
         checks={c['id']:c for c in data['checks']}
         self.assertEqual(set(checks),{'lint','unit','integration','build'})
         for check in checks.values():
             self.assertEqual(check['status'],'passed')
-            self.assertEqual(check['returncode'],0)
+            self.assertEqual(check['exit_code'],0)
             self.assertFalse(check['timed_out'])
         self.assertEqual(checks['integration']['argv'],['go','test','-race','./...'])
 

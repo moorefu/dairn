@@ -57,16 +57,18 @@ function parseLog(raw) {
   }).filter(Boolean);
 }
 
-/* `git diff --name-status -z`: `A\0path\0` and `Rxxx\0new\0old\0`. */
+/* `git diff --name-status -z`: plain entries are `A\0path\0`; renames are
+ * `R<score>\0<old>\0<new>\0` — the OLD path comes first here, the opposite
+ * of `git status --porcelain -z` rename records. */
 function parseNameStatus(raw) {
   const out = [];
   const parts = String(raw || '').split('\0');
   for (let i = 0; i < parts.length; i++) {
     const status = parts[i];
     if (!status) continue;
-    if (status[0] === 'R') {
-      const next = parts[i + 1], origin = parts[i + 2];
-      if (next != null) { out.push({status: 'R', path: next, from: origin || null}); i += 2; continue; }
+    if (status[0] === 'R' || status[0] === 'C') {
+      const origin = parts[i + 1], next = parts[i + 2];
+      if (origin != null && next != null) { out.push({status: status[0], path: next, from: origin}); i += 2; continue; }
     }
     const next = parts[i + 1];
     if (next == null) break;

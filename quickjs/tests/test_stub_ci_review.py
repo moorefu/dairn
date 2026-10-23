@@ -100,9 +100,10 @@ class StubCIReview(unittest.TestCase):
   ok_verify=verify(pub);self.assertEqual(ok_verify.returncode,0,ok_verify.stdout+'\n'+ok_verify.stderr)
   # Gate composition (v1 protocol inputs). Post-merge trusts the signed build
   # chain (approval was enforced pre-merge by the platform); pre-merge without
-  # approval evidence stays INDETERMINATE, never a silent pass.
+  # approval evidence stays INDETERMINATE, never a silent pass. The gate binds
+  # the verified statement to THIS run id, so the fixture reuses the real one.
   self.subject_file(head)
-  v1run=self.v1_run_file(head)
+  v1run=self.v1_run_file(head,run_id)
   gate=lambda stage='post-merge',key=None: self.call('gate','evaluate','--subject','.dairn/governance/evidence/subject.json',
    '--policy','.dairn/governance/project.json','--check',v1run,
    '--attestation','.dairn/governance/evidence/statement.json',
@@ -133,13 +134,13 @@ class StubCIReview(unittest.TestCase):
   path.write_text(json.dumps({'schema':'dairn.subject.v1','repository':'sample/project','kind':'git-commit',
    'source_commit':commit,'tree_sha':tree,'base_commit':None,'comparison':'base-to-source'}))
   return '.dairn/governance/evidence/subject.json'
- def v1_run_file(self,commit):
+ def v1_run_file(self,commit,run_id='run-gatefixture-0001'):
   tree=self.git('rev-parse','HEAD^{tree}')
   path=self.project/'.dairn/governance/evidence/gate-check.json'
   # Full L2 matrix for the sample project's single module (gate enforces
-  # (module, check) coverage — a lint-only run can no longer gate L2).
+  # (module, check) coverage and binds the attestation to this exact run).
   checks=[{'id':g,'module':'app','status':'passed','exit_code':0} for g in ('lint','unit','integration','build')]
-  path.write_text(json.dumps({'schema':'dairn.check-run.v1','run_id':'run-gatefixture-0001',
+  path.write_text(json.dumps({'schema':'dairn.check-run.v1','run_id':run_id,
    'subject':{'schema':'dairn.subject.v1','repository':'sample/project','kind':'git-commit',
     'source_commit':commit,'tree_sha':tree,'base_commit':None,'comparison':'base-to-source'},
    'execution':{'environment':'local','policy_sha256':'0'*64},
