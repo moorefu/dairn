@@ -18,4 +18,12 @@ PR/MR 使用不带秘密的质量门禁；仅受保护主分支 Push 才能进�
 2. **Separated Signer**：通过 CI 平台从同一流水线取得证据，独立校验来源、HEAD、策略、运行时和成功检查，不执行任何项目编译、测试或 Stub。私钥仅可在这个隔离的 Runner/密钥服务中访问。签署并附加与证据哈希绑定的 Ed25519 声明。
 3. **Verify/Gate**：`dairn attest verify` 使用外部受信公钥（必须在项目检出之外）验签 statement 原始字节并绑定受信 CI 上下文；`dairn evidence verify` 独立复核 bundle 成员摘要；`dairn gate evaluate` 组合 Check/Approval/Attestation 输出 PASS/FAIL/INDETERMINATE。任务账本只通过 `dairn work link-check --run <run-id>` 引用已有 Run，不产生可信声明；人工审批和合并策略仍独立生效。
 
+## Gate 输入的信任绑定
+
+`dairn gate evaluate` 只消费能自证来源的输入，不接受自述 JSON：
+
+- **检查矩阵**：按可信 Policy 对给定风险级别（默认保守 L2）要求的 `(module_id, check_id)` 逐一配对校验；`--modules` 显式给出受影响模块，缺省按 Policy 全部模块（保守超集）。一个模块通过某检查不能覆盖另一个模块的同名检查；缺少模块身份的检查记录不构成覆盖证明。
+- **已验签声明**：`--attestation` 必须与 `--signature`、`--key`（CI 控制的绝对路径公钥）同时给出；Gate 内部先执行真实 Ed25519 验签并消费验签结果，裸 statement JSON 直接拒绝。声明还需绑定本次 Subject（repository/commit/tree）与被评估的 run_id。
+- **审批身份绑定**：Approval verdict 的 `subject.repository` 与 `subject.reviewed_head_sha` 必须与本次 Subject 匹配；来自其他仓库或旧 head 的审批记录不产生授权。
+
 这不是 DSSE、in-toto 或 SLSA 认证，且签名不能独立证明测试执行真实性。测试作业的信誉、Job 权限、可信制品分发、CI 服务器认证、流水线 artifact 身份、密钥和 Runner 隔离必须在实际生产 CI 平台验收。签名后的 Push 检查不可代替 PR 合并前的 required checks。

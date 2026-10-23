@@ -42,7 +42,7 @@ export function runtimeIdentity(h){
   for(const x of m.assets||[]) invariant(sha256(read(h,ASSETS+x.type+'/'+x.path))===x.sha256,'Embedded asset checksum mismatch: '+x.path);
   return sha256(raw);
 }
-const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--ci','--base','--timeout','--id','--kind','--precision','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--snapshot','--origin'];
+const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--precision','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin'];
 const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
 function argsParse(args){
   const out={cmd:args[0]||'help',pos:[],root:'.',stack:'auto',ci:'none',timeout:120};
@@ -620,15 +620,33 @@ function gateCmd(h,o,root){
   const op=o.pos[0]||'evaluate';
   invariant(op==='evaluate','Usage: dairn gate evaluate --subject <s.json> --policy <p.json> [...]');
   invariant(o.subject&&o.policy,'gate evaluate requires --subject and --policy');
-  const input={
-    subject:readJsonRel(h,root,o.subject,'subject'),
-    policy:readJsonRel(h,root,o.policy,'policy'),
-    check:o.check?readJsonRel(h,root,o.check,'check run') : null,
-    approval:o.approval?readJsonRel(h,root,o.approval,'approval verdict') : null,
-    attestation:o.attestation?readJsonRel(h,root,o.attestation,'attestation statement') : null,
-    context:o.context?readJsonRel(h,root,o.context,'context') : {},
-    requiredStage:o.stage||'pre-merge'};
-  const verdict=gateEvaluate({...input,trustedPolicy:input.policy});
+  // P0: the gate consumes the RESULT of real Ed25519 verification, never a
+  // bare statement JSON (consolidated plan §2.2). A statement without its
+  // signature and CI-controlled public key cannot gate anything.
+  if(o.attestation)invariant(o.signature&&o.key,
+    'gate evaluate --attestation requires --signature <sig> and --key <absolute trusted pubkey> (real Ed25519 verification)');
+  const subject=readJsonRel(h,root,o.subject,'subject');
+  const policy=readJsonRel(h,root,o.policy,'policy');
+  const check=o.check?readJsonRel(h,root,o.check,'check run') : null;
+  const approval=o.approval?readJsonRel(h,root,o.approval,'approval verdict') : null;
+  const context=o.context?readJsonRel(h,root,o.context,'context') : {};
+  let verifiedAttestation=null;
+  if(o.attestation){
+    const statement=readJsonRel(h,root,o.attestation,'attestation statement');
+    let verified;
+    try { verified=verifyAttestation(h,root,o.attestation,o.signature,o.key,context); }
+    catch(e){
+      const failed={schema:'dairn.gate-verdict.v1',status:'FAIL',
+        reasons:['attestation verification failed: '+String(e&&e.message||e)]};
+      if(o.json)h.log(fmt(failed));
+      else h.error('ERROR gate: FAIL — '+failed.reasons[0]);
+      return 1;
+    }
+    verifiedAttestation={...verified,schema:'dairn.verified-attestation.v1',statement};
+  }
+  const modules=o.modules?String(o.modules).split(',').map(x=>x.trim()).filter(Boolean):null;
+  const verdict=gateEvaluate({subject,policy,check,approval,context,verifiedAttestation,modules,
+    risk:o.risk||null,requiredStage:o.stage||'pre-merge',trustedPolicy:policy});
   if(o.json)h.log(fmt(verdict));
   else h.log('gate: '+verdict.status+(verdict.reasons.length?' — '+verdict.reasons.join('; '):''));
   return verdict.status==='PASS'?0:verdict.status==='INDETERMINATE'?3:1;

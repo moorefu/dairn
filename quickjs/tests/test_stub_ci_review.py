@@ -103,12 +103,16 @@ class StubCIReview(unittest.TestCase):
   # approval evidence stays INDETERMINATE, never a silent pass.
   self.subject_file(head)
   v1run=self.v1_run_file(head)
-  gate=lambda stage='post-merge': self.call('gate','evaluate','--subject','.dairn/governance/evidence/subject.json',
+  gate=lambda stage='post-merge',key=None: self.call('gate','evaluate','--subject','.dairn/governance/evidence/subject.json',
    '--policy','.dairn/governance/project.json','--check',v1run,
-   '--attestation','.dairn/governance/evidence/statement.json','--context','.dairn/governance/evidence/ci-context.json',
+   '--attestation','.dairn/governance/evidence/statement.json',
+   '--signature','.dairn/governance/evidence/statement.json.sig','--key',str(key or pub),
+   '--context','.dairn/governance/evidence/ci-context.json',
    '--stage',stage,'--root',self.project)
   self.assertEqual(gate().returncode,0)
   self.assertEqual(gate('pre-merge').returncode,3)
+  # Wrong public key: real Ed25519 verification fails closed, never PASS.
+  self.assertEqual(gate(key=wrong).returncode,1)
   # Review requires explicit, current-head two-axis decision.
   review=self.project/'review.json'
   review.write_text(json.dumps({'standards':'pass','spec_fidelity':'not-applicable','head':'0'*40}))
@@ -132,11 +136,14 @@ class StubCIReview(unittest.TestCase):
  def v1_run_file(self,commit):
   tree=self.git('rev-parse','HEAD^{tree}')
   path=self.project/'.dairn/governance/evidence/gate-check.json'
+  # Full L2 matrix for the sample project's single module (gate enforces
+  # (module, check) coverage — a lint-only run can no longer gate L2).
+  checks=[{'id':g,'module':'app','status':'passed','exit_code':0} for g in ('lint','unit','integration','build')]
   path.write_text(json.dumps({'schema':'dairn.check-run.v1','run_id':'run-gatefixture-0001',
    'subject':{'schema':'dairn.subject.v1','repository':'sample/project','kind':'git-commit',
     'source_commit':commit,'tree_sha':tree,'base_commit':None,'comparison':'base-to-source'},
    'execution':{'environment':'local','policy_sha256':'0'*64},
-   'required_checks':['lint'],'checks':[{'id':'lint','status':'passed','exit_code':0}],
+   'required_checks':['lint','unit','integration','build'],'checks':checks,
    'status':'passed','declared_assurance':'local-observed','related_tasks':[]}))
   return '.dairn/governance/evidence/gate-check.json'
  def test_ci_stub_requires_external_hash(self):
