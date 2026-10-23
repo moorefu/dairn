@@ -14,7 +14,8 @@ import {evaluate as gateEvaluate} from '../core/gate.mjs';
 import {validateWorkflowMapping, adaptWorkflow, defaultWorkflowMapping} from '../core/workflow-adapter.mjs';
 import {validatePolicyV1, resolvePolicy, requiredChecksFor, approvalPolicyFor} from '../core/policy-resolver.mjs';
 
-const base = (std.getenv('TMPDIR') || std.getenv('TEMP') || std.getenv('TMP') || os.getcwd()).replace(/\\/g, '/') + '/dairn-governance-' + os.getpid() + '-' + Date.now();
+// os.getcwd() 在此 QuickJS 返回 [path, err] 元组；host.cwd() 已正确解构。
+const base = (std.getenv('TMPDIR') || std.getenv('TEMP') || std.getenv('TMP') || realHost.cwd()).replace(/\\/g, '/') + '/dairn-governance-' + os.getpid() + '-' + Date.now();
 realHost.mkdirs(base);
 const tests = [];
 let failures = 0;

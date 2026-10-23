@@ -275,13 +275,20 @@ function checks(h,root,opts,st,raw,validation,stats) {
   const logsRel='.dairn/governance/evidence/logs/'+logRunKey;
   // 工作树身份只在会成为门禁证据的运行里捕获（任务检查、hook、baseline）。
   // 纯预览证据不参与任何门禁，避免在大型未追踪目录上做无意义的全量摘要。
-  const worktree=(opts.task||opts.hook||opts.all)?captureWorktree(h,root,opts.timeout,opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[]):null;
+  // 捕获失败（例如 tracked symlink 输入）fail closed：记录为整体失败但仍写
+  // 证据文件，让门禁 reason 可审计，而不是让整个 check 无证据崩溃。
+  let worktree=null,worktreeError=null;
+  if(opts.task||opts.hook||opts.all){
+    try{worktree=captureWorktree(h,root,opts.timeout,opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[]);}
+    catch(e){worktreeError=String(e&&e.message||e);}
+  }
   const report={schema_version:opts.task?2:1,engine:'dairn-quickjs',assurance:'technical-checks-only',mode:opts.all?'baseline-all':opts.hook?'pre-push-gate':'risk-gate-preview',
     risk,governance_mode:opts.all?'G2':st.governance_mode,review_pending:opts.all?true:st.review_pending,
     base:opts.all?null:st.base,head:opts.all?null:st.head,utc:h.now(),changed_paths:opts.all?[]:st.paths,
-    policy_sha256:sha256(raw),...(worktree?{worktree}:{}),governance_validation:{status:'passed',validators:Object.keys(validation.detail).sort(),error_count:0},checks:[],logs_dir:logsRel};
+    policy_sha256:sha256(raw),...(worktree?{worktree}:{}),snapshot_error:worktreeError,governance_validation:{status:'passed',validators:Object.keys(validation.detail).sort(),error_count:0},checks:[],logs_dir:logsRel};
   if(opts.hook) report.trust='local-unattested';
-  let failed=false;
+  let failed=!!worktreeError;
+  if(worktreeError)h.error('ERROR: worktree snapshot failed: '+worktreeError);
   if (!opts.all && !st.paths.length) {
     if(opts.task)throw Error('Task-linked check requires changed paths and actual selected checks');
     if(stats){stats.checks=0;stats.failed=false;}
@@ -340,7 +347,11 @@ function checks(h,root,opts,st,raw,validation,stats) {
   let v1Ref=null,v1Run=null;
   if(!headProbe.timedOut&&headProbe.code===0&&/^([0-9a-f]{40,64})\s*$/i.test(headProbe.output||'')){
     const treeSha=headProbe.output.trim();
-    const snapAfter=(opts.task&&worktree)?captureWorktree(h,root,opts.timeout,opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[]):null;
+    let snapAfter=null,snapAfterFailed=false;
+    if(opts.task&&worktree&&!worktreeError){
+      try{snapAfter=captureWorktree(h,root,opts.timeout,opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[]);}
+      catch(e){snapAfterFailed=true;}
+    }
     const created=createCheckRun({subject:{schema:'dairn.subject.v1',repository:repositoryOf(h,root,opts.timeout),kind:'git-commit',
         source_commit:st.head??command(h,['git','rev-parse','HEAD'],root,opts.timeout).trim(),tree_sha:treeSha,
         base_commit:opts.all?null:st.base,comparison:'base-to-source'},
@@ -351,7 +362,7 @@ function checks(h,root,opts,st,raw,validation,stats) {
       required_checks:[...required],
       checks:report.checks.map(c=>({id:c.gate,module:c.module,status:c.timed_out?'timeout':c.status,
         exit_code:c.returncode,argv:c.argv??null,log_sha256:c.output_sha256??null})),
-      status:(snapAfter&&worktree&&snapAfter.snapshot_sha256!==worktree.snapshot_sha256)?'invalidated':(failed?'failed':'passed'),
+      status:(snapAfterFailed||(snapAfter&&worktree&&snapAfter.snapshot_sha256!==worktree.snapshot_sha256))?'invalidated':(failed?'failed':'passed'),
       declared_assurance:'local-observed',related_tasks:opts.task?[opts.task]:[],
       run_id:opts.task?report.run_id:null,now:h.now()});
     v1Run=created;v1Ref=writeRunEvidence(h,root,v1Run);

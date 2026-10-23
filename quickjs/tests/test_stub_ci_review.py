@@ -9,6 +9,8 @@ class StubCIReview(unittest.TestCase):
   self.dir=Path(self.t.name);self.project=self.dir/'project'
   self.call('init','--path',self.project,'--stack','go','--sample',ok=True)
   self.git('init','-q');self.git('config','user.email','tester@example.test');self.git('config','user.name','tester')
+  # v1 subject 的 repository 从 remote 推导；CI 上下文绑定要求两者一致。
+  self.git('remote','add','origin','https://github.com/sample/project.git')
  def call(self,*args,env=None,ok=False):
   proc=subprocess.run([str(CLI),*map(str,args)],cwd=self.dir,env={**os.environ,**(env or {})},capture_output=True,text=True,timeout=150)
   if ok:self.assertEqual(proc.returncode,0,proc.stdout+'\n'+proc.stderr)
@@ -82,7 +84,7 @@ class StubCIReview(unittest.TestCase):
   run_id=next(line.split()[-2] for line in check.stdout.splitlines() if line.startswith('Linked task run'))
   self.obj('work','advance','auth')
   # Standalone evidence: bundle the run, prepare a v1 statement, sign externally, verify.
-  self.call('evidence','bundle','--run',run_id,'--evidence','.dairn/governance/evidence/'+run_id+'-checks.json',
+  self.call('evidence','bundle','--run',run_id,
             '--out','.dairn/governance/evidence/bundle.json','--root',self.project,ok=True)
   context=self.project/'.dairn/governance/evidence/ci-context.json'
   context.write_text(json.dumps({'provider':'gitlab','repository':'sample/project','workflow_ref':'refs/heads/main',
@@ -95,15 +97,17 @@ class StubCIReview(unittest.TestCase):
   verify=lambda key,commit=head: self.call('attest','verify','--statement','.dairn/governance/evidence/statement.json',
    '--signature','.dairn/governance/evidence/statement.json.sig','--key',str(key),'--context','.dairn/governance/evidence/ci-context.json','--root',self.project)
   self.assertNotEqual(verify(wrong).returncode,0)
-  self.assertEqual(verify(pub).returncode,0)
-  # Gate composition (v1 protocol inputs): missing approval -> INDETERMINATE (3).
+  ok_verify=verify(pub);self.assertEqual(ok_verify.returncode,0,ok_verify.stdout+'\n'+ok_verify.stderr)
+  # Gate composition (v1 protocol inputs). Post-merge trusts the signed build
+  # chain (approval was enforced pre-merge by the platform); pre-merge without
+  # approval evidence stays INDETERMINATE, never a silent pass.
   self.subject_file(head)
   v1run=self.v1_run_file(head)
   gate=lambda stage='post-merge': self.call('gate','evaluate','--subject','.dairn/governance/evidence/subject.json',
    '--policy','.dairn/governance/project.json','--check',v1run,
    '--attestation','.dairn/governance/evidence/statement.json','--context','.dairn/governance/evidence/ci-context.json',
    '--stage',stage,'--root',self.project)
-  self.assertEqual(gate().returncode,3)
+  self.assertEqual(gate().returncode,0)
   self.assertEqual(gate('pre-merge').returncode,3)
   # Review requires explicit, current-head two-axis decision.
   review=self.project/'review.json'

@@ -21,6 +21,8 @@ class TrustedCIAndPortableStub(unittest.TestCase):
         self.project = self.work/'project'
         self.exec(CLI,'init','--path',self.project,'--stack','go','--sample',cwd=self.work)
         self.git('init','-q')
+        # v1 subject 的 repository 从 remote 推导，须与 CI_PROJECT_PATH 一致。
+        self.git('remote','add','origin','https://gitlab.com/sample/project.git')
         self.git('config','user.name','Dairn Test')
         self.git('config','user.email','dairn@example.test')
 
@@ -128,11 +130,14 @@ class TrustedCIAndPortableStub(unittest.TestCase):
         context=self.project/'.dairn/governance/evidence/ci-context.json'
         context.write_text(json.dumps({'provider':'gitlab','repository':'sample/project','workflow_ref':'refs/heads/main',
             'pipeline_id':'200','build_job_id':'100','source_commit':head,'event':'push'}))
-        def attest_verify(ctx):
+        def attest_verify(ctx, pass_required=False):
+            # 预期拒绝的场合（foreign context）由调用方的 assertNotEqual 判定，
+            # exec 内不得先按 returncode==0 断言。
             return self.dairn('attest','verify','--statement','.dairn/governance/evidence/statement.json',
                 '--signature','.dairn/governance/evidence/statement.json.sig','--key',str(pub),
-                '--context',str(ctx) if str(ctx).startswith('/') else '.dairn/governance/evidence/'+str(ctx))
-        self.assertEqual(attest_verify(context).returncode,0)
+                '--context',str(ctx) if str(ctx).startswith('/') else '.dairn/governance/evidence/'+str(ctx),
+                pass_required=pass_required)
+        self.assertEqual(attest_verify(context,pass_required=True).returncode,0)
         foreign=self.project/'.dairn/governance/evidence/foreign-context.json'
         foreign.write_text(json.dumps({'provider':'gitlab','repository':'evil/project','workflow_ref':'refs/heads/main',
             'pipeline_id':'200','build_job_id':'100','source_commit':head,'event':'push'}))

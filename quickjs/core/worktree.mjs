@@ -111,7 +111,13 @@ export function captureWorktree(h, root, timeout = 120, exclude = [], options = 
     declared_ignored_count: entries.filter(x => x.status === 'ignored-declared').length,
     uncovered_inputs: uncovered
   };
-  result.snapshot_sha256 = sha256(JSON.stringify(result));
+  // 快照身份只由被检查的输入闭包决定：exclusions/exclusions_sha256 是调用方
+  // 视角（任务证据会随推进增长），同一输入闭包在排除列表变化前后必须保持
+  // 相同身份，否则按 sha 绑定的推进校验会自我失效。两者保留为审计元数据。
+  const identity = { ...result };
+  delete identity.exclusions;
+  delete identity.exclusions_sha256;
+  result.snapshot_sha256 = sha256(JSON.stringify(identity));
   result.identity_sha256 = result.snapshot_sha256;
   return result;
 }

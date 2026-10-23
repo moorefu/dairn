@@ -24,8 +24,9 @@ else
 fi
 # Standalone check run: no --task, no work ledger dependency.
 "$DAIRN_CI_BIN" check --base "$BASE" --root "$PWD"
-RUN_JSON=.dairn/governance/evidence/$(printf '%s' "$HEAD" | cut -c1-12)-qjs-checks.json
-[ -f "$RUN_JSON" ] || { echo "Expected standalone check evidence not found: $RUN_JSON" >&2; exit 2; }
+# v1 protocol evidence carries the run id (the legacy report may not).
+RUN_JSON=$(ls ".dairn/governance/evidence/runs/$HEAD/"*/run.json 2>/dev/null | head -1)
+[ -n "$RUN_JSON" ] || { echo "Expected v1 check evidence not found under runs/$HEAD/" >&2; exit 2; }
 RUN_ID=$(jq -er '.run_id // empty' "$RUN_JSON")
 [ -n "$RUN_ID" ] || { echo 'Check evidence has no run_id' >&2; exit 2; }
 ORIGIN=.dairn/governance/evidence/ci-build-origin.json
