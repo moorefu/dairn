@@ -78,35 +78,63 @@ class StubCIReview(unittest.TestCase):
   self.assertNotEqual(self.call('guide','impact','--precision','surface','--root',self.project).returncode,0)
  def test_external_signed_attestation_review_and_synchronize(self):
   self.task();base=self.base();self.change();head=self.git('rev-parse','HEAD')
-  self.call('check','--base',base,'--task','auth','--root',self.project,ok=True)
+  check=self.call('check','--base',base,'--task','auth','--root',self.project,ok=True)
+  run_id=next(line.split()[-2] for line in check.stdout.splitlines() if line.startswith('Linked task run'))
   self.obj('work','advance','auth')
-  # Unsigned/local evidence does not satisfy protected CI requirement.
-  fail=self.call('work','verify','auth','--require-ci-attestation','--root',self.project)
-  self.assertNotEqual(fail.returncode,0)
-  env={'DAIRN_CI_PROVIDER':'gitlab','DAIRN_CI_JOB_ID':'trusted-job-100'}
-  prep=self.obj('work','attest-prepare','auth',env=env)
-  payload=self.project/prep['payload'];sig=self.project/(prep['payload']+'.sig')
+  # Standalone evidence: bundle the run, prepare a v1 statement, sign externally, verify.
+  self.call('evidence','bundle','--run',run_id,'--evidence','.dairn/governance/evidence/'+run_id+'-checks.json',
+            '--out','.dairn/governance/evidence/bundle.json','--root',self.project,ok=True)
+  context=self.project/'.dairn/governance/evidence/ci-context.json'
+  context.write_text(json.dumps({'provider':'gitlab','repository':'sample/project','workflow_ref':'refs/heads/main',
+   'pipeline_id':'200','build_job_id':'100','source_commit':head,'event':'push'}))
+  prep=self.call('attest','prepare','--bundle','.dairn/governance/evidence/bundle.json',
+   '--context','.dairn/governance/evidence/ci-context.json','--out','.dairn/governance/evidence/statement.json','--root',self.project,ok=True)
+  payload=self.project/'.dairn/governance/evidence/statement.json';sig=self.project/(str(payload)+'.sig')
   priv,pub,wrong=self.signkeys()
   subprocess.run(['openssl','pkeyutl','-sign','-inkey',str(priv),'-rawin','-in',str(payload),'-out',str(sig)],check=True,capture_output=True)
-  self.assertNotEqual(self.call('work','attest-attach','auth',prep['payload'],str(sig.relative_to(self.project)),'--root',self.project,env={'DAIRN_TRUSTED_CI_PUBLIC_KEY':str(wrong)}).returncode,0)
-  trust={'DAIRN_TRUSTED_CI_PUBLIC_KEY':str(pub),'DAIRN_TRUSTED_CI_PROVIDER':'gitlab'}
-  attach=self.obj('work','attest-attach','auth',prep['payload'],str(sig.relative_to(self.project)),env=trust)
-  self.assertEqual(attach['status'],'signature-verified')
-  self.call('work','verify','auth','--require-ci-attestation','--root',self.project,env=trust,ok=True)
+  verify=lambda key,commit=head: self.call('attest','verify','--statement','.dairn/governance/evidence/statement.json',
+   '--signature','.dairn/governance/evidence/statement.json.sig','--key',str(key),'--context','.dairn/governance/evidence/ci-context.json','--root',self.project)
+  self.assertNotEqual(verify(wrong).returncode,0)
+  self.assertEqual(verify(pub).returncode,0)
+  # Gate composition (v1 protocol inputs): missing approval -> INDETERMINATE (3).
+  self.subject_file(head)
+  v1run=self.v1_run_file(head)
+  gate=lambda stage='post-merge': self.call('gate','evaluate','--subject','.dairn/governance/evidence/subject.json',
+   '--policy','.dairn/governance/project.json','--check',v1run,
+   '--attestation','.dairn/governance/evidence/statement.json','--context','.dairn/governance/evidence/ci-context.json',
+   '--stage',stage,'--root',self.project)
+  self.assertEqual(gate().returncode,3)
+  self.assertEqual(gate('pre-merge').returncode,3)
   # Review requires explicit, current-head two-axis decision.
   review=self.project/'review.json'
   review.write_text(json.dumps({'standards':'pass','spec_fidelity':'not-applicable','head':'0'*40}))
-  self.assertNotEqual(self.call('work','record','auth','review.json','--kind','review','--root',self.project,env=trust).returncode,0)
+  self.assertNotEqual(self.call('work','record','auth','review.json','--kind','review','--root',self.project).returncode,0)
   review.write_text(json.dumps({'standards':'pass','spec_fidelity':'not-applicable','head':head}))
-  self.obj('work','record','auth','review.json','--kind','review',env=trust)
-  self.call('work','advance','auth','--require-ci-attestation','--root',self.project,env=trust,ok=True)
-  self.assertEqual(self.obj('work','next','auth',env=trust)['current_stage'],'synchronize')
+  self.obj('work','record','auth','review.json','--kind','review')
+  self.call('work','advance','auth','--root',self.project,ok=True)
+  self.assertEqual(self.obj('work','next','auth')['current_stage'],'synchronize')
   sync=self.project/'sync.json';sync.write_text(json.dumps({'status':'no-change','head':head,'reviewed_docs':['README.md'],'reason':'No user-facing documentation or published interface guidance changed in this patch.'}))
-  self.obj('work','record','auth','sync.json','--kind','document',env=trust)
-  self.call('work','finish','auth','--require-ci-attestation','--root',self.project,env=trust,ok=True)
-  # Tamper signed payload even if linkage already exists -> refuse verification.
-  payload.write_text(payload.read_text().replace('trusted-job-100','fake-job'))
-  self.assertNotEqual(self.call('work','verify','auth','--require-ci-attestation','--root',self.project,env=trust).returncode,0)
+  self.obj('work','record','auth','sync.json','--kind','document')
+  self.call('work','finish','auth','--root',self.project,ok=True)
+  # Tamper the signed statement: verification must fail afterwards.
+  payload.write_text(payload.read_text().replace('"pipeline_id":"200"','"pipeline_id":"999"'))
+  self.assertNotEqual(verify(pub).returncode,0)
+ def subject_file(self,commit):
+  path=self.project/'.dairn/governance/evidence/subject.json'
+  tree=self.git('rev-parse','HEAD^{tree}')
+  path.write_text(json.dumps({'schema':'dairn.subject.v1','repository':'sample/project','kind':'git-commit',
+   'source_commit':commit,'tree_sha':tree,'base_commit':None,'comparison':'base-to-source'}))
+  return '.dairn/governance/evidence/subject.json'
+ def v1_run_file(self,commit):
+  tree=self.git('rev-parse','HEAD^{tree}')
+  path=self.project/'.dairn/governance/evidence/gate-check.json'
+  path.write_text(json.dumps({'schema':'dairn.check-run.v1','run_id':'run-gatefixture-0001',
+   'subject':{'schema':'dairn.subject.v1','repository':'sample/project','kind':'git-commit',
+    'source_commit':commit,'tree_sha':tree,'base_commit':None,'comparison':'base-to-source'},
+   'execution':{'environment':'local','policy_sha256':'0'*64},
+   'required_checks':['lint'],'checks':[{'id':'lint','status':'passed','exit_code':0}],
+   'status':'passed','declared_assurance':'local-observed','related_tasks':[]}))
+  return '.dairn/governance/evidence/gate-check.json'
  def test_ci_stub_requires_external_hash(self):
   f=self.project/'.dairn/stubs.json';source=ROOT/'examples/stubs/go-surface/main.go'
   f.write_text(json.dumps({'schema':1,'stubs':[{'id':'surface','kind':'surface-analysis','argv':['go','run',str(source)],'cwd':'.'}]}))

@@ -24,10 +24,10 @@ For any language, a project may configure a `surface-analysis` Stub in `.dairn/s
 
 ## Stage completion and turn-end anchors
 
-Run `dairn check --task <id> --base <trusted-base>` for real machine evidence. Protected CI may create and sign a statement with `dairn work attest-prepare`, and a verifier may attach it with `dairn work attest-attach`. Never sign with a key in the project checkout.
+Run `dairn check --task <id> --base <trusted-base>` for real machine evidence; the run is standalone evidence and linking it into the ledger (`dairn work link-check <id> --run <run-id>`) is an advisory reference only. Trusted CI statements are produced by the protected evidence chain (`dairn attest prepare` on the isolated signer over an evidence bundle, verified with `dairn attest verify` against an out-of-repository public key); the task ledger cannot mint them. Never sign with a key in the project checkout.
 
 `dairn hook turn-end` anchors the current session to the active task as local-unattributed evidence. Trigger it (or install the harness hook with `dairn hooks install --apply`) so the ledger can show which session ended on which HEAD. An anchor is not proof of correctness, a passing test, or approval.
 
-In Review, record JSON with `standards`, `spec_fidelity`, and `head` (the current Git commit). In Synchronize, record JSON containing `status: updated|no-change`, `head`, `reviewed_docs`, and a meaningful `reason`; `no-change` is a reviewed judgment, not an automatic pass. Use `dairn work verify <id> --require-ci-attestation` only where a protected signer and out-of-repository public trust key are configured; the CLI cannot invent CI trust.
+In Review, record JSON with `standards`, `spec_fidelity`, and `head` (the current Git commit). In Synchronize, record JSON containing `status: updated|no-change`, `head`, `reviewed_docs`, and a meaningful `reason`; `no-change` is a reviewed judgment, not an automatic pass. CI-level verification lives outside the task ledger: verify evidence bundles with `dairn evidence verify` and compose final gate decisions with `dairn gate evaluate`; the CLI cannot invent CI trust.
 
 Provider-neutral: Codex reads AGENTS.md; Claude Code follows the CLAUDE.md pointer; DeepSeek Harness discovers project `.agents/skills`. Dairn does not initiate AI calls.

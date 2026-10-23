@@ -1,8 +1,9 @@
 #!/bin/sh
-# Keyless build/check phase. MUST NOT have access to signing keys or signer runner mounts.
+# Keyless post-merge protected build. MUST NOT have access to signing keys.
+# Task-independent (architecture Q4): the run is standalone evidence; no work
+# ledger is required or consulted.
 set -eu
-TASK=${1:?Usage: build-protected.sh TASK_ID [TRUSTED_BASE]}
-BASE=${2:-${DAIRN_TRUSTED_BASE_REF:-HEAD^}}
+BASE=${1:-${DAIRN_TRUSTED_BASE_REF:-HEAD^}}
 : "${DAIRN_CI_BIN:?Trusted Dairn launcher required}"
 : "${DAIRN_CI_APE_PATH:?Trusted APE required}"
 : "${DAIRN_EXPECTED_APE_SHA256:?Pinned APE SHA256 required}"
@@ -21,11 +22,20 @@ elif [ "${GITHUB_ACTIONS:-}" = true ]; then
 else
   echo 'No authenticated CI context, refusing build origin' >&2;exit 2
 fi
-"$DAIRN_CI_BIN" check --task "$TASK" --base "$BASE" --root "$PWD"
-"$DAIRN_CI_BIN" work verify "$TASK" --require-machine-gates --root "$PWD" >/dev/null
+# Standalone check run: no --task, no work ledger dependency.
+"$DAIRN_CI_BIN" check --base "$BASE" --root "$PWD"
+RUN_JSON=.dairn/governance/evidence/$(printf '%s' "$HEAD" | cut -c1-12)-qjs-checks.json
+[ -f "$RUN_JSON" ] || { echo "Expected standalone check evidence not found: $RUN_JSON" >&2; exit 2; }
+RUN_ID=$(jq -er '.run_id // empty' "$RUN_JSON")
+[ -n "$RUN_ID" ] || { echo 'Check evidence has no run_id' >&2; exit 2; }
 ORIGIN=.dairn/governance/evidence/ci-build-origin.json
 [ ! -e "$ORIGIN" ] || { echo 'Refuse overwriting build origin' >&2;exit 2; }
 umask 077
 jq -nc --arg provider "$PROVIDER" --arg repo "$REPO" --arg ref "$REF" --arg sha "$HEAD" --arg pipeline "$PIPELINE" --arg job "$JOB_ID" \
   '{schema:1,status:"passed",provider:$provider,repository:$repo,ref:$ref,source_commit:$sha,pipeline_id:$pipeline,build_job_id:$job}' > "$ORIGIN"
-printf 'DAIRN_PROTECTED_BUILD_SUCCEEDED head=%s task=%s job=%s\n' "$HEAD" "$TASK" "$JOB_ID"
+# Bundle the run plus this origin so the isolated signer verifies bytes, not stories.
+BUNDLE=.dairn/governance/evidence/bundle.json
+[ ! -e "$BUNDLE" ] || { echo 'Refuse overwriting evidence bundle' >&2;exit 2; }
+"$DAIRN_CI_BIN" evidence bundle --run "$RUN_ID" --evidence "$RUN_JSON" \
+  --origin .dairn/governance/evidence/ci-build-origin.json --out "$BUNDLE"
+printf 'DAIRN_PROTECTED_BUILD_SUCCEEDED head=%s run=%s job=%s\n' "$HEAD" "$RUN_ID" "$JOB_ID"

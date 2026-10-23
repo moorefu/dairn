@@ -4,7 +4,7 @@
 import {sha256} from './sha256.mjs';
 import {recommendWorkflow} from './workflow.mjs';
 import {validateTaskObject} from './tasks.mjs';
-import {statementFor,prepareAttestation,verifyAttestation} from './attestation.mjs';
+import {validateCheckRun} from './evidence.mjs';
 import {launcherInfo,LAUNCHER_POSIX,LAUNCHER_WINDOWS} from './launcher.mjs';
 import {captureWorktree,sameWorktree,taskExclusions} from './worktree.mjs';
 const at=(a,b)=>a.replace(/\/$/,'')+'/'+b;
@@ -70,10 +70,11 @@ function commitTask(h,root,id,t,expectedRevision){
   return t;
 }
 function reportStage(t){return t.stages.find(s=>s.status==='active')||null;}
-export function prepareCheckTask(h,root,id){
-  const t=readTask(h,root,id),active=reportStage(t);
-  ok(t.status==='active'&&active?.id==='implement','Task must be in active implement stage for --task: '+id);
-  ok(!proofCheck(h,root,t).length,'Existing task evidence has failed integrity checks');
+/* Checks are Task-independent (RUN-02): a task reference only gates the link
+ * operation itself, never the eligibility or outcome of the Check run. */
+export function checkTaskPresence(h,root,id){
+  const t=readTask(h,root,id);
+  ok(t.stages.some(s=>s.id==='implement'),'Task has no implement stage to reference runs: '+id);
   return {task:t,head:gitHead(h,root)};
 }
 function machineProblems(h,root,t,requirePassed=false){
@@ -91,53 +92,112 @@ function machineProblems(h,root,t,requirePassed=false){
       ok(exists(h,file),'Missing machine run: '+link.path);
       const raw=h.read(file);ok(sha256(raw)===link.sha256,'Machine evidence digest mismatch: '+link.path);
       const evidence=JSON.parse(raw);
-      ok(evidence.schema_version===2&&evidence.run_id===link.run_id&&evidence.task_id===t.id,'Machine run id/task mismatch');
-      ok(evidence.head===link.commit&&evidence.policy_sha256===link.policy_sha256,'Machine run commit/policy mismatch');
-      ok(evidence.worktree&&evidence.worktree.schema===1&&typeof evidence.worktree.identity_sha256==='string','Machine run missing worktree identity');
-      // A passing run is eligible for progression only when the policy and the
-      // complete working-tree snapshot still describe the checkout being verified.
-      // Dairn-managed data and sha256-bound task evidence are excluded by
-      // captureWorktree, so recording evidence cannot invalidate its own machine run.
-      // Historical failed runs remain inspectable after a later fix.
-      if(evidence.status==='passed'){
-        ok(evidence.policy_sha256===policyHash(),'Policy changed since machine run: '+link.path);
-        ok(sameWorktree(evidence.worktree,worktree()),'Worktree changed since machine run: '+link.path);
+      if(evidence.schema==='dairn.check-run.v1'){
+        // v1 protocol runs are standalone evidence: validate structure and the
+        // recorded binding only. Current-state applicability is judged below.
+        ok(!validateCheckRun(evidence).length,'Invalid check-run evidence: '+link.path);
+        ok(evidence.run_id===link.run_id&&evidence.subject.source_commit===link.commit,'Run id/commit mismatch');
+        ok(evidence.subject.base_commit===link.base_commit,'Run base mismatch');
+        ok(evidence.execution.policy_sha256===link.policy_sha256,'Run policy mismatch');
+        ok(evidence.status===link.status,'Machine status mismatch');
+      }else{
+        ok(evidence.schema_version===2&&evidence.run_id===link.run_id&&evidence.task_id===t.id,'Machine run id/task mismatch');
+        ok(evidence.head===link.commit&&evidence.policy_sha256===link.policy_sha256,'Machine run commit/policy mismatch');
+        ok(evidence.worktree&&evidence.worktree.schema===1&&typeof evidence.worktree.identity_sha256==='string','Machine run missing worktree identity');
+        ok(evidence.trust==='local-unattested'&&link.trust==='local-unattested','Unexpected trust declaration');
+        ok(['passed','failed'].includes(evidence.status),'Invalid run status');
+        ok(evidence.status===link.status,'Machine status mismatch');
+        const expected=evidence.required_checks||[],modules=evidence.modules||[];
+        ok(expected.length>0&&modules.length>0,'Machine run missing required checks/modules');
+        for(const module of modules)for(const gate of expected)ok(evidence.checks.some(c=>c.module===module&&c.gate===gate),'Machine run missing required gate '+module+':'+gate);
+        ok(evidence.checks.length===modules.length*expected.length,'Unexpected machine gate count');
+        if(evidence.status==='passed')ok(evidence.checks.every(c=>c.status==='passed'&&c.returncode===0),'Run marked passed with failed checks');
       }
-      ok(evidence.trust==='local-unattested'&&link.trust==='local-unattested','Unexpected trust declaration');
-      ok(['passed','failed'].includes(evidence.status),'Invalid run status');
-      ok(evidence.status===link.status,'Machine status mismatch');
-      const expected=evidence.required_checks||[],modules=evidence.modules||[];
-      ok(expected.length>0&&modules.length>0,'Machine run missing required checks/modules');
-      for(const module of modules)for(const gate of expected)ok(evidence.checks.some(c=>c.module===module&&c.gate===gate),'Machine run missing required gate '+module+':'+gate);
-      ok(evidence.checks.length===modules.length*expected.length,'Unexpected machine gate count');
-      if(evidence.status==='passed')ok(evidence.checks.every(c=>c.status==='passed'&&c.returncode===0),'Run marked passed with failed checks');
-      // Historical failed runs remain valid evidence; only a passing run for current HEAD satisfies progression.
+      ok(link.trust==='local-unattested','Unexpected trust declaration');
+      // Historical runs stay valid evidence for the state they were captured in
+      // (architecture §7): currency against today's policy/worktree is only
+      // judged for the run selected to progress the task, never retroactively.
     }catch(e){errors.push(stage.id+': '+e.message);}
   }
   if(requirePassed){
     const stage=t.stages.find(s=>s.id==='implement');
     if(stage&&stage.status!=='pending'){
       const head=gitHead(h,root);
-      if(!(stage.machine_runs||[]).some(x=>x.status==='passed'&&x.commit===head))errors.push('No passing machine run for current HEAD');
+      const passing=(stage.machine_runs||[]).filter(x=>x.status==='passed'&&x.commit===head);
+      if(!passing.length)errors.push('No passing machine run for current HEAD');
+      else{
+        // Only the run that would satisfy progression is held to the current
+        // policy/worktree; older passing runs merely remain inspectable history.
+        const runIds=new Set(passing.map(x=>x.run_id));
+        for(const link of stage.machine_runs||[]){
+          if(!runIds.has(link.run_id))continue;
+          try{
+            const evidence=JSON.parse(h.read(safe(h,root,link.path)));
+            const runPolicy=evidence.policy_sha256??evidence.execution?.policy_sha256;
+            ok(runPolicy===policyHash(),'Policy changed since machine run: '+link.path);
+            // v2 runs carry a full worktree snapshot; v1 runs carry the
+            // snapshot digest captured before the checks executed.
+            const before=evidence.worktree?evidence.worktree.snapshot_sha256:evidence.execution?.snapshot_before_sha256;
+            ok(before===worktree().snapshot_sha256,'Worktree changed since machine run: '+link.path);
+          }catch(e){errors.push('implement: '+e.message);}
+        }
+      }
     }
   }
   return errors;
 }
-export function attachCheckRun(h,root,id,run,rel){
-  const t=readTask(h,root,id),active=reportStage(t);
-  ok(t.status==='active'&&active?.id==='implement','Task left implement stage while checks ran');
-  ok(run.head===gitHead(h,root),'HEAD changed during check; refusing to attach stale run');
-  ok(run.schema_version===2&&run.task_id===id,'Invalid task binding in check run');
-  ok(run.worktree&&run.worktree.schema===1&&typeof run.worktree.identity_sha256==='string','Machine run missing worktree identity');
-  ok(run.modules?.length&&run.required_checks?.length,'Cannot attach empty check result');
-  const file=safe(h,root,rel),raw=h.read(file),hash=sha256(raw);
-  const link={run_id:run.run_id,path:rel,sha256:hash,commit:run.head,base_commit:run.base,policy_sha256:run.policy_sha256,status:run.status,trust:'local-unattested',recorded_at:h.now()};
-  active.machine_runs??=[];
-  ok(!active.machine_runs.some(x=>x.run_id===run.run_id),'Duplicate run ID');
-  active.machine_runs.push(link);
+/* Linking is a read-only reference from the advisory ledger to an existing
+ * run; it never mints trust and never gates the run itself (RUN-02/RUN-03). */
+function runLinkFrom(evidence,rel,raw){
+  const digest=sha256(raw);
+  if(evidence.schema==='dairn.check-run.v1')
+    return {run_id:evidence.run_id,path:rel,sha256:digest,commit:evidence.subject.source_commit,
+      base_commit:evidence.subject.base_commit,policy_sha256:evidence.execution.policy_sha256,
+      status:evidence.status,trust:'local-unattested',recorded_at:null};
+  return {run_id:evidence.run_id,path:rel,sha256:digest,commit:evidence.head,
+    base_commit:evidence.base,policy_sha256:evidence.policy_sha256,
+    status:evidence.status,trust:'local-unattested',recorded_at:null};
+}
+export function linkCheckRun(h,root,id,rel,expectedRun){
+  const t=readTask(h,root,id);
+  const implement=t.stages.find(s=>s.id==='implement');
+  ok(implement,'Task has no implement stage: '+id);
+  const file=safe(h,root,rel),raw=h.read(file);
+  const evidence=JSON.parse(raw);
+  if(expectedRun)ok(raw===JSON.stringify(expectedRun,null,2)+'\n','Run content changed on disk before linking');
+  ok(typeof evidence.run_id==='string'&&evidence.run_id.length>0,'Run evidence has no run_id');
+  const link=runLinkFrom(evidence,rel,raw);
+  implement.machine_runs??=[];
+  ok(!implement.machine_runs.some(x=>x.run_id===link.run_id),'Duplicate run ID');
+  link.recorded_at=h.now();
+  implement.machine_runs.push(link);
   const expected=revisionOf(t);
   withTaskLock(h,root,id,()=>commitTask(h,root,id,t,expected));
   return link;
+}
+/* Locate a standalone run evidence file by run id under the governance evidence tree. */
+export function locateRunEvidence(h,root,runId,explicitPath){
+  ok(/^run-[A-Za-z0-9][A-Za-z0-9._-]{1,127}$/.test(runId||''),'Invalid run id: '+(runId||''));
+  ok(!runId.includes('..'),'Invalid run id');
+  const candidates=explicitPath?[explicitPath]:[
+    ...globEvidence(h,root,'.dairn/governance/evidence/runs/*/'+runId+'/run.json'),
+    '.dairn/governance/evidence/'+runId+'-checks.json'];
+  for(const rel of candidates){
+    const file=safe(h,root,rel);
+    if(!exists(h,file))continue;
+    const evidence=JSON.parse(h.read(file));
+    if(evidence.run_id===runId)return {path:rel,evidence};
+  }
+  throw Error('Run evidence not found for '+runId);
+}
+function globEvidence(h,root,pattern){
+  // patterns used here contain exactly one '*' directory segment
+  const star=pattern.indexOf('*');
+  if(star<0)return [pattern];
+  const prefix=pattern.slice(0,star),suffix=pattern.slice(star+1);
+  const dir=safe(h,root,prefix.endsWith('/')?prefix.slice(0,-1):prefix);
+  if(!h.exists(dir)||!h.isDirectory(dir))return [];
+  return h.list(dir).sort().map(name=>prefix+name+suffix);
 }
 function stageContract(h,root,t,active){
   if(!active)return null;
@@ -184,20 +244,6 @@ function proofCheck(h,root,t){
   return errors;
 }
 function idFor(o){return o.id||o.pos[1];}
-function latestPassing(t){const impl=t.stages.find(s=>s.id==='implement');return (impl?.machine_runs||[]).filter(x=>x.status==='passed').at(-1)||null;}
-function ciProblems(h,root,t,required){
-  const errors=[];const passing=latestPassing(t);const entries=t.ci_attestations||[];
-  for(const a of entries){try{const link=t.stages.find(x=>x.id==='implement')?.machine_runs.find(x=>x.run_id===a.run_id);
-    ok(link,'CI attestation references missing run');
-    const checked=verifyAttestation(h,root,t,link,a.payload,a.signature);
-    ok(checked.statement_sha256===a.statement_sha256,'Signed CI payload was modified');
-    ok(checked.key_sha256===a.key_sha256,'CI trust anchor changed since attachment');
-  }catch(e){errors.push('CI attestation: '+e.message);}}
-  if(required){
-    if(!passing||passing.commit!==gitHead(h,root))errors.push('No current-HEAD passing run eligible for CI proof');
-    else if(!entries.some(x=>x.run_id===passing.run_id))errors.push('No verified CI attestation for current passing run');
-  }return errors;
-}
 function result(h,value){h.log(JSON.stringify(value,null,2));return 0;}
 /* Review/evidence identity is self-asserted only: Dairn never authenticates an actor. */
 function actorFromCli(h,o){
@@ -473,22 +519,17 @@ export function runWork(h,root,o){
     return result(h,{event:'skipped',task:id,stage:skipped.stage,reason,status:t.status,next:reportStage(t),revision:t.revision});
   }
   const errors=[...proofCheck(h,root,t),...machineProblems(h,root,t,false)];
-  const requireCi=!!o.require_ci_attestation||h.env('DAIRN_REQUIRE_CI_ATTESTATION')==='true';
-  if(op==='attest-prepare'){const run=latestPassing(t);ok(run,'No passing run to attest');return result(h,{...prepareAttestation(h,root,t,run),revision:revisionOf(t)});}
-  if(op==='attest-attach'){const payload=o.pos[2],signature=o.pos[3];ok(payload&&signature,'Usage: dairn work attest-attach ID PAYLOAD SIGNATURE');
-    const run=latestPassing(t);ok(run,'No passing machine run');
+  if(op==='link-check'){
+    const runId=o.run;ok(runId,'Usage: dairn work link-check <id> --run <run-id> [--evidence <run.json>]');
+    const located=locateRunEvidence(h,root,runId,o.evidence);
     ok(!errors.length,'Task evidence integrity check failed');
-    const att=verifyAttestation(h,root,t,run,payload,signature);
-    const expected=revisionOf(t);
-    withTaskLock(h,root,id,()=>{
-      t.ci_attestations??=[];
-      ok(!t.ci_attestations.some(x=>x.run_id===run.run_id),'CI attestation already linked');
-      t.ci_attestations.push({run_id:run.run_id,payload,signature,statement_sha256:att.statement_sha256,key_sha256:att.key_sha256,recorded_at:h.now()});
-      commitTask(h,root,id,t,expected);
-    });
-    return result(h,att);
+    // linkCheckRun re-reads the run file, pins its bytes and commits under the
+    // per-task lock with a revision CAS; a concurrent writer fails loudly.
+    const rawEvidence=JSON.parse(h.read(safe(h,root,located.path)));
+    const link=linkCheckRun(h,root,id,located.path,rawEvidence);
+    return result(h,{event:'linked',task:id,run_id:link.run_id,path:link.path,status:link.status,
+      assurance:'advisory reference to an existing run; linking grants no trust',revision:readTask(h,root,id).revision});
   }
-  if(requireCi||t.ci_attestations?.length)errors.push(...ciProblems(h,root,t,requireCi));
   if(op==='status'||op==='next'||op==='verify'){
     const current=active?{...active,goal:active.goal}:null;
     const launcher=launcherView(h,root);
@@ -511,9 +552,9 @@ export function runWork(h,root,o){
         else if(!review.actor)errors.push('Review evidence has no actor; set review.actor, --actor or DAIRN_ACTOR');
       }
     }
-    check.evidence_errors=errors;check.machine_gates_required=!!o.require_machine_gates;check.ci_attestation_required=requireCi;
+    check.evidence_errors=errors;check.machine_gates_required=!!o.require_machine_gates;
     check.session_anchor_required=!!o.require_session_anchor;
-    check.ci_attestations=(t.ci_attestations||[]).map(x=>({run_id:x.run_id,key_sha256:x.key_sha256}));
+    check.linked_runs=(t.stages.find(s=>s.id==='implement')?.machine_runs||[]).map(x=>({run_id:x.run_id,status:x.status}));
     h.log(JSON.stringify(check,null,2));return op==='verify'&&errors.length?2:0;
   }
   ok(t.status==='active'&&active,'Task is not active');
@@ -562,7 +603,7 @@ export function runWork(h,root,o){
     if(index+1<t.stages.length){t.stages[index+1].status='active';t.current_stage=t.stages[index+1].id;}
     else{t.status='recorded-complete';t.current_stage=null;}
     withTaskLock(h,root,id,()=>commitTask(h,root,id,t,expected));
-    return result(h,{task:id,status:t.status,completed_stage:active.id,next:reportStage(t),assurance:requireCi?'verified external signature against supplied trust anchor; human merge approval remains external':'local records only; no implied CI or human approval'});
+    return result(h,{task:id,status:t.status,completed_stage:active.id,next:reportStage(t),assurance:'local records only; CI attestation is produced by the protected evidence chain, never by the task ledger'});
   }
-  throw Error('Usage: dairn work start|list|status|next|record|advance|skip|verify|finish|cancel|reopen|attest-prepare|attest-attach');
+  throw Error('Usage: dairn work start|list|status|next|record|advance|skip|verify|finish|cancel|reopen|link-check');
 }

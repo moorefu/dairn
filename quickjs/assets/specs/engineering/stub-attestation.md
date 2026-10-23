@@ -17,8 +17,8 @@ No shell interpolation. Time and response size bounded. Cache under `.dairn/cach
 
 # External CI Attestation
 
-`dairn work attest-prepare <task>` emits a JSON statement identifying a previously executed successful run, source SHA, policy hash, runtime hash, and job identity. The protected CI service signs it with Ed25519 using an external private key.
-`dairn work attest-attach <task> <payload> <signature>` verifies the signature with `DAIRN_TRUSTED_CI_PUBLIC_KEY` outside the checkout and binds it to the machine run. This is **detached Ed25519 v1**, not DSSE or SLSA certification. The CI must protect the signer, key, runtime, policy, and approvals outside the PR.
+`dairn attest prepare --bundle <path> --context <trusted-ci.json>` emits a `dairn.attestation.v1` statement binding the run digests, subject commit, policy/runtime hashes and trusted CI job identity. The isolated protected signer signs those exact bytes with Ed25519.
+`dairn attest verify --statement <s.json> --signature <s.sig> --key <absolute-trusted-pubkey> --context <trusted-ci.json>` verifies the signature outside the checkout. This is **detached Ed25519 v1**, not DSSE or SLSA certification. The task ledger only references existing runs via `dairn work link-check` and never verifies or mints CI trust. The CI must protect the signer, key, runtime, policy, and approvals outside the PR.
 
 # Human vs Machine
 

@@ -45,11 +45,14 @@ class AgentProtocol(unittest.TestCase):
         self.implement()
         self.assertNotEqual(self.cmd('work','verify','auth','--require-machine-gates','--root',self.root).returncode,0)
         self.assertNotEqual(self.cmd('work','advance','auth','--root',self.root).returncode,0)
-    def test_check_task_rejects_wrong_stage_and_all(self):
+    def test_check_task_runs_independent_of_stage(self):
+        # RUN-02: Check is Task-independent; referencing a task from any stage
+        # neither blocks the check nor changes its outcome.
         self.work('start','Implement authentication feature','--id','auth')
         base=self.commit_base();self.go_change()
-        self.assertNotEqual(self.cmd('check','--root',self.root,'--base',base,'--task','auth').returncode,0)
         self.assertNotEqual(self.cmd('check','--root',self.root,'--all','--task','auth').returncode,0)
+        passed=self.cmd('check','--root',self.root,'--base',base,'--task','auth',ok=True)
+        self.assertIn('Linked task run',passed.stdout)
     def test_failed_then_successful_run_and_machine_evidence(self):
         self.implement();base=self.commit_base();self.go_change()
         src=self.root/'auth.go';src.write_text(src.read_text().replace('\n\treturn','\n    return'))
@@ -60,15 +63,19 @@ class AgentProtocol(unittest.TestCase):
         subprocess.run(['gofmt','-w',src],check=True)
         self.git('add','auth.go');self.git('commit','-qm','fix format')
         passed=self.cmd('check','--root',self.root,'--base',base,'--task','auth',ok=True)
-        self.assertIn('Attached task run',passed.stdout)
+        self.assertIn('Linked task run',passed.stdout)
         task=json.loads((self.root/'.dairn/work/auth.json').read_text())
         runs=task['stages'][4]['machine_runs'];self.assertEqual([x['status'] for x in runs],['failed','passed'])
+        # Task links now reference the v1 protocol run (dairn.check-run.v1).
+        self.assertIn('runs/',runs[-1]['path'])
         raw=json.loads((self.root/runs[-1]['path']).read_text())
-        self.assertEqual(raw['task_id'],'auth');self.assertEqual(raw['head'],self.git('rev-parse','HEAD'))
-        self.assertEqual(raw['base_commit'],base);self.assertEqual(raw['trust'],'local-unattested')
-        self.assertEqual(raw['worktree']['status'],'clean')
-        self.assertEqual(len(raw['worktree']['identity_sha256']),64)
-        self.assertEqual(len(raw['checks']),4);self.assertTrue(all(c['output_sha256'] for c in raw['checks']))
+        self.assertEqual(raw['schema'],'dairn.check-run.v1')
+        self.assertEqual(raw['related_tasks'],['auth'])
+        self.assertEqual(raw['subject']['source_commit'],self.git('rev-parse','HEAD'))
+        self.assertEqual(raw['subject']['base_commit'],base)
+        self.assertEqual(raw['declared_assurance'],'local-observed')
+        self.assertEqual(len(raw['execution']['snapshot_before_sha256']),64)
+        self.assertEqual(len(raw['checks']),4);self.assertTrue(all(c['log_sha256'] for c in raw['checks']))
         self.assertTrue(self.work('verify','auth','--require-machine-gates')['machine_gates_required'])
         self.assertEqual(self.work('advance','auth')['next']['id'],'review')
     def test_mutated_run_file_rejected(self):
@@ -76,7 +83,7 @@ class AgentProtocol(unittest.TestCase):
         self.cmd('check','--base',base,'--task','auth','--root',self.root,ok=True)
         task=json.loads((self.root/'.dairn/work/auth.json').read_text())
         file=self.root/task['stages'][4]['machine_runs'][0]['path']
-        file.write_text(file.read_text().replace('local-unattested','trusted-ci'))
+        file.write_text(file.read_text().replace('"declared_assurance": "local-observed"','"declared_assurance": "ci-verified"'))
         self.assertNotEqual(self.cmd('work','verify','auth','--root',self.root).returncode,0)
         self.assertNotEqual(self.cmd('work','advance','auth','--root',self.root).returncode,0)
     def test_stale_run_head_rejected(self):

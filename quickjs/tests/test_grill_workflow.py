@@ -92,7 +92,7 @@ class GrillWorkflow(unittest.TestCase):
         self.git('add','hello.go')
         self.git('commit','-qm','add token validation')
         result=self.ok('check','--root',self.root,'--base',base,'--task','auth')
-        self.assertIn('Attached task run',result.stdout)
+        self.assertIn('Linked task run',result.stdout)
         task=json.loads((self.root/'.dairn/work/auth.json').read_text())
         runs=task['stages'][4]['machine_runs']
         self.assertEqual([run['status'] for run in runs],['passed'])

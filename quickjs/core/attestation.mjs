@@ -1,60 +1,97 @@
-/* Signed CI evidence verification: external trust anchor only. This is a detached
- * Ed25519 signature over a canonical JSON statement, not a DSSE envelope.
- * Signing keys are NEVER stored in the project, and Dairn never self-certifies a run.
- */
+/* Detached Ed25519 statement protocol. Signing is performed by protected CI. */
 import {sha256} from './sha256.mjs';
-const at=(a,b)=>a.replace(/\/$/,'')+'/'+b;
-const ok=(v,m)=>{if(!v)throw Error('Attestation: '+m);};
-const pathOk=p=>typeof p==='string'&&p.startsWith('/')&&!p.includes('\0');
-const relOk=p=>typeof p==='string'&&p&&!p.startsWith('/')&&!p.includes('\\')&&!p.split('/').some(x=>x==='..'||x==='.'||!x);
-function repoFile(h,root,p){ok(relOk(p),'unsafe evidence path');let c=root;for(const x of p.split('/')){c=at(c,x);ok(!h.isSymlink(c),'symlinked evidence path');}return c;}
-export function statementFor(h,root,task,link){
-  ok(link?.status==='passed','cannot attest failed run');
-  const file=repoFile(h,root,link.path);ok(h.exists(file),'missing run');const raw=h.read(file);
-  ok(sha256(raw)===link.sha256,'run evidence hash changed');
-  const run=JSON.parse(raw);ok(run.status==='passed'&&run.head===link.commit&&run.policy_sha256===link.policy_sha256,'run fields changed');
-  ok(run.checks?.length>0&&run.checks.every(c=>c.status==='passed'&&c.returncode===0),'checks are not all passing');
-  return {schema:1,type:'dairn.ci.evidence.v1',task_id:task.id,run_id:link.run_id,source_commit:link.commit,
-    base_commit:link.base_commit,policy_sha256:link.policy_sha256,run_sha256:link.sha256,
-    runtime_sha256:run.runtime?.runtime_sha256,checks_sha256:sha256(JSON.stringify(run.checks)),
-    // These identifiers are claims in the signed statement; trust depends on the protected signer.
-    ci_provider:h.env('DAIRN_CI_PROVIDER')||null,ci_job_id:h.env('DAIRN_CI_JOB_ID')||null,
-    ci_repository:h.env('DAIRN_CI_REPOSITORY')||null,ci_ref:h.env('DAIRN_CI_REF')||null,
-    ci_workflow:h.env('DAIRN_CI_WORKFLOW')||null,ci_build_job_id:h.env('DAIRN_CI_BUILD_JOB_ID')||null,
-    ci_pipeline_id:h.env('DAIRN_CI_PIPELINE_ID')||null};
+import {validateSubject} from './subject.mjs';
+
+function ok(value, message) { if (!value) throw Error('Attestation: ' + message); }
+function safeRel(path) { return typeof path === 'string' && path.length > 0 && !path.startsWith('/') &&
+  !path.includes('\\') && !path.split('/').some(x => !x || x === '.' || x === '..'); }
+function repoFile(h, root, path) {
+  ok(safeRel(path), 'unsafe repository path'); let current = root;
+  for (const part of path.split('/')) { current = current.replace(/\/$/, '') + '/' + part; ok(!h.isSymlink(current), 'symlinked path'); }
+  return current;
 }
-export function prepareAttestation(h,root,task,link){
-  const p=statementFor(h,root,task,link);
-  ok(p.runtime_sha256,'missing runtime digest');ok(p.ci_provider&&p.ci_job_id,'CI provider/job identity required');
-  if(h.env('DAIRN_REQUIRE_CI_CONTEXT')==='true')ok(p.ci_repository&&p.ci_ref&&p.ci_workflow&&p.ci_build_job_id&&p.ci_pipeline_id,'trusted repository, ref, workflow and build-job context required');
-  if(h.env('GITHUB_ACTIONS')==='true'||h.env('GITLAB_CI')==='true'){
-    ok(h.env('DAIRN_EXPECTED_POLICY_SHA256')===p.policy_sha256,'protected CI policy pin absent/mismatched');
-    ok(h.env('DAIRN_EXPECTED_RUNTIME_SHA256')===p.runtime_sha256,'protected CI runtime pin absent/mismatched');
-  }
-  const base='.dairn/governance/evidence/'+link.run_id+'.attestation.json';
-  const file=repoFile(h,root,base);ok(!h.exists(file),'attestation already exists');
-  h.writeExclusive(file,JSON.stringify(p)+'\n');
-  return {payload:base,payload_sha256:sha256(h.read(file)),status:'unsigned; sign on protected CI with external key'};
+function readJson(h, root, path) { const file = repoFile(h, root, path); ok(h.exists(file), 'missing file: ' + path); return {raw:h.read(file), value:JSON.parse(h.read(file))}; }
+function contextFields(context) {
+  return {provider:context.provider || context.ci_provider || null, repository:context.repository || context.ci_repository || null,
+    workflow_ref:context.workflow_ref || context.ci_workflow || null, pipeline_id:context.pipeline_id || context.ci_pipeline_id || null,
+    build_job_id:context.build_job_id || context.ci_build_job_id || null, source_commit:context.source_commit || null,
+    event:context.event || null};
 }
-export function verifyAttestation(h,root,task,link,payloadRel,signatureRel){
-  const key=h.env('DAIRN_TRUSTED_CI_PUBLIC_KEY');ok(key&&pathOk(key),'DAIRN_TRUSTED_CI_PUBLIC_KEY must be absolute, external, protected');
-  ok(!key.startsWith(root+'/'),'trusted public key must not live inside PR workspace');ok(h.exists(key)&&!h.isSymlink(key),'trusted public key is missing/unsafe');
-  const payload=repoFile(h,root,payloadRel),signature=repoFile(h,root,signatureRel);
-  ok(h.exists(payload)&&h.exists(signature),'missing signed payload or signature');
-  const text=h.read(payload);ok(text.length<=16384,'payload too large');
-  const statement=JSON.parse(text);
-  const expected=statementFor(h,root,task,link);
-  ok(statement.schema===1&&statement.type===expected.type,'invalid attestation type');
-  for(const f of ['task_id','run_id','source_commit','base_commit','policy_sha256','run_sha256','runtime_sha256','checks_sha256'])ok(statement[f]===expected[f],'mismatch '+f);
-  ok(typeof statement.ci_provider==='string'&&statement.ci_provider.length>0&&typeof statement.ci_job_id==='string'&&statement.ci_job_id.length>0,'missing CI identity');
-  const expectedProvider=h.env('DAIRN_TRUSTED_CI_PROVIDER');if(expectedProvider)ok(statement.ci_provider===expectedProvider,'unexpected CI provider');
-  const job=h.env('DAIRN_TRUSTED_CI_JOB_ID');if(job)ok(statement.ci_job_id===job,'unexpected CI job identity');
-  const scope=[['DAIRN_TRUSTED_CI_REPOSITORY','ci_repository'],['DAIRN_TRUSTED_CI_REF','ci_ref'],['DAIRN_TRUSTED_CI_WORKFLOW','ci_workflow'],['DAIRN_TRUSTED_CI_BUILD_JOB_ID','ci_build_job_id'],['DAIRN_TRUSTED_CI_PIPELINE_ID','ci_pipeline_id']];
-  if(h.env('DAIRN_REQUIRE_CI_CONTEXT')==='true')for(const [key,field] of scope)ok(h.env(key),'missing external trusted '+key);
-  for(const [key,field] of scope){const expected=h.env(key);if(expected)ok(statement[field]===expected,'CI identity scope mismatch: '+field);}
-  const r=h.run(['openssl','pkeyutl','-verify','-pubin','-inkey',key,'-rawin','-in',payload,'-sigfile',signature],root,15);
-  ok(!r.timedOut&&r.code===0,'signature verification failed');
-  return {schema:1,status:'signature-verified',task_id:task.id,run_id:link.run_id,head:link.commit,
-    statement_sha256:sha256(text),key_sha256:sha256(h.read(key)),payload:payloadRel,signature:signatureRel,
-    provider:statement.ci_provider,job_id:statement.ci_job_id,repository:statement.ci_repository||null,ref:statement.ci_ref||null,workflow:statement.ci_workflow||null,build_job_id:statement.ci_build_job_id||null,pipeline_id:statement.ci_pipeline_id||null,assurance:'cryptographically signed by supplied protected key; CI authorization external'};
+export function statementForRun(run, digests = {}, context = {}, signer = {}) {
+  const errors = validateSubject(run?.subject); ok(!errors.length, errors.join('; '));
+  ok(run.status === 'passed', 'cannot attest a non-passing run');
+  const ci = contextFields(context);
+  ok(ci.provider && ci.repository && ci.pipeline_id && ci.build_job_id, 'trusted CI context incomplete');
+  return {schema:'dairn.attestation.v1', type:'dairn.ci.evidence.v1', subject:{repository:run.subject.repository,
+    commit:run.subject.source_commit, tree_sha:run.subject.tree_sha}, run_id:run.run_id,
+    digests:{run_json_sha256:digests.run_json_sha256 || digests.run_sha256 || null,
+      logs_manifest_sha256:digests.logs_manifest_sha256 || null, origin_json_sha256:digests.origin_json_sha256 || null,
+      decision_json_sha256:digests.decision_json_sha256 || null, approval_snapshot_sha256:digests.approval_snapshot_sha256 || null},
+    policy_sha256:run.execution?.policy_sha256 || null, runtime_sha256:run.execution?.runtime_sha256 || null,
+    ci, signer:{key_id:signer.key_id || context.key_id || null, algorithm:'Ed25519'}};
+}
+export function statementBytes(statement) { return JSON.stringify(statement) + '\n'; }
+export function validateStatement(statement) {
+  const errors = [];
+  const check = (value, message) => { if (!value) errors.push(message); };
+  check(statement?.schema === 'dairn.attestation.v1', 'schema must be dairn.attestation.v1');
+  check(statement?.type === 'dairn.ci.evidence.v1', 'type invalid');
+  check(typeof statement?.subject?.repository === 'string' && statement.subject.repository.length > 0, 'subject.repository required');
+  check(/^[0-9a-f]{40,64}$/i.test(statement?.subject?.commit || ''), 'subject.commit invalid');
+  check(/^[0-9a-f]{40,64}$/i.test(statement?.subject?.tree_sha || ''), 'subject.tree_sha invalid');
+  check(/^run-[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/.test(statement?.run_id || ''), 'run_id invalid');
+  for (const field of ['run_json_sha256','logs_manifest_sha256','origin_json_sha256','decision_json_sha256'])
+    if (field !== 'logs_manifest_sha256' || statement?.digests?.[field] != null) check(!statement?.digests?.[field] || /^[0-9a-f]{64}$/i.test(statement.digests[field]), field + ' invalid');
+  check(typeof statement?.ci?.provider === 'string' && statement.ci.provider.length > 0, 'ci.provider required');
+  check(typeof statement?.ci?.repository === 'string' && statement.ci.repository.length > 0, 'ci.repository required');
+  check(typeof statement?.ci?.pipeline_id === 'string' && statement.ci.pipeline_id.length > 0, 'ci.pipeline_id required');
+  check(typeof statement?.ci?.build_job_id === 'string' && statement.ci.build_job_id.length > 0, 'ci.build_job_id required');
+  return errors;
+}
+export function verifyAttestationStatement(statement, context = {}) {
+  const errors = validateStatement(statement);
+  if (errors.length) return {status:'FAIL', reasons:errors};
+  const expected = contextFields(context);
+  const reasons = [];
+  for (const field of ['provider','repository','workflow_ref','pipeline_id','build_job_id','source_commit'])
+    if (expected[field] != null && statement.ci[field] !== expected[field]) reasons.push('CI context mismatch: ' + field);
+  if (expected.repository && statement.subject.repository !== expected.repository) reasons.push('subject repository mismatch');
+  if (expected.source_commit && statement.subject.commit !== expected.source_commit) reasons.push('subject commit mismatch');
+  return {status:reasons.length ? 'FAIL' : 'PASS', reasons};
+}
+function prepareBundleAttestation(h, root, bundlePath, context, outPath) {
+  const bundle = readJson(h, root, bundlePath).value;
+  ok(bundle?.schema === 'dairn.evidence-bundle.v1', 'invalid bundle');
+  const run = bundle.run; const digests = {};
+  for (const [key, item] of Object.entries(bundle.files || {})) if (item?.sha256) digests[key + '_sha256'] = item.sha256;
+  if (bundle.files?.run_json?.sha256) digests.run_json_sha256 = bundle.files.run_json.sha256;
+  const statement = statementForRun(run, digests, context || {});
+  const errors = validateStatement(statement); ok(!errors.length, errors.join('; '));
+  const raw = statementBytes(statement); const output = outPath || bundlePath.replace(/bundle\.json$/, 'statement.json');
+  const file = repoFile(h, root, output); ok(!h.exists(file), 'refuse to overwrite statement'); h.writeExclusive(file, raw);
+  return {path:output, statement, statement_sha256:sha256(raw)};
+}
+function verifyStatementFiles(h, root, statementPath, signaturePath, publicKeyPath, context = {}) {
+  ok(publicKeyPath && (publicKeyPath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(publicKeyPath)), 'public key must be absolute');
+  ok(!publicKeyPath.startsWith(root + '/'), 'public key must be outside project');
+  ok(h.exists(publicKeyPath) && !h.isSymlink(publicKeyPath), 'public key missing/unsafe');
+  const statementFile = repoFile(h, root, statementPath), signatureFile = repoFile(h, root, signaturePath);
+  ok(h.exists(statementFile) && h.exists(signatureFile), 'signed statement or signature missing');
+  const raw = h.read(statementFile); ok(raw.length <= 65536, 'statement too large');
+  const statement = JSON.parse(raw); const verdict = verifyAttestationStatement(statement, context);
+  ok(verdict.status === 'PASS', verdict.reasons.join('; '));
+  const result = h.run(['openssl','pkeyutl','-verify','-pubin','-inkey',publicKeyPath,'-rawin','-in',statementFile,'-sigfile',signatureFile], root, 30);
+  ok(!result.timedOut && result.code === 0, 'signature verification failed');
+  return {schema:'dairn.attestation.v1', status:'PASS', statement_sha256:sha256(raw), key_sha256:sha256(h.read(publicKeyPath)),
+    statement:statementPath, signature:signaturePath};
+}
+
+/* Q9: no compatibility layer for pre-v1 task-ledger attestations. The only
+ * prepare/verify surface is the detached Ed25519 v1 statement protocol over
+ * evidence bundles produced by the protected CI chain. */
+export function prepareAttestation(h, root, bundlePath, context = {}, outPath) {
+  return prepareBundleAttestation(h, root, bundlePath, context, outPath);
+}
+export function verifyAttestation(h, root, statementPath, signaturePath, publicKeyPath, context = {}) {
+  return verifyStatementFiles(h, root, statementPath, signaturePath, publicKeyPath, context);
 }

@@ -1,9 +1,13 @@
 import {recommendWorkflow,workflowStageList} from './workflow.mjs';
-import {runWork} from './work.mjs';
+import {runWork,locateRunEvidence} from './work.mjs';
 import {installHooks} from './hooks.mjs';
 import {lintAssets} from './assets-lint.mjs';
 import {tasksReport,tasksReady} from './tasks.mjs';
 import {sealArchive} from './notes.mjs';
+import {verifyBundle,verifyRunBytes} from './evidence.mjs';
+import {evaluate as gateEvaluate} from './gate.mjs';
+import {prepareAttestation,verifyAttestation} from './attestation.mjs';
+import {platformVerdict as approvalPlatformVerdict} from './approval.mjs';
 import {LAUNCHER_POSIX,LAUNCHER_WINDOWS,LAUNCHER_CONFIG,RUNTIME_DIR,launcherScripts,defaultLauncherConfig,readLauncherConfig,launcherInfo,vendorRuntime,verifyLauncher} from './launcher.mjs';
 import {configuredStubs,stubInit,stubDoctor,stubTemplates} from './stubs.mjs';
 import {captureFacts,acceptFacts,factSnapshotPath} from './facts.mjs';
@@ -38,8 +42,8 @@ export function runtimeIdentity(h){
   for(const x of m.assets||[]) invariant(sha256(read(h,ASSETS+x.type+'/'+x.path))===x.sha256,'Embedded asset checksum mismatch: '+x.path);
   return sha256(raw);
 }
-const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--ci','--base','--timeout','--id','--kind','--precision','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor'];
-const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--require-machine-gates':'require_machine_gates','--require-ci-attestation':'require_ci_attestation','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
+const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--ci','--base','--timeout','--id','--kind','--precision','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--snapshot'];
+const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
 function argsParse(args){
   const out={cmd:args[0]||'help',pos:[],root:'.',stack:'auto',ci:'none',timeout:120};
   for(let i=1;i<args.length;i++){
@@ -545,7 +549,123 @@ function doctor(h,root){
   return problems.length?1:0;
 }
 
-export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','stubs','doctor','version','--version','tasks','hooks','notes'].includes(args[0]);}
+/* --- 独立证据/门禁命令：只读验证，不授予信任，不触网。 --- */
+function safeRelInside(h,root,rel){
+  invariant(typeof rel==='string'&&rel.length>0&&!rel.startsWith('/')&&!rel.includes('\\')&&!/^[A-Za-z]:/.test(rel)&&!rel.split('/').some(x=>x==='..'||x===''||x==='.'),'Unsafe project-relative path: '+rel);
+  let cur=root;for(const part of rel.split('/')){cur=j(cur,part);invariant(!h.isSymlink(cur),'Refuse symlinked input: '+rel);}
+  return cur;
+}
+function readJsonRel(h,root,rel,label){
+  invariant(typeof rel==='string'&&rel.length>0,label+' path required');
+  // 受信 CI 上下文可以来自项目外的受控位置（例如 signer 的 mktemp 输入）；
+  // 仅读取 JSON，不授予任何执行能力，验签失败仍然 fail closed。
+  const isAbsolute=rel.startsWith('/')||/^[A-Za-z]:[\\/]/.test(rel);
+  const path=isAbsolute?rel:safeRelInside(h,root,rel);
+  invariant(file(h,path),label+' not found: '+rel);
+  return JSON.parse(read(h,path));
+}
+function evidenceCmd(h,o,root){
+  const op=o.pos[0]||'verify';
+  if(op==='verify'){
+    invariant(o.bundle||o.run,'Usage: dairn evidence verify --bundle <path> | --run <run-id> [--evidence <run.json>]');
+    if(o.bundle){
+      const report=verifyBundle(h,root,o.bundle);
+      if(o.json)h.log(fmt(report));
+      else{h.log('bundle: '+report.status+' (run '+String(report.run_id)+', '+report.files.length+' files)');
+        for(const f of report.files)h.log((f.ok?'OK   ':'FAIL ')+f.name+' '+f.path+(f.reason?' — '+f.reason:''));
+        for(const e of report.run_validation)h.error('ERROR '+e);}
+      return report.status==='verified'?0:1;
+    }
+    const located=locateRunEvidence(h,root,o.run,o.evidence);
+    const checked=verifyRunBytes(h,root,located.path);
+    h.log(fmt({schema:'dairn.check-run.v1',status:'verified',run_id:checked.run.run_id,
+      run_status:checked.run.status,declared_assurance:checked.run.declared_assurance,
+      path:located.path,run_sha256:checked.sha256,
+      subject:checked.run.subject,required_checks:checked.run.required_checks}));
+    return 0;
+  }
+  if(op==='inspect'){
+    invariant(o.run,'Usage: dairn evidence inspect --run <run-id> [--evidence <run.json>] [--json]');
+    const located=locateRunEvidence(h,root,o.run,o.evidence);
+    const checked=verifyRunBytes(h,root,located.path);
+    const run=checked.run;
+    h.log(fmt({schema:'dairn.check-run.v1',run_id:run.run_id,status:run.status,
+      declared_assurance:run.declared_assurance,related_tasks:run.related_tasks,
+      subject:run.subject,path:located.path,run_sha256:checked.sha256,
+      required_checks:run.required_checks,
+      checks:(run.checks||[]).map(c=>({id:c.id,status:c.status,exit_code:c.exit_code??c.returncode??null}))}));
+    return 0;
+  }
+  if(op==='bundle'){
+    invariant(o.run&&o.out,'Usage: dairn evidence bundle --run <run-id> [--evidence <run.json>] [--origin <origin.json>] --out <bundle.json>');
+    const located=locateRunEvidence(h,root,o.run,o.evidence);
+    const checked=verifyRunBytes(h,root,located.path);
+    const files={run_json:{path:located.path,sha256:checked.sha256}};
+    if(o.origin){
+      const originPath=safeRelInside(h,root,o.origin);
+      invariant(file(h,originPath),'origin not found: '+o.origin);
+      files.origin_json={path:o.origin,sha256:sha256(read(h,originPath))};
+    }
+    const bundle={schema:'dairn.evidence-bundle.v1',run:checked.run,files};
+    bundle.bundle_sha256=sha256(JSON.stringify(bundle));
+    const outPath=safeRelInside(h,root,o.out);
+    invariant(!file(h,outPath),'refuse to overwrite bundle: '+o.out);
+    h.write(outPath,fmt(bundle));
+    h.log(fmt({status:'bundled',path:o.out,run_id:checked.run.run_id,files:Object.keys(files)}));
+    return 0;
+  }
+  throw Error('Usage: dairn evidence verify|inspect|bundle --bundle <path>|--run <run-id>');
+}
+function gateCmd(h,o,root){
+  const op=o.pos[0]||'evaluate';
+  invariant(op==='evaluate','Usage: dairn gate evaluate --subject <s.json> --policy <p.json> [...]');
+  invariant(o.subject&&o.policy,'gate evaluate requires --subject and --policy');
+  const input={
+    subject:readJsonRel(h,root,o.subject,'subject'),
+    policy:readJsonRel(h,root,o.policy,'policy'),
+    check:o.check?readJsonRel(h,root,o.check,'check run') : null,
+    approval:o.approval?readJsonRel(h,root,o.approval,'approval verdict') : null,
+    attestation:o.attestation?readJsonRel(h,root,o.attestation,'attestation statement') : null,
+    context:o.context?readJsonRel(h,root,o.context,'context') : {},
+    requiredStage:o.stage||'pre-merge'};
+  const verdict=gateEvaluate({...input,trustedPolicy:input.policy});
+  if(o.json)h.log(fmt(verdict));
+  else h.log('gate: '+verdict.status+(verdict.reasons.length?' — '+verdict.reasons.join('; '):''));
+  return verdict.status==='PASS'?0:verdict.status==='INDETERMINATE'?3:1;
+}
+/* 平台审批快照裁决：消费 ci/providers 抓取的规范化快照，不触网、不信 PR 自带 JSON。 */
+function approvalCmd(h,o,root){
+  const op=o.pos[0]||'evaluate';
+  invariant(op==='evaluate','Usage: dairn approval evaluate --snapshot <snap.json> [--policy <p.json>] [--json]');
+  invariant(o.subject===undefined,'approval uses the snapshot subject; --subject is not accepted');
+  invariant(o.snapshot,'approval evaluate requires --snapshot <platform snapshot json>');
+  const snapshot=readJsonRel(h,root,o.snapshot,'approval snapshot');
+  const policy=o.policy?readJsonRel(h,root,o.policy,'policy'):{};
+  const verdict=approvalPlatformVerdict(snapshot,policy.approvals||policy);
+  if(o.json)h.log(fmt(verdict));
+  else h.log('approval: '+verdict.status+' provider='+verdict.provider+
+    ' eligible=['+verdict.eligible_reviewer_ids.join(',')+']'+
+    (verdict.reasons.length?' — '+verdict.reasons.join('; '):''));
+  return verdict.status==='PASS'?0:verdict.status==='INDETERMINATE'?3:1;
+}
+function attestCmd(h,o,root){  const op=o.pos[0];
+  if(op==='prepare'){
+    invariant(o.bundle&&o.context,'attest prepare requires --bundle and --context (trusted CI context JSON)');
+    const context=readJsonRel(h,root,o.context,'context');
+    const result=prepareAttestation(h,root,o.bundle,context,o.out||undefined);
+    h.log(fmt(result));h.error('NOTE: statement is unsigned; signing happens on the isolated protected CI signer');
+    return 0;
+  }
+  if(op==='verify'){
+    invariant(o.statement&&o.signature&&o.key,'attest verify requires --statement --signature --key <absolute trusted pubkey>');
+    const context=o.context?readJsonRel(h,root,o.context,'context'):{};
+    const result=verifyAttestation(h,root,o.statement,o.signature,o.key,context);
+    h.log(fmt(result));return 0;
+  }
+  throw Error('Usage: dairn attest prepare --bundle <p> --context <c.json> [--out <s.json>] | attest verify --statement <s> --signature <sig> --key <pub>');
+}
+
+export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','stubs','doctor','version','--version','tasks','hooks','notes','evidence','gate','attest','approval'].includes(args[0]);}
 export function dispatch(h,args){
   try{
     const o=argsParse(args),root=o.root==='.'?h.cwd():o.root;
@@ -597,6 +717,10 @@ export function dispatch(h,args){
       h.log(fmt(recommendWorkflow(o.pos.slice(1).join(' '))));return 0;
     }
     if(o.cmd==='work'){const r=checkedRoot(h,root,false);verifyRuntimeLock(h,r,true);return runWork(h,r,o);}
+    if(o.cmd==='evidence'){const r=checkedRoot(h,root,false);return evidenceCmd(h,o,r);}
+    if(o.cmd==='gate'){const r=checkedRoot(h,root,false);return gateCmd(h,o,r);}
+    if(o.cmd==='attest'){const r=checkedRoot(h,root,false);return attestCmd(h,o,r);}
+    if(o.cmd==='approval'){const r=checkedRoot(h,root,false);return approvalCmd(h,o,r);}
     if(o.cmd==='stubs'){
       const rr=checkedRoot(h,root,false);verifyRuntimeLock(h,rr,true);
       const op=o.pos[0]||'list';

@@ -1,5 +1,6 @@
 # REVIEWED TEMPLATE: file .github/workflows/dairn-quality-and-sign.yml.
-# Uses separate keyless build and protected signer; on protected pushes only.
+# Uses separate keyless build, isolated signer and keyless evidence publisher;
+# on protected pushes only. CI chain is Task-independent (architecture Q4).
 name: Dairn quality and protected evidence
 on:
   pull_request:
@@ -39,18 +40,15 @@ jobs:
           DAIRN_CI_REF_PROTECTED: ${{ github.ref_protected }}
           DAIRN_PROTECTED_BRANCH: main
           DAIRN_TRUSTED_BASE_REF: HEAD^
-          DAIRN_TASK_ID: ${{ vars.DAIRN_SIGNING_TASK_ID }}
           DAIRN_EXPECTED_POLICY_SHA256: ${{ vars.DAIRN_EXPECTED_POLICY_SHA256 }}
           DAIRN_EXPECTED_RUNTIME_SHA256: ${{ vars.DAIRN_EXPECTED_RUNTIME_SHA256 }}
           DAIRN_EXPECTED_APE_SHA256: ${{ vars.DAIRN_EXPECTED_APE_SHA256 }}
-        run: /opt/dairn/ci/protected/build-protected.sh "$DAIRN_TASK_ID" "$DAIRN_TRUSTED_BASE_REF"
+        run: /opt/dairn/ci/protected/build-protected.sh "$DAIRN_TRUSTED_BASE_REF"
       - name: Publish current-pipeline evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dairn-protected-build-evidence
-          path: |
-            .dairn/governance/evidence/
-            .dairn/work/
+          path: .dairn/governance/evidence/
           include-hidden-files: true
           if-no-files-found: error
 
@@ -75,11 +73,41 @@ jobs:
           DAIRN_CI_APE_PATH: /opt/dairn/runtime/dairn-embedded.com
           DAIRN_CI_REF_PROTECTED: ${{ github.ref_protected }}
           DAIRN_PROTECTED_BRANCH: main
-          DAIRN_TRUSTED_BASE_REF: HEAD^
-          DAIRN_TASK_ID: ${{ vars.DAIRN_SIGNING_TASK_ID }}
           DAIRN_EXPECTED_POLICY_SHA256: ${{ vars.DAIRN_EXPECTED_POLICY_SHA256 }}
           DAIRN_EXPECTED_RUNTIME_SHA256: ${{ vars.DAIRN_EXPECTED_RUNTIME_SHA256 }}
           DAIRN_EXPECTED_APE_SHA256: ${{ vars.DAIRN_EXPECTED_APE_SHA256 }}
+          DAIRN_EVIDENCE_DIR: ${{ github.workspace }}/.dairn/governance/evidence
           DAIRN_SIGNING_PRIVATE_KEY_PATH: /run/secrets/dairn-ci-ed25519.pem
           DAIRN_TRUSTED_CI_PUBLIC_KEY: /etc/dairn/ci-ed25519-public.pem
-        run: /opt/dairn/ci/protected/sign-protected.sh "$DAIRN_TASK_ID" "$DAIRN_TRUSTED_BASE_REF"
+        run: /opt/dairn/ci/protected/sign-protected.sh
+      - name: Publish signed evidence artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dairn-signed-evidence
+          path: .dairn/governance/evidence/
+          include-hidden-files: true
+          if-no-files-found: error
+
+  evidence-publish:
+    needs: [protected-sign]
+    if: github.event_name == 'push' && github.ref_protected == true
+    runs-on: [self-hosted, dairn-evidence-publisher]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          # The publisher pushes ONLY to the evidence ref using a dedicated
+          # runner-provisioned identity; never the workflow token.
+          persist-credentials: false
+      - name: Fetch signed evidence from same workflow run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dairn-signed-evidence
+          path: .
+      - name: Verify, append to evidence branch, read back
+        env:
+          DAIRN_CI_BIN: /opt/dairn/dairn.sh
+          DAIRN_TRUSTED_CI_PUBLIC_KEY: /etc/dairn/ci-ed25519-public.pem
+          DAIRN_EVIDENCE_DIR: ${{ github.workspace }}/.dairn/governance/evidence
+          DAIRN_EVIDENCE_REF_NAME: refs/heads/dairn-evidence
+        run: /opt/dairn/ci/protected/publish-evidence.sh

@@ -17,19 +17,24 @@ const LEGACY_PY = new Set(['governance.py', 'docs.py', 'ci_base.py', 'ci_postche
 const REPO_SEGMENTS = /^(?:docs|\.dairn|\.agents|\.github|quickjs|tools|tests|runtime|src|examples|licenses|bin|dist|build)\//;
 const REPO_FILES = /^(?:AGENTS|README|CLAUDE|BUILDING|CHANGELOG|CONTRIBUTING|LICENSE|GOVERNANCE|pyproject|package|Makefile)\b/;
 const TOP_COMMANDS = ['version', '--version', 'init', 'adopt', 'detect', 'upgrade', 'doctor', 'validate',
-  'validate-core', 'scope', 'check', 'help', 'docs', 'skills', 'guide', 'workflow', 'work', 'stubs', 'tasks', 'hooks', 'hook', 'notes'];
+  'validate-core', 'scope', 'check', 'help', 'docs', 'skills', 'guide', 'workflow', 'work', 'stubs', 'tasks', 'hooks', 'hook', 'notes',
+  'evidence', 'gate', 'attest'];
 const SUBCOMMANDS = {
   docs: ['find', 'show', 'context', 'check'],
   skills: ['catalog', 'list', 'add'],
   guide: ['plan', 'audit', 'scaffold', 'facts', 'drift', 'impact'],
   workflow: ['stages', 'recommend'],
   work: ['start', 'list', 'status', 'next', 'record', 'advance', 'skip', 'verify', 'finish', 'cancel', 'reopen',
-    'attest-prepare', 'attest-attach'],
+    'link-check'],
   stubs: ['list', 'templates', 'doctor', 'init'],
   tasks: ['check', 'ready'],
   hooks: ['install'],
   notes: ['seal'],
   hook: ['pre-push', 'turn-end'],
+  evidence: ['verify', 'inspect', 'bundle'],
+  gate: ['evaluate'],
+  attest: ['prepare', 'verify'],
+  approval: ['evaluate'],
 };
 
 /* 权威 CLI 命令面；测试与迁移工具可据此断言引用合法。每次返回独立副本。 */

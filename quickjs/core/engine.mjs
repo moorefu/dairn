@@ -5,13 +5,14 @@ import {validateAll,archiveValidate} from './validators.mjs';
 import {docsValidate} from './docs-validator.mjs';
 import {lifecycleValidate} from './lifecycle-validator.mjs';
 import {verifyRuntimeLock,runtimeVersion,doctor as projectDoctor} from './project.mjs';
-import {prepareCheckTask,attachCheckRun,activeTaskIds,activeTaskProblems} from './work.mjs';
+import {checkTaskPresence,linkCheckRun,activeTaskIds,activeTaskProblems} from './work.mjs';
 import {runTurnEnd} from './hooks.mjs';
 import {prChangeMeta,isCiPullRequest} from './ci-context.mjs';
 import {captureFacts} from './facts.mjs';
 import {readRelations} from './relations.mjs';
 import {configuredStubs} from './stubs.mjs';
 import {captureWorktree,taskExclusions} from './worktree.mjs';
+import {createCheckRun,writeRunEvidence} from './evidence.mjs';
 const slash = x => x.replace(/\\/g, '/');
 const join = (a,b) => b === '.' ? a : a.replace(/\/$/,'') + '/' + b;
 const within = (root, path) => path === root || path.startsWith(root.replace(/\/$/,'') + '/');
@@ -254,6 +255,17 @@ function writeGateLog(h, logsDir, logsRel, seen, name, text) {
   return {log: logsRel + '/' + file, log_sha256: sha256(content), log_truncated: cut.truncated};
 }
 /* doctor 由 project.mjs 唯一实现（launcher 感知）；此处不再保留第二份不可达实现。 */
+function repositoryOf(h,root,timeout){
+  const fromEnv=h.env('DAIRN_CI_REPOSITORY');
+  if(fromEnv)return fromEnv;
+  const probe=h.run(['git','config','--get','remote.origin.url'],root,Math.min(timeout,30));
+  if(!probe.timedOut&&probe.code===0&&probe.output){
+    const value=probe.output.trim().replace(/\.git$/,'');
+    const match=/^(?:https?:\/\/|ssh:\/\/|git@)(?:[^/:]+[/:])?(.+)$/.exec(value);
+    return match?match[1]:value;
+  }
+  return 'local/repository';
+}
 function checks(h,root,opts,st,raw,validation,stats) {
   const risk=opts.all ? 'L2' : st.risk;
   const mods=opts.all ? st.policy.modules : st.modules;
@@ -320,9 +332,33 @@ function checks(h,root,opts,st,raw,validation,stats) {
   const file=join(dir,name);
   if(h.exists(file))throw Error('Refuse to overwrite existing run evidence: '+file);
   h.write(file,JSON.stringify(report,null,2)+'\n');
+  /* Dual-write the v1 protocol run: this is the evidence format verifiers,
+   * attestation and the evidence branch consume; the legacy report above stays
+   * for hooks/UI back-compat during the transition. Non-Git baselines have no
+   * commit identity and therefore no attestable subject. */
+  const headProbe=h.run(['git','rev-parse','HEAD^{tree}'],root,opts.timeout);
+  let v1Ref=null,v1Run=null;
+  if(!headProbe.timedOut&&headProbe.code===0&&/^([0-9a-f]{40,64})\s*$/i.test(headProbe.output||'')){
+    const treeSha=headProbe.output.trim();
+    const snapAfter=(opts.task&&worktree)?captureWorktree(h,root,opts.timeout,opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[]):null;
+    const created=createCheckRun({subject:{schema:'dairn.subject.v1',repository:repositoryOf(h,root,opts.timeout),kind:'git-commit',
+        source_commit:st.head??command(h,['git','rev-parse','HEAD'],root,opts.timeout).trim(),tree_sha:treeSha,
+        base_commit:opts.all?null:st.base,comparison:'base-to-source'},
+      execution:{environment:'local',runtime_sha256:opts.runtimeHash??null,policy_sha256:sha256(raw),
+        check_plan_sha256:null,snapshot_before_sha256:worktree?worktree.snapshot_sha256:null,
+        snapshot_after_sha256:snapAfter?snapAfter.snapshot_sha256:null,
+        input_coverage:worktree?worktree.input_coverage:null},
+      required_checks:[...required],
+      checks:report.checks.map(c=>({id:c.gate,module:c.module,status:c.timed_out?'timeout':c.status,
+        exit_code:c.returncode,argv:c.argv??null,log_sha256:c.output_sha256??null})),
+      status:(snapAfter&&worktree&&snapAfter.snapshot_sha256!==worktree.snapshot_sha256)?'invalidated':(failed?'failed':'passed'),
+      declared_assurance:'local-observed',related_tasks:opts.task?[opts.task]:[],
+      run_id:opts.task?report.run_id:null,now:h.now()});
+    v1Run=created;v1Ref=writeRunEvidence(h,root,v1Run);
+  } else h.log('v1 run evidence skipped: no Git commit identity for an attestable subject');
   if(stats){stats.checks=report.checks.length;stats.failed=failed;}
-  if(opts.task){const linked=attachCheckRun(h,root,opts.task,report,'.dairn/governance/evidence/'+name);h.log('Attached task run: '+linked.run_id+' ['+linked.status+']');}
-  h.log('Evidence: '+file+'\nResult: '+(failed?'FAILED':'PASSED')+' [technical-checks-only; NOT full governance approval]');
+  if(opts.task){invariant(v1Ref&&v1Run,'Task-linked check requires v1 run evidence');const linked=linkCheckRun(h,root,opts.task,v1Ref.path,v1Run);h.log('Linked task run: '+linked.run_id+' ['+linked.status+']');}
+  h.log('Evidence: '+file+(v1Ref?' (legacy) / '+v1Ref.path+' (v1)':'')+'\nResult: '+(failed?'FAILED':'PASSED')+' [technical-checks-only; NOT full governance approval]');
   return failed?1:0;
 }
 function firstLine(value) { return String(value||'').trim().split(/\r?\n/)[0].trim(); }
@@ -357,7 +393,7 @@ function prePush(h,root,st,opts) {
 export function main(h,args) {
   try {
     const opts=parseArgs(args);
-    if(opts.cmd==='help') {h.log('Dairn '+runtimeVersion(h)+' — AI-Native Software Engineering Toolkit\n  dairn init|adopt [--root PATH] [--stack go|python|rust|vue|java|spring-boot|openresty] [--ci none|github|gitlab|both] [--sample] [--plan]\n  dairn detect|doctor|validate [--root PATH]\n  dairn scope|check --base SHA [--root PATH]\n  dairn check --all (baseline L2 checks)\n  dairn hook pre-push|turn-end [--task ID] [--no-check] [--provider P --session S] [--allow-unattributed]\n  dairn hooks install [--apply] [--git] [--force] [--launcher PATH]\n  dairn tasks check|ready [--strict]\n  dairn notes seal [--apply]\n  dairn docs check [--json]\n  dairn upgrade --plan|--apply [--root PATH]\n  dairn work start|list|status|next|record|advance|skip|verify|finish|cancel|reopen [--require-machine-gates|--require-session-anchor|--require-ci-attestation|--require-review-actor]\n  dairn work attest-prepare|attest-attach TASK [PAYLOAD SIG]\n  dairn guide impact --base SHA [--precision PROJECT-STUB-ID]\n  dairn stubs [list|templates|doctor|init --template LANGUAGE --id NAME [--apply]] [--root PATH]\n  dairn skills catalog|list|add NAME [--apply]\n  dairn docs find QUERY|show|context SPEC-ID|check [--json]');return 0;}
+    if(opts.cmd==='help') {h.log('Dairn '+runtimeVersion(h)+' — AI-Native Software Engineering Toolkit\n  dairn init|adopt [--root PATH] [--stack go|python|rust|vue|java|spring-boot|openresty] [--ci none|github|gitlab|both] [--sample] [--plan]\n  dairn detect|doctor|validate [--root PATH]\n  dairn scope|check --base SHA [--root PATH]\n  dairn check --all (baseline L2 checks)\n  dairn evidence verify --bundle <path>|--run <run-id> [--json]   (independent evidence verification)\n  dairn evidence inspect --run <run-id> [--json]\n  dairn gate evaluate --subject <s.json> --policy <p.json> [--check <run.json>] [--approval <v.json>] [--attestation <st.json>] [--stage pre-merge|post-merge|release] [--json]\n  dairn attest prepare --bundle <path> --context <c.json> [--out <statement.json>]\n  dairn attest verify --statement <s.json> --signature <s.sig> --key <absolute-trusted-pubkey> [--context <c.json>]\n  dairn hook pre-push|turn-end [--task ID] [--no-check] [--provider P --session S] [--allow-unattributed]\n  dairn hooks install [--apply] [--git] [--force] [--launcher PATH]\n  dairn tasks check|ready [--strict]\n  dairn notes seal [--apply]\n  dairn docs check [--json]\n  dairn upgrade --plan|--apply [--root PATH]\n  dairn work start|list|status|next|record|advance|skip|verify|finish|cancel|reopen [--require-machine-gates|--require-session-anchor|--require-review-actor]\n  dairn work link-check <task-id> --run <run-id> (advisory reference to an existing run)\n  dairn guide impact --base SHA [--precision PROJECT-STUB-ID]\n  dairn stubs [list|templates|doctor|init --template LANGUAGE --id NAME [--apply]] [--root PATH]\n  dairn skills catalog|list|add NAME [--apply]\n  dairn docs find QUERY|show|context SPEC-ID|check [--json]');return 0;}
     const root=h.realpath(opts.root??h.cwd());
     verifyRuntimeLock(h,root,false);
     const st=staticChecks(h,root);
@@ -388,7 +424,7 @@ export function main(h,args) {
       preflight=validation;
       if(validation.errors.length){for(const error of validation.errors)h.error('ERROR: '+error);return 1;}
     }
-    if(opts.task){ opts.taskPreflight=prepareCheckTask(h,root,opts.task); opts.runtimeHash=verifyRuntimeLock(h,root,true).runtime_sha256;}
+    if(opts.task){ opts.taskPreflight=checkTaskPresence(h,root,opts.task); opts.runtimeHash=verifyRuntimeLock(h,root,true).runtime_sha256;}
     const scope=opts.all ? {policy:st.policy} : {...readScope(h,root,st.policy,opts),policy:st.policy};
     if(opts.cmd==='scope') {
       h.log(JSON.stringify({paths:scope.paths,modules:scope.modules.map(m=>m.name),risk:scope.risk,governance_mode:scope.governance_mode,

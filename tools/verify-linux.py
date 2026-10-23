@@ -41,7 +41,8 @@ with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
     native.chmod(0o755)
     subprocess.run(['/bin/sh', str(native), '--assimilate'], check=True)
     env = {**os.environ, 'DAIRN_QJS_BIN': str(native)}
-    for name, script in [('policy', 'test_native.mjs'), ('host', 'test_host_native.mjs')]:
+    for name, script in [('policy', 'test_native.mjs'), ('host', 'test_host_native.mjs'),
+                         ('governance', 'test_governance_native.mjs')]:
         result = subprocess.run([str(native), str(root / 'quickjs/tests' / script)],
                                 env=env, capture_output=True, timeout=40)
         (out / ('linux-' + name + '.log')).write_bytes(result.stdout + result.stderr)

@@ -103,34 +103,44 @@ class TrustedCIAndPortableStub(unittest.TestCase):
             'DAIRN_EXPECTED_RUNTIME_SHA256':json.loads((self.project/'.dairn/lock.json').read_text())['runtime_sha256'],
             'DAIRN_EXPECTED_POLICY_SHA256':hashlib.sha256((self.project/'.dairn/governance/project.json').read_bytes()).hexdigest(),
             'DAIRN_SIGNING_PRIVATE_KEY_PATH':str(priv),'DAIRN_TRUSTED_CI_PUBLIC_KEY':str(pub),
+            'DAIRN_EVIDENCE_DIR':str(self.project/'.dairn/governance/evidence'),
         }
         build=ROOT/'ci/protected/build-protected.sh'
         sign=ROOT/'ci/protected/sign-protected.sh'
         # Signer refuses running without same-pipeline evidence.
-        self.assertNotEqual(self.exec(sign,'auth',base,env=env,pass_required=False).returncode,0)
-        self.assertNotEqual(self.exec(sign,'auth',base,env={**env,'CI_PIPELINE_SOURCE':'merge_request_event'},pass_required=False).returncode,0)
-        self.assertNotEqual(self.exec(sign,'auth',base,env={**env,'DAIRN_EXPECTED_APE_SHA256':'0'*64},pass_required=False).returncode,0)
+        self.assertNotEqual(self.exec(sign,env=env,pass_required=False).returncode,0)
+        self.assertNotEqual(self.exec(sign,env={**env,'CI_PIPELINE_SOURCE':'merge_request_event'},pass_required=False).returncode,0)
+        self.assertNotEqual(self.exec(sign,env={**env,'DAIRN_EXPECTED_APE_SHA256':'0'*64},pass_required=False).returncode,0)
         keyless={k:v for k,v in env.items() if k not in ('DAIRN_SIGNING_PRIVATE_KEY_PATH','DAIRN_TRUSTED_CI_PUBLIC_KEY')}
-        self.exec(build,'auth',base,env=keyless)
+        self.exec(build,base,env=keyless)
         origin=self.project/'.dairn/governance/evidence/ci-build-origin.json'
         saved=origin.read_text()
         bad=json.loads(saved);bad['pipeline_id']='wrong'
         origin.write_text(json.dumps(bad))
-        self.assertNotEqual(self.exec(sign,'auth',base,env=env,pass_required=False).returncode,0)
+        self.assertNotEqual(self.exec(sign,env=env,pass_required=False).returncode,0)
         origin.write_text(saved)
         # Remove project language toolchain PATH from signer: it must not run Go tests.
-        self.exec(sign,'auth',base,env={**env,'PATH':'/usr/bin:/bin'})
-        trust={'DAIRN_TRUSTED_CI_PUBLIC_KEY':str(pub),'DAIRN_TRUSTED_CI_PROVIDER':'gitlab',
-            'DAIRN_TRUSTED_CI_REPOSITORY':'sample/project','DAIRN_TRUSTED_CI_REF':'refs/heads/main',
-            'DAIRN_TRUSTED_CI_WORKFLOW':'200/dairn:sign','DAIRN_TRUSTED_CI_BUILD_JOB_ID':'100',
-            'DAIRN_TRUSTED_CI_PIPELINE_ID':'200','DAIRN_REQUIRE_CI_CONTEXT':'true'}
-        self.dairn('work','verify','auth','--require-ci-attestation',env=trust)
-        wrong={**trust,'DAIRN_TRUSTED_CI_REPOSITORY':'evil/project'}
-        self.assertNotEqual(self.dairn('work','verify','auth','--require-ci-attestation',env=wrong,pass_required=False).returncode,0)
+        self.exec(sign,env={**env,'PATH':'/usr/bin:/bin'})
+        # The signed statement verifies against the external public key and binds
+        # the same-pipeline context; a foreign scope is refused.
+        statement=self.project/'.dairn/governance/evidence/statement.json'
+        self.assertTrue(statement.is_file())
+        context=self.project/'.dairn/governance/evidence/ci-context.json'
+        context.write_text(json.dumps({'provider':'gitlab','repository':'sample/project','workflow_ref':'refs/heads/main',
+            'pipeline_id':'200','build_job_id':'100','source_commit':head,'event':'push'}))
+        def attest_verify(ctx):
+            return self.dairn('attest','verify','--statement','.dairn/governance/evidence/statement.json',
+                '--signature','.dairn/governance/evidence/statement.json.sig','--key',str(pub),
+                '--context',str(ctx) if str(ctx).startswith('/') else '.dairn/governance/evidence/'+str(ctx))
+        self.assertEqual(attest_verify(context).returncode,0)
+        foreign=self.project/'.dairn/governance/evidence/foreign-context.json'
+        foreign.write_text(json.dumps({'provider':'gitlab','repository':'evil/project','workflow_ref':'refs/heads/main',
+            'pipeline_id':'200','build_job_id':'100','source_commit':head,'event':'push'}))
+        self.assertNotEqual(attest_verify(foreign).returncode,0)
         ledger=json.loads((self.project/'.dairn/work/auth.json').read_text())
-        self.assertEqual(ledger['stages'][4]['machine_runs'][-1]['status'],'passed')
-        self.assertEqual(len(ledger['ci_attestations']),1)
+        self.assertEqual(ledger['stages'][4]['machine_runs'],[])
         self.assertNotIn('check --task',sign.read_text())
+        self.assertNotIn('work verify',build.read_text())
 
 if __name__=='__main__':
     unittest.main(verbosity=2)

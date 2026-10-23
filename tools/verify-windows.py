@@ -105,6 +105,7 @@ run('cli', [sys.executable, '-B', '-X', 'utf8', '-m', 'unittest',
             'quickjs.tests.test_windows', '-v'])
 run('host', [HOST_QJS, ROOT / 'quickjs/tests/test_host_native.mjs'])
 run('policy', [APE, ROOT / 'quickjs/tests/test_native.mjs'])
+run('governance', [APE, ROOT / 'quickjs/tests/test_governance_native.mjs'])
 run('npm', ['node', '--test', 'tools/tests/npm-distribution.test.cjs'])
 # 安装/Wheel/npm 下仍使用中文+空格路径做兼容性验证；临时根目录自身保持 ASCII，
 # 因为 MSYS2/gcc 等原生工具链对非 ASCII GOTMPDIR/GOCACHE 路径支持不稳定。
