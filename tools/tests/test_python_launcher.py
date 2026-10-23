@@ -30,7 +30,9 @@ class PythonLauncherTests(unittest.TestCase):
         shutil.copytree(ROOT / 'runtime', self.package / 'runtime')
         self.binary = self.package / 'runtime/dairn-embedded.com'
         self.checksum = hashlib.sha256(self.binary.read_bytes()).hexdigest()
-        self.version = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))['version']
+        # CLI 版本来自内嵌运行时 manifest；标签构建会覆盖 package.json 的兜底版本。
+        self.version = json.loads((self.package / 'runtime/runtime-integrity.json').read_text(
+            encoding='utf-8'))['engine_version']
         self.cache = self.root / '共享 缓存'
         inherited = {key: value for key, value in os.environ.items() if key not in PROTECTED_CI_KEYS}
         self.env = {**inherited, 'PYTHONDONTWRITEBYTECODE': '1', 'PYTHONUTF8': '1', 'DAIRN_FAST_RUNTIME': '0',

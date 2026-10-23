@@ -19,6 +19,9 @@ class StubCIReview(unittest.TestCase):
  def runtime_sha(self):
   import hashlib
   return hashlib.sha256((ROOT/'runtime/dairn-embedded.com').read_bytes()).hexdigest()
+ def engine_version(self):
+  # CLI 版本来自内嵌运行时 manifest；标签构建会覆盖 package.json 的兜底版本。
+  return json.loads((ROOT/'runtime/runtime-integrity.json').read_text(encoding='utf-8'))['engine_version']
  def fast_env(self,cache,extra=None):
   # 快速缓存用例显式清空受保护 CI 标记；负例再单独设置。
   return {'GITHUB_ACTIONS':'','GITLAB_CI':'','DAIRN_PROTECTED_CI':'',
@@ -116,7 +119,7 @@ class StubCIReview(unittest.TestCase):
  def test_ape_fast_cache_does_not_mutate_source(self):
   original=self.runtime_sha();cache=self.dir/'runtime-cache'
   p=self.call('version',env=self.fast_env(cache),ok=True)
-  version=json.loads((ROOT/'package.json').read_text(encoding='utf-8'))['version']
+  version=self.engine_version()
   self.assertIn('Dairn '+version+' —',p.stdout)
   self.assert_fast_cache_valid(cache)
   self.assertEqual(self.runtime_sha(),original)
@@ -129,7 +132,7 @@ class StubCIReview(unittest.TestCase):
   self.assertEqual((native.read_bytes(),native.stat().st_mtime_ns),before,'仅 CI=true 时快速缓存仍应命中复用')
  def test_fast_cache_disabled_on_protected_ci(self):
   original=self.runtime_sha()
-  version=json.loads((ROOT/'package.json').read_text(encoding='utf-8'))['version']
+  version=self.engine_version()
   cases=[('GITHUB_ACTIONS','true'),('GITHUB_ACTIONS','1'),('GITLAB_CI','true'),('DAIRN_PROTECTED_CI','1')]
   for index,(name,value) in enumerate(cases):
    with self.subTest(name+'='+value):

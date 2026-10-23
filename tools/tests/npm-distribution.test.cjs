@@ -24,7 +24,10 @@ if (fixture) {
 }
 const launcher = path.join(source,'bin','dairn.cjs');
 const ape = path.join(source,'runtime','dairn-embedded.com');
-const version = JSON.parse(fs.readFileSync(path.join(source,'package.json'),'utf8')).version;
+const packageVersion = JSON.parse(fs.readFileSync(path.join(source,'package.json'),'utf8')).version;
+// CLI 版本来自内嵌运行时 manifest；标签构建会覆盖 package.json 的兜底版本，
+// 因此断言以 runtime-integrity.json 为准，只有真实安装包才要求二者相等。
+const engineVersion = JSON.parse(fs.readFileSync(path.join(source,'runtime','runtime-integrity.json'),'utf8')).engine_version;
 const hash = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
 const CACHE_ENTRIES = ['dairn-native','dairn-native.sha256'];
 const PROTECTED_CI_KEYS = ['GITHUB_ACTIONS','GITLAB_CI','DAIRN_PROTECTED_CI'];
@@ -44,7 +47,10 @@ function run(args=[], options={}) {
 test('运行时 SHA256 与包内 APE 一致', () => {
   const meta = JSON.parse(fs.readFileSync(path.join(source,'runtime','runtime-integrity.json')));
   assert.equal(hash(ape),meta.sha256);
-  assert.equal(meta.engine_version,version);
+  assert.match(meta.engine_version,/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/);
+  // 发布 tarball 的 package.json 版本由构建入口按标签统一改写；只有真实安装包
+  // 才断言 package.json 与内嵌运行时版本一致（fixture 用的是仓库兜底版本）。
+  if (process.env.DAIRN_NPM_PACKAGE) assert.equal(meta.engine_version,packageVersion);
 });
 
 test('npm 包元数据与 MIT 许可证一致', () => {
@@ -61,7 +67,7 @@ test('版本和参数透传不修改源二进制', () => {
   const before=hash(ape);
   const p=run(['version']);
   assert.equal(p.status,0,p.stderr);
-  assert.ok(p.stdout.startsWith('Dairn '+version+' —'),p.stdout);
+  assert.ok(p.stdout.startsWith('Dairn '+engineVersion+' —'),p.stdout);
   assert.equal(hash(ape),before);
 });
 
@@ -85,7 +91,7 @@ test('缺少执行位的运行时在 bash 下仍可启动并补齐执行位', {s
       encoding:'utf8',timeout:20000,env:{...process.env,DAIRN_FAST_RUNTIME:'0'},
     });
     assert.equal(p.status,0,p.stderr);
-    assert.ok(p.stdout.startsWith('Dairn '+version+' —'),p.stdout);
+    assert.ok(p.stdout.startsWith('Dairn '+engineVersion+' —'),p.stdout);
     assert.notEqual(fs.statSync(runtime).mode & 0o111,0,'启动器必须补齐执行位');
     assert.equal(hash(runtime),before,'启动器不得改写运行时内容');
   } finally { fs.rmSync(temp,{recursive:true,force:true}); }
@@ -144,7 +150,7 @@ test('受保护 CI（GITHUB_ACTIONS=true）禁用快速缓存并回退源 APE', 
            GITHUB_ACTIONS:'true',GITLAB_CI:'',DAIRN_PROTECTED_CI:''},
     });
     assert.equal(p.status,0,p.stderr);
-    assert.ok(p.stdout.startsWith('Dairn '+version+' —'),p.stdout);
+    assert.ok(p.stdout.startsWith('Dairn '+engineVersion+' —'),p.stdout);
     assert.equal(hash(ape),before);
     assert.deepEqual(fs.readdirSync(tmp),[],'受保护 CI 下不得创建快速缓存');
   } finally { fs.rmSync(tmp,{recursive:true,force:true}); }
