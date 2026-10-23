@@ -282,11 +282,7 @@ function checks(h,root,opts,st,raw,validation,stats) {
     try{worktree=captureWorktree(h,root,opts.timeout,opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[]);}
     catch(e){worktreeError=String(e&&e.message||e);}
   }
-  const report={schema_version:opts.task?2:1,engine:'dairn-quickjs',assurance:'technical-checks-only',mode:opts.all?'baseline-all':opts.hook?'pre-push-gate':'risk-gate-preview',
-    risk,governance_mode:opts.all?'G2':st.governance_mode,review_pending:opts.all?true:st.review_pending,
-    base:opts.all?null:st.base,head:opts.all?null:st.head,utc:h.now(),changed_paths:opts.all?[]:st.paths,
-    policy_sha256:sha256(raw),...(worktree?{worktree}:{}),snapshot_error:worktreeError,governance_validation:{status:'passed',validators:Object.keys(validation.detail).sort(),error_count:0},checks:[],logs_dir:logsRel};
-  if(opts.hook) report.trust='local-unattested';
+  const records=[];
   let failed=!!worktreeError;
   if(worktreeError)h.error('ERROR: worktree snapshot failed: '+worktreeError);
   if (!opts.all && !st.paths.length) {
@@ -303,7 +299,7 @@ function checks(h,root,opts,st,raw,validation,stats) {
     if(!cfg) {
       failed=true;
       Object.assign(record,writeGateLog(h,logsAbs,logsRel,seenLogs,logName,'Check configuration missing for '+m.name+':'+gate+'\n'));
-      report.checks.push(record);continue;
+      records.push(record);continue;
     }
     record.argv=cfg.argv;
     let gateOutput='';
@@ -324,52 +320,72 @@ function checks(h,root,opts,st,raw,validation,stats) {
     }
     Object.assign(record,writeGateLog(h,logsAbs,logsRel,seenLogs,logName,gateOutput));
     if(record.status!=='passed') failed=true;
-    report.checks.push(record);
+    records.push(record);
   }
-  if(opts.task){
-    const started=opts.taskPreflight;
-    const after=command(h,['git','rev-parse','--verify','HEAD^{commit}'],root,opts.timeout).trim();
-    invariant(after===started.head&&after===st.head,'Git HEAD changed during check; evidence cannot be attached');
-    report.run_id='run-'+Date.now()+'-'+sha256(opts.task+'|'+st.head+'|'+h.now()+'|'+Math.random()).slice(0,14);
-    report.task_id=opts.task;report.base_commit=st.base;report.commit=st.head;report.modules=mods.map(m=>m.name);report.required_checks=[...required];
-    report.status=failed?'failed':'passed';report.trust='local-unattested';report.ci=null;report.runtime={version:runtimeVersion(h),runtime_sha256:opts.runtimeHash};
-  }
-  const dir=evidenceDir;h.mkdirs(dir);
-  const name=opts.task?report.run_id+'-checks.json':opts.hook?'pre-push-'+Date.now()+'-checks.json':(opts.all?'all':st.head.slice(0,12))+'-qjs-checks.json';
-  const file=join(dir,name);
-  if(h.exists(file))throw Error('Refuse to overwrite existing run evidence: '+file);
-  h.write(file,JSON.stringify(report,null,2)+'\n');
-  /* Dual-write the v1 protocol run: this is the evidence format verifiers,
-   * attestation and the evidence branch consume; the legacy report above stays
-   * for hooks/UI back-compat during the transition. Non-Git baselines have no
-   * commit identity and therefore no attestable subject. */
+  /* The v1 protocol run is the ONLY machine-written evidence artifact (the
+   * legacy JSON report dual-write is gone, PR-03). Non-Git baselines have no
+   * commit identity and therefore no attestable subject — they get an
+   * execution audit record that is explicitly NOT dairn.check-run.v1 (it can
+   * never be attested, bundled or gated); audit logs still land under
+   * evidence/logs/ with content digests bound in each check record. */
+  const toProtocolChecks = rs => rs.map(c=>({id:c.gate,module:c.module,status:c.timed_out?'timeout':c.status,
+    exit_code:c.returncode,argv:c.argv??null,cwd:c.cwd??null,duration_sec:c.duration_sec??null,
+    timed_out:!!c.timed_out,reason:c.reason??null,log:c.log??null,log_sha256:c.output_sha256??null,
+    log_truncated:c.output_truncated??null}));
   const headProbe=h.run(['git','rev-parse','HEAD^{tree}'],root,opts.timeout);
   let v1Ref=null,v1Run=null;
   if(!headProbe.timedOut&&headProbe.code===0&&/^([0-9a-f]{40,64})\s*$/i.test(headProbe.output||'')){
     const treeSha=headProbe.output.trim();
+    const headCommit=command(h,['git','rev-parse','--verify','HEAD^{commit}'],root,opts.timeout).trim();
+    // Evidence must describe the commit the caller scoped: a HEAD that moved
+    // mid-check can never be attested (fail closed instead of writing a lie).
+    if(!opts.all && headCommit!==st.head) throw Error('Git HEAD changed during check; evidence cannot be written');
     let snapAfter=null,snapAfterFailed=false;
     if(opts.task&&worktree&&!worktreeError){
       try{snapAfter=captureWorktree(h,root,opts.timeout,opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[]);}
       catch(e){snapAfterFailed=true;}
     }
+    if(opts.task){
+      const started=opts.taskPreflight;
+      invariant(headCommit===started.head&&headCommit===st.head,'Git HEAD changed during check; evidence cannot be attached');
+    }
+    // Input coverage is honesty, not a formality: ignored inputs the caller
+    // never declared leave the evidence unable to prove what it ran over
+    // (T41); such a run is invalidated rather than silently passed.
+    const coverageIncomplete=!!worktree&&!worktreeError&&worktree.input_coverage==='incomplete';
+    // The engine cannot prove its own runner trustworthiness: environment is a
+    // declared observation only and assurance stays local-observed (T40);
+    // ci-level trust is established by the signed chain, never self-reported.
+    const environment=(h.env('GITHUB_ACTIONS')==='true'||h.env('GITLAB_CI')==='true')?'ci-declared':'local';
     const created=createCheckRun({subject:{schema:'dairn.subject.v1',repository:repositoryOf(h,root,opts.timeout),kind:'git-commit',
-        source_commit:st.head??command(h,['git','rev-parse','HEAD'],root,opts.timeout).trim(),tree_sha:treeSha,
+        source_commit:headCommit,tree_sha:treeSha,
         base_commit:opts.all?null:st.base,comparison:'base-to-source'},
-      execution:{environment:'local',runtime_sha256:opts.runtimeHash??null,policy_sha256:sha256(raw),
-        check_plan_sha256:null,snapshot_before_sha256:worktree?worktree.snapshot_sha256:null,
+      execution:{environment,runtime_sha256:opts.runtimeHash??null,policy_sha256:sha256(raw),
+        check_plan_sha256:null,logs_dir:logsRel,
+        mode:opts.all?'baseline-all':opts.hook?'pre-push-gate':'risk-gate-preview',
+        risk,governance_validators:Object.keys(validation.detail).sort(),
+        changed_paths:opts.all?[]:[...st.paths],
+        snapshot_before_sha256:worktree?worktree.snapshot_sha256:null,
         snapshot_after_sha256:snapAfter?snapAfter.snapshot_sha256:null,
         input_coverage:worktree?worktree.input_coverage:null},
       required_checks:[...required],
-      checks:report.checks.map(c=>({id:c.gate,module:c.module,status:c.timed_out?'timeout':c.status,
-        exit_code:c.returncode,argv:c.argv??null,log_sha256:c.output_sha256??null})),
-      status:(snapAfterFailed||(snapAfter&&worktree&&snapAfter.snapshot_sha256!==worktree.snapshot_sha256))?'invalidated':(failed?'failed':'passed'),
-      declared_assurance:'local-observed',related_tasks:opts.task?[opts.task]:[],
-      run_id:opts.task?report.run_id:null,now:h.now()});
+      checks:toProtocolChecks(records),
+      status:(snapAfterFailed||(snapAfter&&worktree&&snapAfter.snapshot_sha256!==worktree.snapshot_sha256)||coverageIncomplete)?'invalidated':(failed?'failed':'passed'),
+      declared_assurance:'local-observed',related_tasks:opts.task?[opts.task]:[],now:h.now()});
     v1Run=created;v1Ref=writeRunEvidence(h,root,v1Run);
-  } else h.log('v1 run evidence skipped: no Git commit identity for an attestable subject');
-  if(stats){stats.checks=report.checks.length;stats.failed=failed;}
+    if(coverageIncomplete)h.error('ERROR: snapshot input coverage incomplete ('+worktree.uncovered_inputs.length+' uncovered ignored inputs); run evidence invalidated');
+  } else {
+    h.mkdirs(evidenceDir);
+    const audit={schema:'dairn.execution-record.v1',
+      mode:opts.all?'baseline-all':opts.hook?'pre-push-gate':'risk-gate-preview',
+      risk,required_checks:[...required],checks:toProtocolChecks(records),
+      status:failed?'failed':'passed',logs_dir:logsRel,created_at:h.now()};
+    h.write(join(evidenceDir,'execution-'+logRunKey+'.json'),JSON.stringify(audit,null,2)+'\n');
+    h.log('v1 run evidence skipped: no Git commit identity for an attestable subject; execution audit recorded');
+  }
+  if(stats){stats.checks=records.length;stats.failed=failed;}
   if(opts.task){invariant(v1Ref&&v1Run,'Task-linked check requires v1 run evidence');const linked=linkCheckRun(h,root,opts.task,v1Ref.path,v1Run);h.log('Linked task run: '+linked.run_id+' ['+linked.status+']');}
-  h.log('Evidence: '+file+(v1Ref?' (legacy) / '+v1Ref.path+' (v1)':'')+'\nResult: '+(failed?'FAILED':'PASSED')+' [technical-checks-only; NOT full governance approval]');
+  h.log('Evidence: '+(v1Ref?v1Ref.path:'none')+'\nResult: '+(failed?'FAILED':'PASSED')+' [technical-checks-only; NOT full governance approval]');
   return failed?1:0;
 }
 function firstLine(value) { return String(value||'').trim().split(/\r?\n/)[0].trim(); }

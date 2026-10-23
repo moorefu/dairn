@@ -26,17 +26,19 @@ class AuditLogs(unittest.TestCase):
         return result
 
     def evidence(self):
-        return json.loads((self.root/'.dairn/governance/evidence/all-qjs-checks.json').read_text(encoding='utf-8'))
+        runs=sorted((self.root/'.dairn/governance/evidence/runs').glob('*/*/run.json'))
+        self.assertTrue(runs,'no v1 run evidence written')
+        return json.loads(runs[-1].read_text(encoding='utf-8'))
 
     def resolve(self,relative):
         path=Path(relative)
         return path if path.is_absolute() else self.root/path
 
-    def assert_gate_logs(self,report):
-        logs_dir=self.resolve(report['logs_dir'])
-        self.assertTrue(logs_dir.is_dir(),report['logs_dir'])
+    def assert_gate_logs(self,run):
+        logs_dir=self.resolve(run['execution']['logs_dir'])
+        self.assertTrue(logs_dir.is_dir(),run['execution']['logs_dir'])
         non_empty=[]
-        for check in report['checks']:
+        for check in run['checks']:
             for key in ('log','log_sha256','log_truncated'):
                 self.assertIn(key,check,check)
             self.assertRegex(check['log_sha256'],r'^[0-9a-f]{64}$')
@@ -45,24 +47,24 @@ class AuditLogs(unittest.TestCase):
             self.assertTrue(str(log_path).startswith(str(logs_dir)),check['log'])
             content=log_path.read_text(encoding='utf-8',errors='replace')
             self.assertEqual(check['log_sha256'],hashlib.sha256(content.encode('utf-8')).hexdigest(),check['log'])
-            if content.strip():non_empty.append(check['gate'])
+            if content.strip():non_empty.append(check['id'])
         self.assertTrue(non_empty,'expected at least one non-empty gate log')
         return non_empty
 
     def test_check_all_writes_one_log_per_gate(self):
         result=self.call('check','--all','--root',self.root)
         self.assertEqual(result.returncode,0,result.stdout+'\n'+result.stderr)
-        report=self.evidence()
-        self.assertEqual(len(report['checks']),4)
-        self.assert_gate_logs(report)
+        run=self.evidence()
+        self.assertEqual(len(run['checks']),4)
+        self.assert_gate_logs(run)
 
     def test_failed_gate_log_keeps_failure_text(self):
         (self.root/'hello.go').write_text('package hello\n\nfunc Greeting()string{return"hello"}\n')
         result=self.call('check','--all','--root',self.root)
         self.assertEqual(result.returncode,1,result.stdout+'\n'+result.stderr)
-        report=self.evidence()
-        self.assert_gate_logs(report)
-        lint=next(check for check in report['checks'] if check['gate']=='lint')
+        run=self.evidence()
+        self.assert_gate_logs(run)
+        lint=next(check for check in run['checks'] if check['id']=='lint')
         self.assertNotEqual(lint['status'],'passed')
         content=self.resolve(lint['log']).read_text(encoding='utf-8',errors='replace')
         self.assertTrue(content.strip())

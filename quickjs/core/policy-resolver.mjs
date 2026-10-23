@@ -1,9 +1,11 @@
 /* dairn.policy.v1 schema validation and normalization.
  * The first-release protocol policy is declarative (architecture §10.1):
  * risk levels with a floor that can only be raised, per-level required checks,
- * per-level approval rules and evidence store settings. Legacy schema_version 1
- * project policies resolve into the same read-only view so gate/attestation
- * consume one shape; the legacy engine keeps its own classifier. */
+ * per-level approval rules and evidence store settings. Project configuration
+ * files (project.json, schema_version 1) resolve into the same read-only view
+ * so gate/attestation consume one shape; the project classifier keeps its own
+ * risk floor. Exactly one protocol per document: a JSON that claims both
+ * shapes at once is rejected (T42), so no caller can sit between the two. */
 const LEVELS = ['L0', 'L1', 'L2'];
 function isNonEmptyStringArray(value) {
   return Array.isArray(value) && value.length > 0 && value.every(x => typeof x === 'string' && x.length > 0);
@@ -50,19 +52,24 @@ export function validatePolicyV1(policy) {
   }
   return errors;
 }
-/* Normalize legacy schema_version 1 project policies into the v1 read view.
- * Legacy risk classification stays with the legacy engine; the resolved view
- * marks it so no consumer mistakes the absence of critical_paths for "no
- * critical paths exist". */
+/* Resolve any accepted single-protocol policy document into the v1 read view.
+ * - dairn.policy.v1 documents pass through as-is (mixed schema_version markers
+ *   are rejected).
+ * - Project configuration (schema_version 1 with required_checks) derives the
+ *   same view; this is the project-config format of the first release, not a
+ *   compatibility layer, and carries no legacy marker. */
 export function resolvePolicy(policy) {
   if (!policy || typeof policy !== 'object') return null;
-  if (policy.schema === 'dairn.policy.v1') return policy;
-  if (policy.schema_version === 1 && policy.required_checks) {
+  if (policy.schema === 'dairn.policy.v1') {
+    if (policy.schema_version !== undefined) return null;
+    return policy;
+  }
+  if (policy.schema === undefined && policy.schema_version === 1 && policy.required_checks) {
     const checks = {};
     for (const level of LEVELS) if (Array.isArray(policy.required_checks[level])) checks[level] = [...policy.required_checks[level]];
-    return {schema:'dairn.policy.v1', _resolved_from:'legacy-schema-1',
+    return {schema:'dairn.policy.v1',
       risk:{levels:[...LEVELS], default:'L1', critical_paths:null,
-        note:'legacy policy: risk floor enforced by the legacy classifier in policy.mjs'},
+        note:'project configuration: risk floor enforced by the project classifier in policy.mjs'},
       checks, approvals:{}, work:{required_for_ci:false},
       evidence:{store:'git-ref', ref:'refs/heads/dairn-evidence', immutable_records:true},
       modules:policy.modules || []};

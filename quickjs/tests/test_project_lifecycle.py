@@ -36,7 +36,7 @@ class Lifecycle(unittest.TestCase):
         self.ok('doctor','--root',self.root)
         self.ok('validate','--root',self.root)
         self.ok('check','--root',self.root,'--all')
-        e=json.loads((self.root/'.dairn/governance/evidence/all-qjs-checks.json').read_text())
+        e=json.loads(sorted((self.root/'.dairn/governance/evidence/runs').glob('*/*/run.json'))[-1].read_text())
         self.assertEqual(len(e['checks']),4)
         self.assertEqual({c['status'] for c in e['checks']},{'passed'})
     def test_auto_detect_multi_stack(self):
@@ -114,7 +114,7 @@ class Lifecycle(unittest.TestCase):
         scope=json.loads(self.ok('scope','--root',self.root,'--base',base).stdout)
         self.assertEqual((scope['risk'],scope['governance_mode']),('L2','G2'))
         self.ok('check','--root',self.root,'--base',base)
-        evidence=list((self.root/'.dairn/governance/evidence').glob('*-qjs-checks.json'))
+        evidence=sorted((self.root/'.dairn/governance/evidence/runs').glob('*/*/run.json'))
         self.assertEqual(len(evidence),1)
         info=json.loads(evidence[0].read_text());self.assertEqual({r['status'] for r in info['checks']},{'passed'})
     def test_ci_generator_opt_in(self):

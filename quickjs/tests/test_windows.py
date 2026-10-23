@@ -41,7 +41,11 @@ class WindowsAcceptance(unittest.TestCase):
         config.write_text(json.dumps(data), encoding='utf-8')
 
     def evidence(self):
-        return json.loads((self.root / '.dairn/governance/evidence/all-qjs-checks.json').read_text(encoding='utf-8'))
+        # Non-Git projects have no attestable subject, so check writes an
+        # execution audit record instead of a dairn.check-run.v1 run.
+        records = sorted((self.root / '.dairn/governance/evidence').glob('execution-*.json'))
+        self.assertTrue(records, 'no execution record written')
+        return json.loads(records[-1].read_text(encoding='utf-8'))
 
     def test_exit_status(self):
         self.assertEqual(self.run_cli('version').returncode, 0)
@@ -60,13 +64,12 @@ class WindowsAcceptance(unittest.TestCase):
         result = self.run_cli('check', '--all', '--root', self.root, '--timeout', '5')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual([x['status'] for x in self.evidence()['checks']], ['passed'] * 4)
-        self.assertEqual(self.evidence()['assurance'], 'technical-checks-only')
 
     def test_nonzero_gate_is_recorded(self):
         self.configure('process.exit(13)')
         result = self.run_cli('check', '--all', '--root', self.root, '--timeout', '5')
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertEqual([x['returncode'] for x in self.evidence()['checks']], [13] * 4)
+        self.assertEqual([x['exit_code'] for x in self.evidence()['checks']], [13] * 4)
 
     def test_git_scope_uses_windows_path_lookup(self):
         self.init()
@@ -83,7 +86,7 @@ class WindowsAcceptance(unittest.TestCase):
         self.configure('setTimeout(()=>{}, 10000)')
         result = self.run_cli('check', '--all', '--root', self.root, '--timeout', '1')
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertTrue(all(x['timed_out'] and x['returncode'] is None for x in self.evidence()['checks']))
+        self.assertTrue(all(x['timed_out'] and x['exit_code'] is None for x in self.evidence()['checks']))
 
     def test_junction_cannot_escape_project(self):
         self.init()

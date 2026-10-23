@@ -172,11 +172,12 @@ with tempfile.TemporaryDirectory(prefix='dairn-win-') as temp:
                         '--name', 'go_demo', '--stack', 'go', '--sample'], run_env=go_env)
         run('go-checks', [ROOT / 'dairn.cmd', 'check', '--all', '--root', project],
             run_env=go_env)
-        evidence = project / '.dairn/governance/evidence/all-qjs-checks.json'
-        if evidence.exists():
-            shutil.copyfile(evidence, OUT / 'go-checks.json')
-            checks = json.loads(evidence.read_text(encoding='utf-8'))['checks']
-            summary['go_checks'] = [{k: c.get(k) for k in ['gate', 'status', 'returncode']} for c in checks]
+        # Non-Git project: an execution audit record (not a v1 run) is written.
+        records = sorted((project / '.dairn/governance/evidence').glob('execution-*.json'))
+        if records:
+            shutil.copyfile(records[-1], OUT / 'go-checks.json')
+            checks = json.loads(records[-1].read_text(encoding='utf-8'))['checks']
+            summary['go_checks'] = [{k: c.get(k) for k in ['id', 'status', 'exit_code']} for c in checks]
 summary['original_unchanged'] = digest(APE) == summary['ape_sha256']
 # 默认 Go 门禁结果独立记录（-race 需要 CGO/C 编译器），不参与总体验收；
 # 显式提供 --cc-bin --require-go-checks 时，go-checks 与其他套件一样必须通过。

@@ -36,13 +36,20 @@ export function runChecks(h, root, {policy, modules = null, risk = 'L1', base = 
   for (const module of selected) for (const id of plan.required_checks) checks.push(runOne(h, root, module, id, timeout));
   const after = captureWorktree(h, root, timeout, [], {input_globs});
   const stable = sameWorktree(before, after) && before.source_commit === after.source_commit;
-  const status = stable ? (checks.length > 0 && checks.every(x => x.status === 'passed' && x.exit_code === 0) ? 'passed' : 'failed') : 'invalidated';
+  // The executor cannot grant itself trust (T40): declared_assurance is always
+  // local-observed here, whatever the caller claims about its environment —
+  // ci-level trust is established by the signed chain, never by this string.
+  // Incomplete declared-input coverage invalidates the evidence instead of
+  // quietly passing over inputs the run cannot prove it saw (T41).
+  const coverageIncomplete = before.input_coverage === 'incomplete';
+  const status = !stable || coverageIncomplete ? 'invalidated'
+    : (checks.length > 0 && checks.every(x => x.status === 'passed' && x.exit_code === 0) ? 'passed' : 'failed');
   const execution = {environment, runtime_sha256:null, policy_sha256:sha256(JSON.stringify(policy)),
     check_plan_sha256:sha256(JSON.stringify(plan)), toolchain_sha256:null,
     snapshot_before_sha256:before.snapshot_sha256, snapshot_after_sha256:after.snapshot_sha256,
     input_coverage:before.input_coverage, uncovered_inputs:before.uncovered_inputs};
   const run = createCheckRun({subject, execution, required_checks:plan.required_checks, checks,
-    status, declared_assurance:environment === 'ci' ? 'ci-verified' : 'local-observed', now:h.now()});
+    status, declared_assurance:'local-observed', now:h.now()});
   if (write) {
     h.mkdirs(join(root, '.dairn/governance/evidence/runs/' + subject.source_commit + '/' + run.run_id));
     const rel = '.dairn/governance/evidence/runs/' + subject.source_commit + '/' + run.run_id + '/run.json';

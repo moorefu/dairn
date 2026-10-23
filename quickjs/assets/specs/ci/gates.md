@@ -16,7 +16,9 @@ symbols: ["dairn validate --base", "dairn check --base", ".dairn/governance/proj
 
 统一入口是 `dairn` CLI；门禁命令与各模块 argv 由 `.dairn/governance/project.json` 定义。`dairn validate --base <trusted-ref>` 先检查文档与治理配置（结构治理），再由 `dairn check --base <trusted-ref>` 实际执行完整风险门禁。
 
-`.dairn/governance/project.json` 中配置的 lint、unit、integration、build argv 仅用于单项调试；单独运行它们不产生 `dairn check` 的 run 证据。`dairn check --base <ref>` 的证据报告记录 `mode=risk-gate-preview`（每个必需 gate 的 argv、退出码与输出摘要都在 `checks[]` 中），`dairn check --all` 记录 `mode=baseline-all`，`dairn hook pre-push` 记录 `mode=pre-push-gate`；单项 argv 成功不能冒充完整门禁。
+`.dairn/governance/project.json` 中配置的 lint、unit、integration、build argv 仅用于单项调试；单独运行它们不产生 `dairn check` 的 run 证据。`dairn check --base <ref>` 写入 `dairn.check-run.v1` Run 证据（`execution.mode=risk-gate-preview`；每个必需 gate 的 argv、退出码、审计日志路径与输出摘要都在 `checks[]` 中），`dairn check --all` 记录 `execution.mode=baseline-all`，`dairn hook pre-push` 记录 `execution.mode=pre-push-gate`；单项 argv 成功不能冒充完整门禁。
+
+`runs/<完整提交>/<run_id>/run.json` 是唯一的机器证据格式（旧版 JSON 报告双写已移除）。执行器不能自证可信：`declared_assurance` 恒为 `local-observed`，`environment` 只是声明性观察（CI 环境记为 `ci-declared`），CI 级信任只能由受保护签名链建立，绝不来自 JSON 自报。快照输入覆盖不完整（存在未声明的被忽略输入）时 Run 状态为 `invalidated` 而不是 `passed`；非 Git 工作区没有可证明的提交身份，只写不可用于门禁的执行审计记录（`dairn.execution-record.v1`）。
 
 ## 命令来源
 

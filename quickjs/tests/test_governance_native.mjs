@@ -242,6 +242,22 @@ test('RUN-07 mutating inputs during the check invalidates the run', () => {
   const run = runChecks(h, dir, {policy: POLICY, risk: 'L1', base: 'origin/main'});
   assert(run.status === 'invalidated', 'mid-check mutation not detected');
 });
+test('RUN-09/T40 self-declared ci environment never yields ci-verified assurance', () => {
+  const dir = workdir('runT40'); realHost.write(dir + '/README.md', 'x\n');
+  const h = gitMockHost(snapState(dir));
+  const run = runChecks(h, dir, {policy: POLICY, risk: 'L1', base: 'origin/main', environment: 'ci'});
+  assert(run.status === 'passed', 'checks failed: ' + JSON.stringify(run.checks));
+  assert(run.declared_assurance === 'local-observed', 'environment=ci upgraded assurance: ' + run.declared_assurance);
+  assert(run.execution.environment === 'ci', 'environment should stay a declared observation');
+});
+test('RUN-10/T41 undeclared ignored inputs invalidate instead of passing', () => {
+  const dir = workdir('runT41'); realHost.write(dir + '/README.md', 'x\n');
+  const state = snapState(dir, {ignoredAll: ['node_modules/dep.js']});
+  const h = gitMockHost(state);
+  const run = runChecks(h, dir, {policy: POLICY, risk: 'L1', base: 'origin/main'});
+  assert(run.execution.input_coverage === 'incomplete', 'coverage not reported');
+  assert(run.status === 'invalidated', 'incomplete coverage still passed: ' + run.status);
+});
 
 /* ---------- Attestation 声明（ATST-02/04 + Q9 清理） ---------- */
 function trustedContext() {
@@ -449,14 +465,17 @@ test('POL-01 validatePolicyV1 accepts the architecture sample and rejects broken
   assert(validatePolicyV1({...V1_POLICY, evidence:{store:'http', ref:'x'}}).length > 0, 'non-git evidence store accepted');
   assert(validatePolicyV1({...V1_POLICY, approvals:{L2:{provider:'self-asserted', min_count:1}}}).length > 0, 'non-native approval provider accepted');
 });
-test('POL-02 legacy schema_version 1 resolves into the v1 read view', () => {
-  const legacy = {schema_version:1, project:'service', modules:[{name:'app', path:'.', checks:{}}],
+test('POL-02/T42 project configuration resolves into the v1 view; mixed protocols are rejected', () => {
+  const project = {schema_version:1, project:'service', modules:[{name:'app', path:'.', checks:{}}],
     required_checks:{L0:['lint'], L1:['lint','unit'], L2:['lint','unit']}};
-  const resolved = resolvePolicy(legacy);
-  assert(resolved?.schema === 'dairn.policy.v1' && resolved._resolved_from === 'legacy-schema-1', 'legacy not resolved');
-  assert(JSON.stringify(requiredChecksFor(legacy, 'L1')) === JSON.stringify(['lint','unit']), 'required checks differ');
+  const resolved = resolvePolicy(project);
+  assert(resolved?.schema === 'dairn.policy.v1' && !('_resolved_from' in resolved), 'project config not resolved as first-release format');
+  assert(JSON.stringify(requiredChecksFor(project, 'L1')) === JSON.stringify(['lint','unit']), 'required checks differ');
   assert(requiredChecksFor(V1_POLICY, 'L2').length === 4, 'v1 required checks wrong');
   assert(resolvePolicy({whatever:true}) === null, 'unknown shape must not resolve');
+  // T42: a document claiming both protocols at once must be refused outright.
+  assert(resolvePolicy({...V1_POLICY, schema_version:1}) === null, 'mixed-protocol policy accepted');
+  assert(resolvePolicy({...project, schema:'dairn.policy.v1'}) === null, 'mixed-protocol project config accepted');
 });
 test('POL-03 approval rules resolve per-risk with flat fallback', () => {
   const rule = approvalPolicyFor(V1_POLICY, 'L2');

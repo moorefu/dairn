@@ -150,18 +150,19 @@ class WorkIntelligence(unittest.TestCase):
     def test_validate_and_real_go_baseline(self):
         self.ok('validate','--root',self.repo)
         result=self.call('check','--all','--root',self.repo)
-        evidence=self.repo/'.dairn/governance/evidence/all-qjs-checks.json'
+        runs=sorted((self.repo/'.dairn/governance/evidence/runs').glob('*/*/run.json'))
+        evidence=runs[-1]
         output_dir=os.environ.get('DAIRN_TEST_EVIDENCE_DIR')
         if output_dir:
             output=Path(output_dir)
             output.mkdir(parents=True,exist_ok=True)
             (output/'linux-go-checks.log').write_text(result.stdout+'\n'+result.stderr,encoding='utf-8')
-            if evidence.exists():
-                (output/'linux-go-checks.json').write_bytes(evidence.read_bytes())
+            (output/'linux-go-checks.json').write_bytes(evidence.read_bytes())
         self.assertEqual(result.returncode,0,result.stdout+'\n'+result.stderr)
         data=json.loads(evidence.read_text(encoding='utf-8'))
-        self.assertEqual(data['assurance'],'technical-checks-only')
-        checks={c['gate']:c for c in data['checks']}
+        self.assertEqual(data['schema'],'dairn.check-run.v1')
+        self.assertEqual(data['declared_assurance'],'local-observed')
+        checks={c['id']:c for c in data['checks']}
         self.assertEqual(set(checks),{'lint','unit','integration','build'})
         for check in checks.values():
             self.assertEqual(check['status'],'passed')
