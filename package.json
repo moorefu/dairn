@@ -13,8 +13,8 @@
   },
   "files": [
     "bin/dairn.cjs",
-    "dairn.sh",
-    "runtime/",
+    "dairn",
+    ".dairn/runtime/",
     "licenses/",
     "LICENSE"
   ],

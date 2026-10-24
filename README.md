@@ -128,7 +128,7 @@ Dairn 的 CLI 命令名为 `dairn`。npm 包为 [`@moorefu/dairn`](https://www.n
 
 如果尚未发布正式版本，请使用预发布通道，或在 Releases 中选择实际存在的版本；**安装命令不代表对应版本当前一定已在注册表发布**。建议生产环境固定精确版本并校验制品摘要。
 
-npm 本地安装可使用 `npx dairn` 调用，或通过 `npm exec -- dairn` 运行已安装版本。项目初始化后，优先使用项目内 Launcher，而不是让 Agent 临时安装一个全局版本。
+npm 本地安装可使用 `npx dairn` 调用，或通过 `npm exec -- dairn` 运行已安装版本。项目初始化后，优先使用项目根启动器，而不是让 Agent 临时安装一个全局版本。
 
 ### 试用零仪式交接：`handoff`
 
@@ -164,14 +164,14 @@ dairn version
 # 创建一个 Go 示例项目
 dairn init --root ./demo --name demo --stack go --sample
 
-# 初始化后通过项目内 Launcher 执行
-a=./demo/.dairn/bin/dairn
+# 初始化后通过项目根启动器执行
+a=./demo/dairn
 "$a" doctor --root ./demo
 "$a" validate --root ./demo
 "$a" check --root ./demo --all
 ```
 
-在 Windows 下使用 `demo\.dairn\bin\dairn.cmd`。检查会使用项目配置的真实工具链；Go 普通测试可能需要 Go 工具链，Go race/CGO 不属于默认验收。
+在 Windows 下使用 `demo\dairn.cmd`。检查会使用项目配置的真实工具链；Go 普通测试可能需要 Go 工具链，Go race/CGO 不属于默认验收。
 
 ### 接入已有项目：先发现，再决定是否写入
 
@@ -187,17 +187,17 @@ dairn adopt --root . --discover --plan
 # 明确检查计划后，再决定是否真正接入
 dairn adopt --root .
 
-# 接入后优先调用项目内 Launcher
-./.dairn/bin/dairn doctor --root .
-./.dairn/bin/dairn validate --root .
-./.dairn/bin/dairn guide impact --base origin/main --root .
+# 接入后优先调用项目根启动器
+./dairn doctor --root .
+./dairn validate --root .
+./dairn guide impact --base origin/main --root .
 ```
 
 `adopt --discover --plan` **不写入仓库**；扫描到 `go.mod`、`pom.xml` 或 `.github/workflows/` 只表示存在这些文件，**不代表测试命令已可运行**。`adopt` 写入模式应先在工作分支审阅变更；已经由 Dairn 管理的项目使用 `upgrade --plan`，而不是再次 adopt。
 
 ### 现在即可试用 Adaptive Governance [Current · MVP]
 
-下面命令在**已接入 Dairn、具有 Git Commit、能解析 `origin/main` 的目标仓库**内执行。项目内 Launcher 负责定位固定版本；`--base` 是本地存在的 Git Ref，可以使用明确的提交 SHA。
+下面命令在**已接入 Dairn、具有 Git Commit、能解析 `origin/main` 的目标仓库**内执行。项目根启动器负责定位固定版本；`--base` 是本地存在的 Git Ref，可以使用明确的提交 SHA。
 
 ```sh
 # 显示风险、必须覆盖的模块×检查、可本地快跑的项、必须留给 CI 的项
@@ -793,6 +793,8 @@ Harness 原生的文件与网络权限、工具授权和 Subagent 调度不由 D
 
 ```text
 my-project/
+├── dairn                             # POSIX 受管启动器
+├── dairn.cmd                         # Windows 受管启动器
 ├── AGENTS.md                         # 项目自己的 Agent 导航
 ├── CLAUDE.md                         # 可选的 Harness 入口
 ├── README.md
@@ -804,9 +806,9 @@ my-project/
 │   ├── skills/                       # 按需引入的 Skills
 │   └── notes/                        # 可选：重要决策与经验
 ├── .dairn/
-│   ├── bin/                          # 项目内 Launcher
+│   ├── runtime/                      # 可选：vendored 治理运行时
 │   ├── lock.json                     # 运行时/资产身份
-│   ├── launcher.json                 # Launcher 解析信息
+│   ├── launcher.json                 # 启动器解析信息
 │   ├── governance/
 │   │   ├── project.json              # 当前项目 Policy 基础
 │   │   ├── adaptation.json           # 可选：治理适配（规划）
@@ -826,24 +828,25 @@ my-project/
 
 Dairn 的运行内核使用 Cosmopolitan QuickJS APE。安装包携带运行时与完整性信息，项目可以选择 Vendored 模式，将已验证的运行时固定在仓库中。
 
-目标项目的 Launcher 解析顺序为：
+目标项目根启动器的运行时解析顺序为：
 
-1. 用户显式指定的 `DAIRN_BIN`；
-2. 项目内 `.dairn/runtime/dairn-embedded.com`；
-3. `PATH` 中的 `dairn`；
-4. 都不可用时，报告 `DAIRN_NOT_AVAILABLE`，不自行联网安装。
+1. 用户显式指定的 `DAIRN_RUNTIME`（构建或显式切换时使用）；
+2. 启动器同目录的 `.dairn/runtime/dairn-embedded.com`（Vendored 模式）；
+3. 都不可用时，报告 `DAIRN_NOT_AVAILABLE` 并以 2 退出，不自行联网安装。
+
+`dairn init` / `dairn adopt` 会在安装适配层提供 `DAIRN_RUNTIME_DIR` 时，把该目录中的运行时与完整性清单复制到项目 `.dairn/runtime/`；直接把发行 ZIP 解压到项目根时，`.dairn/runtime/` 已就位，无需再复制。
 
 ```sh
 # 已有 Dairn 项目，在项目根目录预置官方受信运行时与摘要文件后：
 dairn upgrade --root . --vendor-runtime .dairn/runtime --apply
 
-# POSIX：以后通过项目 Launcher 运行
-./.dairn/bin/dairn doctor
+# POSIX：以后通过项目根启动器运行
+./dairn doctor
 ```
 
-Windows 请使用 `.dairn\bin\dairn.cmd`。具体离线制品、平台限制、完整性校验和操作说明参见 [构建指南](BUILDING.md)。
+Windows 请使用 `dairn.cmd`。具体离线制品、平台限制、完整性校验和操作说明参见 [构建指南](BUILDING.md)。
 
-**Agent 安全规则**：Launcher 缺失或版本校验失败时，应报告环境阻塞；Agent 不应绕过项目约定，在后台安装另一版本 Dairn 或修改全局环境。
+**Agent 安全规则**：启动器缺失或版本校验失败时，应报告环境阻塞；Agent 不应绕过项目约定，在后台安装另一版本 Dairn 或修改全局环境。
 
 ---
 
@@ -899,7 +902,7 @@ Windows 请使用 `.dairn\bin\dairn.cmd`。具体离线制品、平台限制、�
 
 ## 从源码构建与测试
 
-**注意**：本仓库本身是 Dairn 源码，不是一个已经 `dairn init` 的目标项目。不要在源码根目录直接使用目标项目的 Launcher，也不要把构建输出提交为源码。
+**注意**：本仓库本身是 Dairn 源码仓库，也通过 `.dairn/` 自我接入治理；根启动器执行的是已提交的 `.dairn/runtime/` 快照，不要把仓库根当成新建目标项目的 `dairn init` 结果，也不要把构建输出提交为源码。
 
 ```sh
 # 需要 Python 3.10+ 和项目规定的构建环境
@@ -908,12 +911,12 @@ python tools/build.py
 # 或者
 npm run build
 
-# POSIX：运行源码构建出的 CLI
-./dairn.sh version
-./dairn.sh docs check
+# POSIX：运行根启动器（已提交的治理运行时快照）
+./dairn version
+./dairn docs check
 ```
 
-Windows 使用 `dairn.cmd`。日常命令由根启动器直接执行 `.dairn/runtime/` 的治理运行时快照，不需要先构建。更改 `quickjs/core/`、`quickjs/host/` 或 `quickjs/main.mjs` 后，运行 `python tools/build.py` 并用 `DAIRN_RUNTIME` 指向本次构建验证新源码；需要让治理运行时采用新构建时，再按 `docs/PROJECT_GUIDE.md` 更新 `.dairn/runtime/` 快照并执行 `upgrade --vendor-runtime`；否则可能误测旧产物。
+Windows 使用 `dairn.cmd`。日常命令由根启动器直接执行 `.dairn/runtime/` 的治理运行时快照，不需要先构建。更改 `quickjs/core/`、`quickjs/host/` 或 `quickjs/main.mjs` 后，运行 `python tools/build.py` 并用 `DAIRN_RUNTIME=$PWD/runtime/dairn-embedded.com ./dairn ...` 验证新源码；仓库根 `runtime/` 只是构建产物，启动器不会隐式使用它。需要让治理运行时采用新构建时，再按 `docs/PROJECT_GUIDE.md` 更新 `.dairn/runtime/` 快照并执行 `upgrade --vendor-runtime`；否则可能误测旧产物。
 
 `quickjs.lock.json` 固定 QuickJS 运行时来源。构建涉及的完整步骤、离线缓存、平台矩阵和验证命令，参见 [BUILDING.md](BUILDING.md)。
 

@@ -6,11 +6,11 @@ Dairn 是确定性的工程治理内核，不调用模型，不代替 GitHub 的
 
 能力驱动分析入口为 `dairn analyze plan`（默认 dry-run，仅对受信策略允许的只读 execute analyzer 在超时预算内执行）与 `dairn context`（Phase 1 上下文解析 MVP）。二者属于 advisory 决策/检索层，不构成 Gate 判定；契约见 `dairn docs show dairn.engineering.analyzer-selection` 与 `dairn docs show dairn.engineering.context-intelligence`。
 
-`tools/build.py` 与 `tools/build.cjs` 使用 `quickjs.lock.json` 固定的 QuickJS，将当前源码嵌入 APE，生成 ZIP、Wheel 和 npm 制品。Python 和 npm 只提供构建、安装和调用入口，不替代治理内核。源码构建到根目录 `runtime/`（构建产物，仅用于构建、打包和显式验证新源码）；`.dairn/runtime/` 是项目内 vendor 的治理运行时快照，由根目录 `dairn.sh`/`dairn.cmd` 直接执行，是日常命令的实际执行者。两者不得混淆：运行 `runtime/` 必须通过 `DAIRN_RUNTIME` 显式指定。
+`tools/build.py` 与 `tools/build.cjs` 使用 `quickjs.lock.json` 固定的 QuickJS，将当前源码嵌入 APE，生成 ZIP、Wheel 和 npm 制品。Python 和 npm 只提供构建、安装和调用入口，不替代治理内核。源码构建到根目录 `runtime/`（构建产物，仅用于构建、打包和显式验证新源码）；`.dairn/runtime/` 是项目内 vendor 的治理运行时快照，由根目录 `dairn`/`dairn.cmd` 直接执行，是日常命令的实际执行者。两者不得混淆：运行 `runtime/` 必须通过 `DAIRN_RUNTIME` 显式指定。
 
 ## 本地开发与门禁
 
-日常直接运行根启动器（POSIX `./dairn.sh`，Windows `dairn.cmd`），它执行 `.dairn/runtime/` 快照，不需要先构建。修改 `quickjs/core/`、`quickjs/host/`、`quickjs/main.mjs` 或资产后先 `python tools/build.py`，再用 `DAIRN_RUNTIME=$PWD/runtime/dairn-embedded.com ./dairn.sh ...` 验证新构建；不要安装另一个 Dairn 来掩盖本分支缺陷。只有需要刷新治理运行时或发布时才执行 vendor/upgrade 流程。
+日常直接运行根启动器（POSIX `./dairn`，Windows `dairn.cmd`），它执行 `.dairn/runtime/` 快照，不需要先构建。修改 `quickjs/core/`、`quickjs/host/`、`quickjs/main.mjs` 或资产后先 `python tools/build.py`，再用 `DAIRN_RUNTIME=$PWD/runtime/dairn-embedded.com ./dairn ...` 验证新构建；不要安装另一个 Dairn 来掩盖本分支缺陷。只有需要刷新治理运行时或发布时才执行 vendor/upgrade 流程。
 
 `.dairn/governance/project.json` 的检查统一调用 `python tools/check-source.py <阶段>`：
 
@@ -33,7 +33,7 @@ $env:DAIRN_RUNTIME = "$PWD/runtime/dairn-embedded.com"    # 显式让启动器�
 Remove-Item Env:\DAIRN_RUNTIME                             # 回到治理运行时快照
 ```
 
-完整门禁会重建根目录 `runtime/`，因此应在同步 vendor 后从治理运行时快照执行，避免 Windows 锁住待重建的二进制：完整本地验收直接运行根启动器：`./dairn.cmd check --all --timeout 3600`（POSIX `./dairn.sh check --all --timeout 3600`），并确保未设置 `DAIRN_RUNTIME`，以验证治理运行时快照而不误用构建产物。检查脚本将临时文件放在 `validation/source-checks/tmp/`；Dairn 对默认系统临时目录不可写的已初始化项目自动回退到 `.dairn/tmp/`。显式配置的 `TMPDIR` 无效时直接报错；不要修改全局环境或把工具探测失败改成成功。
+完整门禁会重建根目录 `runtime/`，因此应在同步 vendor 后从治理运行时快照执行，避免 Windows 锁住待重建的二进制：完整本地验收直接运行根启动器：`./dairn.cmd check --all --timeout 3600`（POSIX `./dairn check --all --timeout 3600`），并确保未设置 `DAIRN_RUNTIME`，以验证治理运行时快照而不误用构建产物。检查脚本将临时文件放在 `validation/source-checks/tmp/`；Dairn 对默认系统临时目录不可写的已初始化项目自动回退到 `.dairn/tmp/`。显式配置的 `TMPDIR` 无效时直接报错；不要修改全局环境或把工具探测失败改成成功。
 
 本仓库的 `.dairn/governance/project.json` 用 `snapshot_exclusions` 声明 `/.build/`、`/dist/`、`/runtime/`、`/validation/`、`__pycache__/` 等生成物边界，使 `check --all` 的输入覆盖率为 `declared-complete`。该字段只能排除被 Git 忽略的生成物，命中已跟踪或未被忽略的未跟踪输入时检查直接失败；前导 `/` 表示锚定仓库根。新增构建输出时同步更新声明，不能为绕过覆盖率而隐藏源码或测试。语义见 `dairn docs show dairn.engineering.evidence-snapshot`。
 
@@ -57,7 +57,7 @@ Remove-Item Env:\DAIRN_RUNTIME
 .\dairn.cmd validate
 ```
 
-升级工具验证二进制、版本和摘要，刷新 lock 与受管资源，并保留项目自有策略。`upgrade --apply` 会刷新 lock 与受管 launcher 副本；`.dairn/bin/dairn` 只是被治理项目的可再生副本，本仓库日常入口仍是根启动器。维护者必须审阅 Git diff；更新快照不构成发布批准。
+升级工具验证二进制、版本和摘要，刷新 lock 与受管资源，并保留项目自有策略。`upgrade --apply` 会刷新 lock 与受管根启动器 `dairn`/`dairn.cmd`，并把旧项目中的 `.dairn/bin/dairn`、`.dairn/bin/dairn.cmd` 作为退役受管文件移除；本仓库日常入口仍是根启动器。维护者必须审阅 Git diff；更新快照不构成发布批准。
 
 ## 推送后的交付
 

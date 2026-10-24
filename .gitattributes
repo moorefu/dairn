@@ -4,4 +4,5 @@
 *.zip binary
 *.gz binary
 *.xz binary
+dairn text eol=lf
 dairn.cmd text eol=crlf

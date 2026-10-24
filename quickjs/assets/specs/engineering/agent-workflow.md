@@ -51,4 +51,4 @@ G0/G1 优先用最短闭环，G2/G3 加入独立评审和可信证据。`dairn w
 
 通过 `dairn work start/list/status/next/record/advance/skip/verify/finish/cancel/reopen` 保存任务过程与外部证据，不自动调用 AI（`skip` 只允许规划阶段并必须给出理由）。工程变更后先 `dairn guide impact`、再审查 README/AGENTS/项目 Spec；最终由受保护 CI 执行质量门禁，任务记录不替代审批。
 
-调用入口是项目 launcher（`.dairn/bin/dairn` 或 `.dairn/bin/dairn.cmd`）；本文档与 Skill 示例中的 `dairn` 是它的简写。launcher 不可用时报告 `DAIRN_NOT_AVAILABLE`，**不要自行安装 Dairn**，也不要在仓库里写入运行时；解析顺序与 vendored 运行时见 [launcher 契约](launcher.md)。
+调用入口是项目根启动器 `dairn`（Windows `dairn.cmd`）；本文档与 Skill 示例中的 `dairn` 是它的简写。启动器不可用时报告 `DAIRN_NOT_AVAILABLE`，**不要自行安装 Dairn**，也不要在仓库里写入运行时；解析顺序与 vendored 运行时见 [launcher 契约](launcher.md)。

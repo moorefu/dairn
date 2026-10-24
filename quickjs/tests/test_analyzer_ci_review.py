@@ -2,7 +2,7 @@
 import json,os,subprocess,tempfile,time,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
-CLI=ROOT/'dairn.sh'
+CLI=ROOT/'dairn'
 class AnalyzerCIReview(unittest.TestCase):
  def setUp(self):
   self.t=tempfile.TemporaryDirectory(prefix='dairn-v12-');self.addCleanup(self.t.cleanup)

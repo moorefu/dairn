@@ -18,7 +18,7 @@ if os.name == 'nt':
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'validation/source-checks'
 PYTHON = [sys.executable, '-B', '-X', 'utf8']
-CLI = ROOT / ('dairn.cmd' if os.name == 'nt' else 'dairn.sh')
+CLI = ROOT / ('dairn.cmd' if os.name == 'nt' else 'dairn')
 
 # Windows PowerShell 可能以 GBK 连接 stdout；门禁日志包含中文路径和原始
 # QuickJS 错误时，报告器自身不能因为编码异常遮蔽真正的退出码。
@@ -64,8 +64,12 @@ def main():
         npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
         if not npm:
             parser.error('缺少 npm；构建门禁不会自动安装工具')
+        node = shutil.which('node')
+        if not node:
+            parser.error('缺少 node；无法校验根启动器与脚本常量一致')
         artifact_dir = Path(tempfile.mkdtemp(prefix='build-', dir=OUT))
-        commands = [PYTHON + ['tools/build.py', '--out', str(artifact_dir)],
+        commands = [[node, 'tools/render-launchers.mjs', '--check'],
+                    PYTHON + ['tools/build.py', '--out', str(artifact_dir)],
                     [npm, 'run', 'build', '--', '--out', str(artifact_dir)],
                     PYTHON + ['tools/checksums.py', '--dist', str(artifact_dir)]]
     results = []

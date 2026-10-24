@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CLI = ROOT / ('dairn.cmd' if os.name == 'nt' else 'dairn.sh')
+CLI = ROOT / ('dairn.cmd' if os.name == 'nt' else 'dairn')
 # Cosmopolitan 的 fd 表变量指向未继承句柄，Python 再启动 APE 孙进程时必须清空。
 ENV = {key: value for key, value in os.environ.items()
        if key not in ('_COSMO_FDS', '_COSMO_FDS_V2', 'DAIRN_RUNTIME', 'DAIRN_RUNTIME_SOURCE')}

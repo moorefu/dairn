@@ -16,8 +16,8 @@ dairn:pr-quality:
   script:
     - export DAIRN_EXPECTED_POLICY_SHA256="$(cat /etc/dairn/trusted-policy.sha256)"
     - test -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - /opt/dairn/dairn.sh validate --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - /opt/dairn/dairn.sh check --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - /opt/dairn/dairn validate --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - /opt/dairn/dairn check --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
 
 # No signing key on this runner, despite operating on a protected commit.
 dairn:protected-build:
@@ -29,7 +29,7 @@ dairn:protected-build:
   variables:
     GIT_DEPTH: "0"
   script:
-    - export DAIRN_CI_BIN=/opt/dairn/dairn.sh DAIRN_CI_APE_PATH=/opt/dairn/runtime/dairn-embedded.com
+    - export DAIRN_CI_BIN=/opt/dairn/dairn DAIRN_CI_APE_PATH=/opt/dairn/.dairn/runtime/dairn-embedded.com
     - export DAIRN_TRUSTED_BASE_REF="${DAIRN_TRUSTED_BASE_REF:-HEAD^}"
     - /opt/dairn/ci/protected/build-protected.sh "$DAIRN_TRUSTED_BASE_REF"
   artifacts:
@@ -51,7 +51,7 @@ dairn:sign:
   variables:
     GIT_DEPTH: "0"
   script:
-    - export DAIRN_CI_BIN=/opt/dairn/dairn.sh DAIRN_CI_APE_PATH=/opt/dairn/runtime/dairn-embedded.com
+    - export DAIRN_CI_BIN=/opt/dairn/dairn DAIRN_CI_APE_PATH=/opt/dairn/.dairn/runtime/dairn-embedded.com
     - export DAIRN_SIGNING_PRIVATE_KEY_PATH=/run/secrets/dairn-ci-ed25519.pem
     - export DAIRN_TRUSTED_CI_PUBLIC_KEY=/etc/dairn/ci-ed25519-public.pem
     - export DAIRN_EVIDENCE_DIR="$CI_PROJECT_DIR/.dairn/governance/evidence"
@@ -75,7 +75,7 @@ dairn:publish-evidence:
   variables:
     GIT_DEPTH: "0"
   script:
-    - export DAIRN_CI_BIN=/opt/dairn/dairn.sh
+    - export DAIRN_CI_BIN=/opt/dairn/dairn
     - export DAIRN_TRUSTED_CI_PUBLIC_KEY=/etc/dairn/ci-ed25519-public.pem
     - export DAIRN_EVIDENCE_DIR="$CI_PROJECT_DIR/.dairn/governance/evidence"
     - export DAIRN_EVIDENCE_REF_NAME="${DAIRN_EVIDENCE_REF_NAME:-refs/heads/dairn-evidence}"

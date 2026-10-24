@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 ROOT=Path(__file__).resolve().parents[2]
-CLI=ROOT/'dairn.sh'
+CLI=ROOT/'dairn'
 class MultilanguageAnalyzers(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(prefix='dairn-multilang-')

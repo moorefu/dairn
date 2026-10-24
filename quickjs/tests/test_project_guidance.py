@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 ROOT=Path(__file__).resolve().parents[2]
-CLI=ROOT/('dairn.cmd' if os.name=='nt' else 'dairn.sh')
+CLI=ROOT/('dairn.cmd' if os.name=='nt' else 'dairn')
 
 class Guidance(unittest.TestCase):
     def setUp(self):

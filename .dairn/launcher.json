@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "launcher": ".dairn/bin/dairn",
-  "windows_launcher": ".dairn/bin/dairn.cmd",
+  "launcher": "dairn",
+  "windows_launcher": "dairn.cmd",
   "mode": "vendored",
   "runtime": {
     "path": ".dairn/runtime/dairn-embedded.com",
     "integrity": ".dairn/runtime/runtime-integrity.json",
     "version": "0.1.0-nightly.20261024123943",
-    "sha256": "f14f0a919de9abe843553ca0209989dbf765962e44549419093592c919a60d05"
+    "sha256": "b1f347ca532a520d19772c53f6f2d0554ad650f30d4102149524b8ce509edffe"
   },
   "generated_by": "0.1.0-nightly.20261024123943"
 }

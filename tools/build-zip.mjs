@@ -90,14 +90,14 @@ try {
     builder_sha256:sha256Bytes(files.get('tools/build-zip.mjs')),
     zip_helper_sha256:sha256Bytes(files.get('tools/zip.mjs'))
   },null,2)+'\n'));
-  const mode=name=>/\.(sh|com)$/.test(name)||name==='bin/dairn.cjs'?0o100755:0o100644;
+  const mode=name=>/\.(sh|com)$/.test(name)||name==='dairn'||name==='bin/dairn.cjs'?0o100755:0o100644;
   const names=[...files.keys()].sort(),prefix=release.name+'-'+release.version+'/';
   const distribution=new Map([
     ['LICENSE',files.get('LICENSE')],
+    ['dairn',files.get('dairn')],
     ['dairn.cmd',files.get('dairn.cmd')],
-    ['dairn.sh',files.get('dairn.sh')],
-    ['runtime/dairn-embedded.com',runtime],
-    ['runtime/runtime-integrity.json',files.get('runtime-integrity.json')],
+    ['.dairn/runtime/dairn-embedded.com',runtime],
+    ['.dairn/runtime/runtime-integrity.json',files.get('runtime-integrity.json')],
     ...[...files].filter(([name])=>name.startsWith('licenses/'))
   ]);
   const artifact=out+'/'+release.name+'-'+release.version+'.zip';

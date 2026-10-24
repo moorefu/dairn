@@ -4,16 +4,16 @@
  * 以避免循环依赖：project.mjs 生成/注册 launcher，engine/work 只消费
  * launcherInfo/verifyLauncher 的只读结果。
  *
- * launcher 解析顺序（脚本内置，不自动安装）：
- *   DAIRN_BIN -> <root>/.dairn/runtime/dairn-embedded.com -> PATH 中的 dairn -> exit 127。
+ * 启动器解析顺序（脚本内置，不自动安装）：
+ *   DAIRN_RUNTIME -> 启动器同目录/.dairn/runtime/dairn-embedded.com -> exit 2。
  * launcher 文件由调用方（project.mjs）写入并纳入 lock 管理；`launcher.json`
- * 是项目自有配置，不参与受管哈希。本模块不写任何文件（有意不导出
- * installLauncherFiles；写盘与 chmod 由 project.mjs 负责）。二进制哈希不能
- * 通过 h.read（APE 是二进制，QuickJS 的 loadFile 会按文本处理），因此
- * sha256File 调用系统工具。
+ * 是项目自有配置，不参与受管哈希。本模块不写任何文件（写盘与 chmod 由
+ * project.mjs 负责），但提供只读的运行时载荷（DAIRN_RUNTIME_DIR）校验与
+ * 复制所需的元数据。二进制哈希不能通过 h.read（APE 是二进制，QuickJS 的
+ * loadFile 会按文本处理），因此 sha256File 调用系统工具或 h.readBytes。
  */
 import {sha256Bytes, sha256} from './sha256.mjs';
-import {POSIX_LAUNCHER_LINES, WINDOWS_LAUNCHER_LINES, RUNTIME_SOURCE_ENV} from './launcher-scripts.mjs';
+import {POSIX_LAUNCHER_LINES, WINDOWS_LAUNCHER_LINES, RUNTIME_SOURCE_ENV, RUNTIME_DIR_ENV} from './launcher-scripts.mjs';
 const join = (a, b) => a.replace(/\/$/, '') + '/' + b;
 const file = (h, p) => h.exists(p) && !h.isDirectory(p);
 const isObj = x => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -25,12 +25,15 @@ const safeRelPath = value => {
   return !path.split('/').some(part => !part || part === '.' || part === '..');
 };
 
-export const LAUNCHER_POSIX = '.dairn/bin/dairn';
-export const LAUNCHER_WINDOWS = '.dairn/bin/dairn.cmd';
+export const LAUNCHER_POSIX = 'dairn';
+export const LAUNCHER_WINDOWS = 'dairn.cmd';
 export const LAUNCHER_CONFIG = '.dairn/launcher.json';
 export const RUNTIME_DIR = '.dairn/runtime';
 export const RUNTIME_BINARY = '.dairn/runtime/dairn-embedded.com';
 export const RUNTIME_INTEGRITY = '.dairn/runtime/runtime-integrity.json';
+/* 旧版本把项目启动器放在 .dairn/bin/；upgrade 负责迁移并退役这两个受管文件。 */
+export const LEGACY_LAUNCHER_POSIX = '.dairn/bin/dairn';
+export const LEGACY_LAUNCHER_WINDOWS = '.dairn/bin/dairn.cmd';
 
 /* 返回 launcher 脚本文本。POSIX 用 LF；.cmd 用 CRLF，与 .dairn/.gitattributes
  * 的 eol 声明一致，保证跨平台 checkout 后受管哈希稳定。 */
@@ -93,7 +96,7 @@ export function launcherInfo(h, root) {
     windows: LAUNCHER_WINDOWS,
     mode: config.mode,
     invocation: './' + LAUNCHER_POSIX,
-    windows_invocation: LAUNCHER_WINDOWS.replace(/\//g, '\\'),
+    windows_invocation: LAUNCHER_WINDOWS,
     runtime,
   };
 }
@@ -141,13 +144,78 @@ export function sha256File(h, root, relPath) {
   throw Error('no SHA256 tool available for ' + rel + ' (tried sha256sum, shasum -a 256, certutil -hashfile; ' + failures.join('; ') + ')');
 }
 
-/* 运行时的实际来源（由启动器通过 DAIRN_RUNTIME_SOURCE 传入）。
+/* 运行时实际来源（由启动器通过 DAIRN_RUNTIME_SOURCE 传入）。
  * 只作为 doctor 的观察字段，不参与信任判断：unknown 不表示错误。 */
 export function runtimeSource(h) {
   let value = null;
   try { value = h.env(RUNTIME_SOURCE_ENV); } catch (_) { value = null; }
   const text = typeof value === 'string' ? value.trim() : '';
-  return ['vendored', 'external', 'path', 'packaged'].includes(text) ? text : 'unknown';
+  return ['vendored', 'external', 'packaged'].includes(text) ? text : 'unknown';
+}
+
+/* 启动器/安装适配层导出的运行时载荷目录（DAIRN_RUNTIME_DIR）。
+ * init/adopt/upgrade 用它把分发包自带的运行时复制到项目 `.dairn/runtime/`，
+ * 从而让项目根 `dairn` 成为不需要全局安装的稳定入口。 */
+export function runtimePayloadDir(h) {
+  let value = null;
+  try { value = h.env(RUNTIME_DIR_ENV); } catch (_) { value = null; }
+  const text = typeof value === 'string' ? posix(value).trim() : '';
+  return text || null;
+}
+
+/* 只读检查载荷目录里是否有可复制的运行时；不写盘、不做昂贵哈希。
+ * 返回 null 表示当前进程不是从“携带运行时的分发包/启动器”启动的。 */
+export function inspectRuntimePayload(h) {
+  const dir = runtimePayloadDir(h);
+  if (!dir) return null;
+  const binary = join(dir, 'dairn-embedded.com');
+  const integrityPath = join(dir, 'runtime-integrity.json');
+  if (!file(h, binary) || !file(h, integrityPath)) return null;
+  let integrity;
+  try { integrity = JSON.parse(h.read(integrityPath)); } catch (_) { return null; }
+  if (!isObj(integrity)) return null;
+  if (typeof integrity.sha256 !== 'string' || !HEX64.test(integrity.sha256)) return null;
+  if (typeof integrity.engine_version !== 'string' || !integrity.engine_version.trim()) return null;
+  return {dir, binary, integrity: integrityPath, version: integrity.engine_version, sha256: integrity.sha256};
+}
+
+/* 把载荷运行时原样复制进项目 `.dairn/runtime/` 并做完整校验。
+ * 只在 init/adopt/upgrade 的 apply 阶段调用；复制失败或校验不一致会抛错，
+ * 由 apply 的既有回滚逻辑保证不会留下半套受管状态。 */
+export function copyRuntimePayload(h, root, payload) {
+  if (!payload) throw Error('No runtime payload available: set DAIRN_RUNTIME_DIR to the directory containing dairn-embedded.com and runtime-integrity.json');
+  // 解压后的发行包就是项目的 .dairn/runtime 本身：无需自我复制，只做只读校验。
+  const targetBinary = join(root, RUNTIME_BINARY);
+  const targetIntegrity = join(root, RUNTIME_INTEGRITY);
+  let sameFiles = false;
+  try {
+    sameFiles = file(h, targetBinary) && file(h, targetIntegrity) &&
+      h.realpath(targetBinary) === h.realpath(payload.binary) &&
+      h.realpath(targetIntegrity) === h.realpath(payload.integrity);
+  } catch (_) { sameFiles = false; }
+  if (sameFiles) return vendorRuntime(h, root, RUNTIME_DIR, {version: payload.version});
+  if (typeof h.writeBytes !== 'function') throw Error('Runtime payload copy requires binary write support');
+  for (const rel of [RUNTIME_DIR, RUNTIME_BINARY, RUNTIME_INTEGRITY]) {
+    for (let cur = root, i = 0; i < rel.split('/').length; i++) {
+      cur = join(cur, rel.split('/')[i]);
+      if (h.isSymlink(cur)) throw Error('Refuse symlinked runtime path: ' + rel);
+    }
+  }
+  if (h.exists(join(root, RUNTIME_DIR)) && !h.isDirectory(join(root, RUNTIME_DIR))) {
+    throw Error('Runtime path is not a directory: ' + RUNTIME_DIR);
+  }
+  h.mkdirs(join(root, RUNTIME_DIR));
+  h.writeBytes(join(root, RUNTIME_BINARY), h.readBytes(payload.binary));
+  h.writeBytes(join(root, RUNTIME_INTEGRITY), h.readBytes(payload.integrity));
+  return vendorRuntime(h, root, RUNTIME_DIR, {version: payload.version});
+}
+
+/* 由载荷目录生成 vendored launcher 配置；没有载荷时返回 null。 */
+export function payloadLauncherConfig(h, root) {
+  const payload = inspectRuntimePayload(h);
+  if (!payload) return null;
+  const vendored = copyRuntimePayload(h, root, payload);
+  return {...defaultLauncherConfig(payload.version), mode: 'vendored', runtime: vendored.runtime};
 }
 
 /* 将运行中 runtime 内嵌的 engine_sources 与当前工作树比较，回答
@@ -251,8 +319,11 @@ export function verifyLauncher(h, root) {
     problems.push('launcher config: ' + (e && e.message || e));
     return { ok: false, problems, info: null };
   }
-  if (config.launcher !== LAUNCHER_POSIX) problems.push('launcher.json launcher path differs from managed ' + LAUNCHER_POSIX);
-  if (config.windows_launcher !== LAUNCHER_WINDOWS) problems.push('launcher.json windows_launcher path differs from managed ' + LAUNCHER_WINDOWS);
+  if (config.launcher !== LAUNCHER_POSIX) problems.push('launcher.json launcher path differs from managed ' + LAUNCHER_POSIX + ' (run dairn upgrade --apply)');
+  if (config.windows_launcher !== LAUNCHER_WINDOWS) problems.push('launcher.json windows_launcher path differs from managed ' + LAUNCHER_WINDOWS + ' (run dairn upgrade --apply)');
+  for (const rel of [LEGACY_LAUNCHER_POSIX, LEGACY_LAUNCHER_WINDOWS]) {
+    if (file(h, join(root, rel))) problems.push('legacy project launcher remains: ' + rel + ' (run dairn upgrade --apply to migrate to ./' + LAUNCHER_POSIX + ')');
+  }
   if (config.mode === 'external' && file(h, join(root, RUNTIME_BINARY))) {
     // launcher 脚本按“文件存在”解析 vendored 运行时；mode 只是治理记录。
     // 不一致时 doctor 必须报错，避免出现“实际跑 vendored、账面写 external”的漂移。

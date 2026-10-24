@@ -15,7 +15,7 @@ import {assessCapabilities, discoverRepository} from './capabilities.mjs';
 import {locateContract, locateRun, compareDebt, verifyExitConditions, writeContract} from './refactor.mjs';
 import {validateRefactorContract} from './project-context.mjs';
 import {collectRunHistory, recommendAdaptations} from './governance-feedback.mjs';
-import {LAUNCHER_POSIX,LAUNCHER_WINDOWS,LAUNCHER_CONFIG,RUNTIME_DIR,launcherScripts,defaultLauncherConfig,readLauncherConfig,launcherInfo,vendorRuntime,verifyLauncher,runtimeSource,runtimeFreshness} from './launcher.mjs';
+import {LAUNCHER_POSIX,LAUNCHER_WINDOWS,LAUNCHER_CONFIG,RUNTIME_DIR,LEGACY_LAUNCHER_POSIX,LEGACY_LAUNCHER_WINDOWS,launcherScripts,defaultLauncherConfig,readLauncherConfig,launcherInfo,payloadLauncherConfig,inspectRuntimePayload,vendorRuntime,verifyLauncher,runtimeSource,runtimeFreshness} from './launcher.mjs';
 import {configuredAnalyzers,analyzerInit,analyzerDoctor,analyzerTemplates,resolveAnalysisSuite} from './analyzers.mjs';
 import {executeAnalyzer,importAnalysisReport} from './analyzer-runner.mjs';
 import {loadQualityGoals} from './quality-goals.mjs';
@@ -123,7 +123,7 @@ function moduleConfig(h,root,o){
   });
 }
 function navigation(){return BEGIN+'\nDairn — AI-Native Software Engineering Toolkit.\n'+
-  'Project launcher: `./.dairn/bin/dairn` (Windows: `.dairn\\bin\\dairn.cmd`); `dairn` below is shorthand for this launcher. Never install Dairn during a task; if the launcher is missing, stop and report.\n'+
+  'Project launcher: `./dairn` (Windows: `dairn.cmd`); `dairn` below is shorthand for this launcher. Never install Dairn during a task; if the launcher is missing, stop and report.\n'+
   'Run `dairn doctor`, `dairn validate`, or `dairn check --base <trusted-ref>` before PR/MR.\n'+
   'Discover shared guidance with `dairn docs find <topic>`; additional Skills via `dairn skills add <name> --apply`.\n'+
   'Project governance policy: `.dairn/governance/project.json`; decisions: `.agents/notes/`.\n'+
@@ -153,7 +153,7 @@ jobs:
           DAIRN_CI_BIN: \${{ vars.DAIRN_CI_BIN }}
         run: |
           test -n "$DAIRN_EXPECTED_POLICY_SHA256" && test -n "$BASE_SHA"
-          DAIRN_BIN_VALUE="\${DAIRN_CI_BIN:-./.dairn/bin/dairn}"
+          DAIRN_BIN_VALUE="\${DAIRN_CI_BIN:-./dairn}"
           sh "$DAIRN_BIN_VALUE" guide drift --base "$BASE_SHA"
           sh "$DAIRN_BIN_VALUE" guide impact --base "$BASE_SHA"
           if [ "\${DAIRN_ENFORCE_DOC_DRIFT:-false}" = "true" ]; then sh "$DAIRN_BIN_VALUE" guide drift --base "$BASE_SHA" --strict; fi
@@ -167,7 +167,7 @@ dairn:quality:
   stage: quality
   script:
     - test -n "$DAIRN_EXPECTED_POLICY_SHA256" && test -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - DAIRN_BIN_VALUE="\${DAIRN_CI_BIN:-./.dairn/bin/dairn}"
+    - DAIRN_BIN_VALUE="\${DAIRN_CI_BIN:-./dairn}"
     - sh "$DAIRN_BIN_VALUE" guide drift --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
     - sh "$DAIRN_BIN_VALUE" guide impact --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
     - if [ "\${DAIRN_ENFORCE_DOC_DRIFT:-false}" = "true" ]; then sh "$DAIRN_BIN_VALUE" guide drift --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --strict; fi
@@ -220,6 +220,10 @@ function projectGuide(config){
 }
 function makeDesired(h,root,config,prior){
   const m=assetIndex(h), entries={};
+  // 受管规则：一个文件一旦进入 lock.managed，就必须在后续所有版本的 desired 集合里继续存在，
+  // 否则计划会把它当成“本版本已移除的受管资产”而 fail closed。项目自有文件（如 root
+  // .gitattributes、CLAUDE.md）只在缺失时创建；已受管时继续按受管内容刷新。
+  const wasManaged=rel=>!!(prior&&prior.managed&&prior.managed[rel]);
   const skills=new Set([...SKILLS,...config.modules.flatMap(x=>x.profiles.map(s=>'dairn-stack-'+s)),...(config.extra_skills||[])]);
   for(const x of m.assets)if(x.type==='skills'&&skills.has(x.path.split('/')[0]))entries['.agents/skills/'+x.path]=read(h,ASSETS+'skills/'+x.path);
   if(!prior){
@@ -230,7 +234,7 @@ function makeDesired(h,root,config,prior){
     entries['.agents/notes/archived/sha256.json']='{}\n';
     if(!file(h,j(root,'.gitignore')))entries['.gitignore']='# Dairn transient analyzer and runtime cache\n.dairn/cache/\n.dairn/tmp/\n';
     entries['.dairn/analyzers.json']=fmt({schema:'dairn.analyzers.v1',analyzers:[]});
-    if(!file(h,j(root,'CLAUDE.md')))entries['CLAUDE.md']='# Claude Code\n\nSee [AGENTS.md](AGENTS.md) for the authoritative, provider-neutral Dairn instructions.\nUse the project launcher `./.dairn/bin/dairn` (Windows: `.dairn\\bin\\dairn.cmd`) instead of a globally installed `dairn`; do not install Dairn, and use the `dairn-agent-workflow` Skill in `.agents/skills/` for deterministic checks.\n';
+    if(!file(h,j(root,'CLAUDE.md'))||wasManaged('CLAUDE.md'))entries['CLAUDE.md']='# Claude Code\n\nSee [AGENTS.md](AGENTS.md) for the authoritative, provider-neutral Dairn instructions.\nUse the project launcher `./dairn` (Windows: `dairn.cmd`) instead of a globally installed `dairn`; do not install Dairn, and use the `dairn-agent-workflow` Skill in `.agents/skills/` for deterministic checks.\n';
     if(config.sample){
       invariant(config.modules.length===1&&JSON.stringify(config.modules[0].profiles)==='["go"]','--sample requires a Go-only project');
       const prefix=config.modules[0].path==='.'?'':config.modules[0].path+'/';
@@ -249,12 +253,15 @@ function makeDesired(h,root,config,prior){
   entries['docs/GOVERNANCE_SPEC.md']='# Dairn\n\nAI-Native Software Engineering Toolkit.\n\n'+
     'Project policy: `.dairn/governance/project.json`; authoritative reference specs: `dairn docs find <topic>`.\n\n'+
     'Capability-driven analysis: `dairn analyze plan [--base <ref>] [--apply]` derives needs, reuses valid local results and executes only policy-allowlisted read-only analyzers; task-aware context: `dairn context [query] [--change]` returns sourced, precision-labeled evidence with explicit UNKNOWNs. Both are advisory and never a Gate verdict.\n';
-  entries['.dairn/Makefile']='.PHONY: doctor validate check\nDAIRN ?= ./.dairn/bin/dairn\ndoctor:\n\t@$(DAIRN) doctor\nvalidate:\n\t@$(DAIRN) validate\ncheck:\n\t@$(DAIRN) check\n';
+  entries['.dairn/Makefile']='.PHONY: doctor validate check\nDAIRN ?= ./dairn\ndoctor:\n\t@$(DAIRN) doctor\nvalidate:\n\t@$(DAIRN) validate\ncheck:\n\t@$(DAIRN) check\n';
   // 项目内 launcher 是受管入口；launcher.json 是项目自有配置（见 planFor 排除列表）。
   const launchers=launcherScripts();
   entries[LAUNCHER_POSIX]=launchers.posix;
   entries[LAUNCHER_WINDOWS]=launchers.windows;
-  entries['.dairn/.gitattributes']='bin/dairn text eol=lf\nbin/dairn.cmd text eol=crlf\nruntime/*.com binary\nruntime/runtime-integrity.json text eol=lf\n';
+  entries['.dairn/.gitattributes']='runtime/*.com binary\nruntime/runtime-integrity.json text eol=lf\n';
+  // 根 .gitattributes 是项目自有文件：只在缺失时创建，用于保证受管启动器的换行稳定。
+  // 一旦在旧版本里被创建并纳入受管集合，就继续按受管内容维护（见 wasManaged）。
+  if(!file(h,j(root,'.gitattributes'))||wasManaged('.gitattributes'))entries['.gitattributes']='# Dairn launchers: POSIX script must stay LF, Windows script must stay CRLF.\ndairn text eol=lf\ndairn.cmd text eol=crlf\n';
   if(!prior||!file(h,j(root,LAUNCHER_CONFIG)))entries[LAUNCHER_CONFIG]=fmt(defaultLauncherConfig(runtimeVersion(h)));
   if(['github','both'].includes(config.ci))entries['.github/workflows/dairn.yml']=ciTemplate('github');
   if(['gitlab','both'].includes(config.ci))entries['.gitlab-ci.yml']=ciTemplate('gitlab');
@@ -293,8 +300,13 @@ function planFor(h,root,entries,lock){
   // This release starts with the dairn-* namespace. There is no compatibility
   // translation, implicit deletion, or lock migration for retired asset names.
   // A future same-namespace upgrade must explicitly account for removed assets.
+  // 旧版本把项目启动器放在 .dairn/bin/；本版本迁到项目根 dairn/dairn.cmd 并退役旧受管文件。
+  // 除这类显式迁移外，受管资源集合只增不减，避免静默删除他人文件。
+  const LEGACY_MANAGED=new Set([LEGACY_LAUNCHER_POSIX,LEGACY_LAUNCHER_WINDOWS]);
   const retired=Object.keys(before).filter(rel=>!(rel in full));
-  invariant(retired.length===0,'Managed assets no longer in this Dairn release: '+retired.join(', ')+'. Manual review required.');
+  const unexpected=retired.filter(rel=>!LEGACY_MANAGED.has(rel));
+  invariant(unexpected.length===0,'Managed assets no longer in this Dairn release: '+unexpected.join(', ')+'. Manual review required.');
+  for(const rel of retired)actions.push({path:rel,status:'remove'});
   const kept={...next};
   return {actions,full,managed:kept};
 }
@@ -316,13 +328,32 @@ function launcherSummary(h,root,o,vendorConfig=null){
     return {mode:'vendored',runtime:vendored.runtime};
   }
   const configPath=j(root,LAUNCHER_CONFIG);
-  if(file(h,configPath)){const config=readLauncherConfig(h,root);return {mode:config.mode,runtime:config.runtime};}
+  if(file(h,configPath)){
+    const config=readLauncherConfig(h,root);
+    const payload=inspectRuntimePayload(h);
+    const legacy=config.launcher!==LAUNCHER_POSIX||config.windows_launcher!==LAUNCHER_WINDOWS;
+    if(payload&&(config.mode!=='vendored'||!config.runtime||config.runtime.version!==payload.version||config.runtime.sha256!==payload.sha256)){
+      return {mode:'vendored',pending:true,payload:payload.dir,legacy,
+        note:'apply will copy the bundled runtime into '+RUNTIME_DIR+' and migrate the launcher to ./'+LAUNCHER_POSIX};
+    }
+    return {mode:config.mode,legacy,runtime:config.runtime};
+  }
+  const payload=inspectRuntimePayload(h);
+  if(payload)return {mode:'vendored',pending:true,payload:payload.dir,
+    note:'apply will copy the bundled runtime into '+RUNTIME_DIR};
   return {mode:'external',runtime:null};
 }
 /* apply 后的项目自有 launcher 配置与执行位；managed launcher 文件由 makeDesired 写入。 */
 function ensureLauncher(h,root,o,vendorConfig=null){
   const configPath=j(root,LAUNCHER_CONFIG);
   let config=vendorConfig;
+  if(!config&&file(h,configPath)){
+    const existing=readLauncherConfig(h,root);
+    // launcher.json 是项目自有配置，但受管启动器的位置属于本版本契约：升级时迁移旧路径。
+    if(existing.launcher!==LAUNCHER_POSIX||existing.windows_launcher!==LAUNCHER_WINDOWS){
+      config={...existing,launcher:LAUNCHER_POSIX,windows_launcher:LAUNCHER_WINDOWS,generated_by:runtimeVersion(h)};
+    }
+  }
   if(!config&&!file(h,configPath))config=defaultLauncherConfig(runtimeVersion(h));
   if(config){
     invariant(!h.isSymlink(configPath),'Refuse symlinked launcher config: '+LAUNCHER_CONFIG);
@@ -330,9 +361,11 @@ function ensureLauncher(h,root,o,vendorConfig=null){
     const tmp=configPath+'.dairn-tmp-'+Date.now();
     try{h.write(tmp,fmt(config));h.rename(tmp,configPath);}finally{if(h.exists(tmp))h.remove(tmp);}
   }
-  const launcherPath=j(root,LAUNCHER_POSIX);
-  if(file(h,launcherPath)&&!h.isSymlink(launcherPath)){
-    try{h.chmod(launcherPath,0o755);}catch(e){h.log('WARN: cannot make launcher executable: '+(e&&e.message||e));}
+  for(const rel of [LAUNCHER_POSIX,LAUNCHER_WINDOWS]){
+    const launcherPath=j(root,rel);
+    if(file(h,launcherPath)&&!h.isSymlink(launcherPath)){
+      try{h.chmod(launcherPath,0o755);}catch(e){h.log('WARN: cannot make launcher executable: '+(e&&e.message||e));}
+    }
   }
   // APE 的 sh 加载器需要执行位；注册 vendored runtime 时尽量补上（Windows 无操作）。
   if(config&&config.mode==='vendored'&&config.runtime&&typeof config.runtime.path==='string'){
@@ -349,7 +382,6 @@ function layoutDirs(root){
   for(const kind of ['feedback','incident','bug','release','action'])dirs.push(j(root,'.dairn/governance/operations/'+kind));
   for(const kind of ['engineering','tasks','changes','evidence'])dirs.push(j(root,'.dairn/governance/'+kind));
   dirs.push(j(root,'.dairn/work'));
-  dirs.push(j(root,'.dairn/bin'));
   dirs.push(j(root,'.dairn/runtime'));
   dirs.push(j(root,'.dairn/cache'));
   dirs.push(j(root,'.dairn/cache/analyzers'));
@@ -376,7 +408,6 @@ function layout(h,root){
   for(const kind of ['feedback','incident','bug','release','action'])h.mkdirs(j(root,'.dairn/governance/operations/'+kind));
   for(const kind of ['engineering','tasks','changes','evidence'])h.mkdirs(j(root,'.dairn/governance/'+kind));
   h.mkdirs(j(root,'.dairn/work'));
-  h.mkdirs(j(root,'.dairn/bin'));
   h.mkdirs(j(root,'.dairn/runtime'));
   h.mkdirs(j(root,'.dairn/cache/analyzers'));
   h.mkdirs(j(root,'.dairn/tmp'));
@@ -426,9 +457,26 @@ export function verifyRuntimeLock(h,root,required=false){
   return lock;
 }
 function nameValid(value){invariant(/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(value),'Project name must be letters, digits, - or _ and start with letter');return value;}
+/* 解压后的发行包根目录不是空目录：允许 init 就地展开治理文件。
+ * 只接受发行包自带的启动器、LICENSE/licenses 与 .dairn/runtime 载荷；
+ * 出现任何其他内容都说明这是既有项目，应改用 adopt 以免覆盖项目文件。 */
+function isReleaseLayout(h,path){
+  const allowed=new Set(['dairn','dairn.cmd','LICENSE','licenses','.dairn']);
+  let names;try{names=h.list(path);}catch(_){return false;}
+  for(const name of names){
+    if(!allowed.has(name))return false;
+    if(name==='.dairn'){
+      let inner;try{inner=h.list(j(path,name));}catch(_){return false;}
+      if(!inner.every(x=>x==='runtime'))return false;
+      let files;try{files=h.list(j(j(path,name),'runtime'));}catch(_){return false;}
+      if(!files.every(x=>x==='dairn-embedded.com'||x==='runtime-integrity.json'))return false;
+    }
+  }
+  return true;
+}
 function provision(h,o){
   const path=o.root==='.'?h.cwd():o.root;
-  if(o.cmd==='init'&&h.exists(path)&&h.isDirectory(path)&&h.list(path).length)throw Error('Nonempty directory: use dairn adopt');
+  if(o.cmd==='init'&&h.exists(path)&&h.isDirectory(path)&&h.list(path).length&&!isReleaseLayout(h,path))throw Error('Nonempty directory: use dairn adopt');
   if(o.cmd==='adopt')invariant(h.exists(path),'Existing project directory required for adopt');
   const root=o.plan&& !h.exists(path)?null:checkedRoot(h,path,!o.plan&&o.cmd==='init');
   // A plan for a missing directory must remain read-only.
@@ -446,8 +494,13 @@ function provision(h,o){
     ...(o.discover?{discovery:{repository:discoverRepository(h,evaluationRoot),
       note:'suggestions only; existing CI/tests are reused, never overwritten — apply requires --apply'}}:{}),
     actions:plan.actions,launcher:launcherSummary(h,evaluationRoot,o)}));return plan.actions.some(x=>x.status==='conflict')?2:0;}
-  // Validate an explicitly requested vendored runtime BEFORE the first write (fail closed).
-  const vendorConfig=launcherConfigFor(h,evaluationRoot,o);
+  // Validate an explicitly requested vendored runtime, or copy the bundled runtime payload,
+  // BEFORE the first managed write (fail closed; apply rolls back managed files on error).
+  const vendorConfig=launcherConfigFor(h,evaluationRoot,o)||payloadLauncherConfig(h,evaluationRoot);
+  if(vendorConfig){
+    plan.full[LAUNCHER_CONFIG]=fmt(vendorConfig);
+    if(!plan.actions.some(x=>x.path===LAUNCHER_CONFIG))plan.actions.push({path:LAUNCHER_CONFIG,status:file(h,j(evaluationRoot,LAUNCHER_CONFIG))?'update':'create'});
+  }
   const lock={schema:2,version:runtimeVersion(h),runtime_sha256:runtimeIdentity(h),config,managed:plan.managed};
   apply(h,evaluationRoot,plan,lock);layout(h,evaluationRoot);
   ensureLauncher(h,evaluationRoot,o,vendorConfig);
@@ -457,7 +510,8 @@ function provision(h,o){
   h.log('Dairn '+runtimeVersion(h)+' '+o.cmd+' 完成：'+config.modules.length+' 个模块，'+plan.actions.length+' 项资源。');
   h.log('Launcher: '+LAUNCHER_POSIX+' (Windows: '+LAUNCHER_WINDOWS+')'+(vendorConfig?' — vendored runtime registered':' — external runtime resolution'));
   h.log('Next: dairn guide plan; dairn work start <task> --id <id>; dairn hooks install --apply; dairn doctor; dairn check --all');
-  h.log('Offline runtime: put the official APE + runtime-integrity.json in .dairn/runtime, then run dairn upgrade --vendor-runtime .dairn/runtime --apply (adopt also accepts --vendor-runtime)');return 0;
+  if(!vendorConfig)h.log('WARNING: no runtime payload available; copy the official APE + runtime-integrity.json into .dairn/runtime and run dairn upgrade --vendor-runtime .dairn/runtime --apply');
+  return 0;
 }
 function upgrade(h,o){
   const root=checkedRoot(h,o.root==='.'?h.cwd():o.root,false), lock=lockRead(h,root,true);
@@ -466,7 +520,10 @@ function upgrade(h,o){
   const installed=runtimeVersion(h);
   let existingLauncher=null;
   try{existingLauncher=readLauncherConfig(h,root);}catch(_){existingLauncher=null;}
-  const staleVendored=!!(existingLauncher&&existingLauncher.mode==='vendored'&&!o.vendor_runtime&&
+  const payload=inspectRuntimePayload(h);
+  const payloadFix=!!(payload&&!o.vendor_runtime&&payload.version===installed);
+  const legacyLauncher=!!(existingLauncher&&(existingLauncher.launcher!==LAUNCHER_POSIX||existingLauncher.windows_launcher!==LAUNCHER_WINDOWS));
+  const staleVendored=!!(existingLauncher&&existingLauncher.mode==='vendored'&&!o.vendor_runtime&&!payloadFix&&
     existingLauncher.runtime&&existingLauncher.runtime.version&&existingLauncher.runtime.version!==installed);
   if(staleVendored){
     const message='Project launcher vendors Dairn '+existingLauncher.runtime.version+' but this CLI is '+installed+
@@ -475,13 +532,29 @@ function upgrade(h,o){
     h.error('WARNING: '+message);
   }
   const next={schema:2,version:installed,runtime_sha256:runtimeIdentity(h),config,managed:plan.managed};
-  // A requested vendored runtime must validate before any managed file is written.
-  const vendorConfig=o.vendor_runtime&&o.apply?launcherConfigFor(h,root,o):null;
+  // 任意 vendored 运行时变更都必须在写受管文件之前完成校验/复制（fail closed）。
+  let vendorConfig=null;
+  if(o.apply){
+    if(o.vendor_runtime)vendorConfig=launcherConfigFor(h,root,o);
+    else if(payloadFix){
+      // 版本相同不代表二进制相同（同版本号重建）；用载荷摘要判断是否仍需刷新。
+      const current=!!(existingLauncher&&existingLauncher.mode==='vendored'&&existingLauncher.runtime&&
+        existingLauncher.runtime.version===installed&&existingLauncher.runtime.sha256===payload.sha256);
+      if(!current)vendorConfig=payloadLauncherConfig(h,root);
+    }
+  }
+  if(vendorConfig&&legacyLauncher)vendorConfig={...vendorConfig,launcher:LAUNCHER_POSIX,windows_launcher:LAUNCHER_WINDOWS};
   h.log(fmt({mode:o.apply?'apply':'plan',installed:runtimeVersion(h),recorded:lock.version,actions:plan.actions.filter(x=>o.diff||x.status!=='unchanged'),launcher:launcherSummary(h,root,o,vendorConfig)}));
   if(o.diff){for(const a of plan.actions.filter(x=>x.status==='update'))h.log('~ '+a.path+' (managed content changed; diff with git for exact lines)');}
   if(!o.apply)return plan.actions.some(x=>x.status==='conflict')?2:0;
   apply(h,root,plan,next);layout(h,root);ensureLauncher(h,root,o,vendorConfig);
-  h.log('Upgrade applied; project-owned policy, Notes and launcher.json are preserved unless --vendor-runtime was given.');return 0;
+  h.log('Upgrade applied; project-owned policy and Notes are preserved. Launcher: ./'+LAUNCHER_POSIX+' (Windows: '+LAUNCHER_WINDOWS+')'+
+    (vendorConfig?' — vendored runtime registered':(legacyLauncher?' — launcher paths migrated':'')));
+  for(const rel of [LEGACY_LAUNCHER_POSIX,LEGACY_LAUNCHER_WINDOWS]){
+    const legacyPath=j(root,rel);
+    if(h.exists(legacyPath)&&h.isDirectory(legacyPath))try{h.remove(legacyPath);}catch(_){}
+  }
+  return 0;
 }
 function addSkill(h,o){
   const root=checkedRoot(h,o.root==='.'?h.cwd():o.root,false),lock=verifyRuntimeLock(h,root,true);
@@ -547,7 +620,7 @@ function doctor(h,root){
   for(const problem of launcherCheck.problems)problems.push(problem);
   let launcher=launcherCheck.info;
   if(!launcher){try{launcher=launcherInfo(h,root);}catch(_){launcher=null;}}
-  if(!launcher)launcher={resolved:LAUNCHER_POSIX,windows:LAUNCHER_WINDOWS,mode:'external',invocation:'./'+LAUNCHER_POSIX,windows_invocation:LAUNCHER_WINDOWS.replace(/\//g,'\\'),runtime:null};
+  if(!launcher)launcher={resolved:LAUNCHER_POSIX,windows:LAUNCHER_WINDOWS,mode:'external',invocation:'./'+LAUNCHER_POSIX,windows_invocation:LAUNCHER_WINDOWS,runtime:null};
   if(launcher.mode==='vendored'&&launcher.runtime&&launcher.runtime.version&&launcher.runtime.version!==lock.version){
     problems.push('vendored launcher runtime is '+launcher.runtime.version+' but project lock is '+lock.version+'; run dairn upgrade --vendor-runtime .dairn/runtime --apply');
   }

@@ -110,74 +110,70 @@ class WindowsAcceptance(unittest.TestCase):
             junction.rmdir()
 
     def run_launcher(self, *args, env=None, cwd=None):
-        launcher = (cwd or self.root) / '.dairn/bin/dairn.cmd'
+        # 唯一启动器在项目根：dairn.cmd（Windows），不再有 .dairn/bin 第二层。
+        launcher = (cwd or self.root) / 'dairn.cmd'
         command = ['cmd.exe', '/d', '/c', str(launcher), *map(str, args)]
-        return subprocess.run(command, cwd=cwd or self.root, env=env or os.environ,
+        clean = {key: value for key, value in os.environ.items() if not key.startswith('DAIRN_RUNTIME')}
+        clean.update(env or {})
+        return subprocess.run(command, cwd=cwd or self.root, env=clean,
                               capture_output=True, encoding='utf-8', errors='replace', timeout=90)
 
     def system_path_env(self):
         env = {**os.environ, 'PATH': str(Path(os.environ['SystemRoot']) / 'System32')}
-        env.pop('DAIRN_BIN', None)
+        for key in list(env):
+            if key.startswith('DAIRN_RUNTIME') or key == 'DAIRN_BIN':
+                env.pop(key, None)
         return env
 
-    def test_project_launcher_files_doctor_and_vendored_offline_run(self):
+    def test_project_launcher_vendored_doctor_and_offline_run(self):
         runtime = ROOT / 'runtime/dairn-embedded.com'
         integrity = ROOT / 'runtime/runtime-integrity.json'
         if not runtime.exists() or not integrity.exists():
             self.skipTest('build runtime/ first (python tools/build.py)')
         self.init()
-        for relative in ['.dairn/bin/dairn', '.dairn/bin/dairn.cmd', '.dairn/launcher.json', '.dairn/.gitattributes']:
+        # 唯一启动器在项目根；init 从当前运行载荷（DAIRN_RUNTIME_DIR）复制 vendored 运行时。
+        for relative in ['dairn', 'dairn.cmd', '.dairn/launcher.json', '.dairn/.gitattributes',
+                         '.dairn/runtime/dairn-embedded.com', '.dairn/runtime/runtime-integrity.json']:
             self.assertTrue((self.root / relative).is_file(), relative)
+        self.assertFalse((self.root / '.dairn/bin/dairn').exists())
+        self.assertFalse((self.root / '.dairn/bin/dairn.cmd').exists())
         config = json.loads((self.root / '.dairn/launcher.json').read_text(encoding='utf-8'))
-        self.assertEqual(config['mode'], 'external')
-        self.assertIsNone(config['runtime'])
+        self.assertEqual(config['mode'], 'vendored')
+        self.assertEqual(config['launcher'], 'dairn')
+        self.assertEqual(config['windows_launcher'], 'dairn.cmd')
+        self.assertEqual(config['runtime']['path'], '.dairn/runtime/dairn-embedded.com')
+        declared = json.loads((self.root / '.dairn/runtime/runtime-integrity.json').read_text(encoding='utf-8'))['sha256']
+        self.assertEqual(config['runtime']['sha256'], declared)
         doctor = self.run_cli('doctor', '--root', self.root)
         self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
         report = json.loads(doctor.stdout)
         self.assertEqual(report['status'], 'ready')
-        self.assertIn('.dairn/bin/dairn', report['launcher']['resolved'])
-        self.assertEqual(report['launcher']['mode'], 'external')
+        self.assertEqual(report['launcher']['resolved'], 'dairn')
+        self.assertEqual(report['launcher']['mode'], 'vendored')
         self.assertIn('doctor', report['invocation'])
-        # DAIRN_BIN 覆盖解析顺序（指向可执行 CLI，而不是裸 APE）。
-        overridden = self.run_launcher('version', env={**os.environ, 'DAIRN_BIN': str(CLI)})
-        self.assertEqual(overridden.returncode, 0, overridden.stdout + overridden.stderr)
-        self.assertIn('Dairn ', overridden.stdout)
-        # 注册 vendored 运行时后，PATH 中没有 dairn 也能离线执行。
-        target = self.root / '.dairn/runtime'
-        target.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(runtime, target / 'dairn-embedded.com')
-        shutil.copyfile(integrity, target / 'runtime-integrity.json')
-        registered = self.run_cli('upgrade', '--vendor-runtime', '.dairn/runtime', '--apply', '--root', self.root)
-        self.assertEqual(registered.returncode, 0, registered.stdout + registered.stderr)
-        config = json.loads((self.root / '.dairn/launcher.json').read_text(encoding='utf-8'))
-        self.assertEqual(config['mode'], 'vendored')
-        self.assertEqual(config['runtime']['path'], '.dairn/runtime/dairn-embedded.com')
-        declared = json.loads(integrity.read_text(encoding='utf-8'))['sha256']
-        self.assertEqual(config['runtime']['sha256'], declared)
+        # PATH 中没有 dairn 时也能离线执行项目自带运行时。
         offline = self.run_launcher('version', env=self.system_path_env())
         self.assertEqual(offline.returncode, 0, offline.stdout + offline.stderr)
         self.assertIn('Dairn ', offline.stdout)
-        doctor = self.run_cli('doctor', '--root', self.root)
-        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
-        report = json.loads(doctor.stdout)
-        self.assertEqual(report['launcher']['mode'], 'vendored')
-        self.assertEqual(report['launcher']['runtime']['path'], '.dairn/runtime/dairn-embedded.com')
+        # DAIRN_RUNTIME 覆盖解析顺序（指向构建产物，而不是项目快照）。
+        overridden = self.run_launcher('version', env={'DAIRN_RUNTIME': str(runtime)})
+        self.assertEqual(overridden.returncode, 0, overridden.stdout + overridden.stderr)
+        self.assertIn('Dairn ', overridden.stdout)
 
-    def test_project_launcher_missing_runtime_reports_dairn_not_found(self):
+    def test_project_launcher_missing_runtime_reports_clear_error(self):
         self.init()
-        result = self.run_launcher('version', env=self.system_path_env())
-        self.assertEqual(result.returncode, 127, result.stdout + result.stderr)
-        self.assertIn('dairn not found', result.stderr.lower())
-        self.assertIn('DAIRN_NOT_AVAILABLE', result.stderr)
+        first = self.run_launcher('version', env=self.system_path_env())
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        for name in ('dairn-embedded.com', 'runtime-integrity.json'):
+            (self.root / '.dairn/runtime' / name).unlink()
+        missing = self.run_launcher('version', env=self.system_path_env())
+        self.assertEqual(missing.returncode, 2, missing.stdout + missing.stderr)
+        self.assertIn('DAIRN_NOT_AVAILABLE', missing.stderr)
+        self.assertIn('.dairn', missing.stderr)
+        self.assertIn('dairn-embedded.com', missing.stderr)
 
     def test_vendored_launcher_preserves_nonzero_exit(self):
         self.init()
-        target = self.root / '.dairn/runtime'
-        target.mkdir(parents=True, exist_ok=True)
-        for name in ('dairn-embedded.com', 'runtime-integrity.json'):
-            shutil.copyfile(ROOT / 'runtime' / name, target / name)
-        result = self.run_cli('upgrade', '--vendor-runtime', '.dairn/runtime', '--apply', '--root', self.root)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         result = self.run_launcher('invalid-command', env=self.system_path_env())
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
 
@@ -190,7 +186,9 @@ class WindowsAcceptance(unittest.TestCase):
         clone = Path(self.temp.name) / '克隆 项目'
         subprocess.run(['git', '-c', 'core.autocrlf=true', 'clone', '-q', str(self.root), str(clone)],
                        capture_output=True, check=True)
-        self.assertIn(b'\r\n', (clone / '.dairn/bin/dairn.cmd').read_bytes())
+        # 受管启动器在项目根：POSIX 版 LF，Windows 版 CRLF；二进制运行时不受换行转换影响。
+        self.assertNotIn(b'\r\n', (clone / 'dairn').read_bytes())
+        self.assertIn(b'\r\n', (clone / 'dairn.cmd').read_bytes())
         result = self.run_cli('validate', '--root', clone)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 

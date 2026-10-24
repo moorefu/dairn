@@ -6,7 +6,7 @@
 
 - [ ] 测试组织与仓库（GitHub + GitLab 各一），`main` 分支开启保护：required check `dairn-quality`、required reviews、禁止 force-push
 - [ ] 三个分离 Runner 组：`dairn-protected-build`（无密钥）、`dairn-protected-sign`（挂 Ed25519 私钥）、`dairn-evidence-publisher`（仅 Evidence ref 写身份）
-- [ ] 固定 `/opt/dairn` 发行版（APE + runtime-integrity.json），记录 `DAIRN_EXPECTED_APE_SHA256` / `DAIRN_EXPECTED_RUNTIME_SHA256` / `DAIRN_EXPECTED_POLICY_SHA256` 到仓库变量
+- [ ] 固定 `/opt/dairn` 发行版解压根（根启动器 `dairn`/`dairn.cmd` + `.dairn/runtime/dairn-embedded.com` + `runtime-integrity.json`），记录 `DAIRN_EXPECTED_APE_SHA256` / `DAIRN_EXPECTED_RUNTIME_SHA256` / `DAIRN_EXPECTED_POLICY_SHA256` 到仓库变量
 - [ ] 创建并保护 `refs/heads/dairn-evidence`：仅发布身份可写、拒绝非快进、禁止删除
 
 ## CI 链路正向演练

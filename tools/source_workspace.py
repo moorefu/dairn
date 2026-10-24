@@ -9,7 +9,8 @@ from release_config import load_release
 
 
 def zip_paths(root):
-    return {'LICENSE', 'dairn.cmd', 'dairn.sh', 'runtime/dairn-embedded.com', 'runtime/runtime-integrity.json'} | {
+    return {'LICENSE', 'dairn', 'dairn.cmd', '.dairn/runtime/dairn-embedded.com',
+            '.dairn/runtime/runtime-integrity.json'} | {
         p.relative_to(root).as_posix() for p in (root / 'licenses').rglob('*') if p.is_file()}
 
 
@@ -22,11 +23,11 @@ def runtime_payload(root, archive):
             raise ValueError('运行 ZIP 必须只包含启动器、runtime 和许可证，不得夹带源码')
         if zipped.testzip() is not None:
             raise ValueError('运行 ZIP 校验失败')
-        for launcher in ('dairn.sh', 'dairn.cmd'):
+        for launcher in ('dairn', 'dairn.cmd'):
             if zipped.read(prefix + launcher) != (root / launcher).read_bytes():
                 raise ValueError('ZIP 启动器必须与仓库唯一来源一致：' + launcher)
-        binary = zipped.read(prefix + 'runtime/dairn-embedded.com')
-        integrity = zipped.read(prefix + 'runtime/runtime-integrity.json')
+        binary = zipped.read(prefix + '.dairn/runtime/dairn-embedded.com')
+        integrity = zipped.read(prefix + '.dairn/runtime/runtime-integrity.json')
     if json.loads(integrity)['sha256'] != hashlib.sha256(binary).hexdigest():
         raise ValueError('运行 ZIP 内 APE 校验失败')
     return binary, integrity
@@ -67,7 +68,7 @@ def prepare_workspace(root, destination, archive=None):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
             if os.name != 'nt':
-                target.chmod(0o755 if target.suffix in {'.sh', '.com'} or relative.as_posix() == 'bin/dairn.cjs' else 0o644)
+                target.chmod(0o755 if target.suffix in {'.sh', '.com'} or relative.as_posix() in {'bin/dairn.cjs', 'dairn'} else 0o644)
         else:
             raise ValueError('缺少构建输入：' + str(relative))
 
@@ -78,10 +79,14 @@ def prepare_workspace(root, destination, archive=None):
         copy(Path(name))
     if archive is not None:
         binary, integrity = runtime_payload(root, archive)
-        (destination / 'runtime').mkdir(exist_ok=True)
-        (destination / 'runtime/dairn-embedded.com').write_bytes(binary)
-        (destination / 'runtime/dairn-embedded.com').chmod(0o755)
-        (destination / 'runtime/runtime-integrity.json').write_bytes(integrity)
+        # 仓库根 runtime/ 是 verify-linux 的 DAIRN_RUNTIME 构建槽；.dairn/runtime
+        # 是根启动器实际执行的治理运行时，回归必须使用待测 ZIP 的载荷。
+        for relative in ('runtime', '.dairn/runtime'):
+            target = destination / relative
+            target.mkdir(parents=True, exist_ok=True)
+            (target / 'dairn-embedded.com').write_bytes(binary)
+            (target / 'dairn-embedded.com').chmod(0o755)
+            (target / 'runtime-integrity.json').write_bytes(integrity)
         # 回归使用本次发布的运行时及其内嵌 manifest。
         with zipfile.ZipFile(destination / 'runtime/dairn-embedded.com') as zipped:
             (destination / 'quickjs/assets/manifest.json').write_bytes(zipped.read('quickjs/assets/manifest.json'))

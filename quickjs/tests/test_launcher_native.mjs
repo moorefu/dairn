@@ -1,10 +1,10 @@
-// 原生 QuickJS 契约测试：launcher 运行时来源与源码陈旧度判定。
+// 原生 QuickJS 契约测试：launcher 脚本常量、运行时来源与源码陈旧度判定。
 // 这些函数只读工作树、不写项目；临时目录由测试自行清理。
 import * as std from 'std';
 import {host as h} from '../host/qjs.mjs';
 import {sha256} from '../core/sha256.mjs';
 import {
-  POSIX_LAUNCHER_LINES, WINDOWS_LAUNCHER_LINES, RUNTIME_SOURCE_ENV,
+  POSIX_LAUNCHER_LINES, WINDOWS_LAUNCHER_LINES, RUNTIME_SOURCE_ENV, RUNTIME_DIR_ENV,
 } from '../core/launcher-scripts.mjs';
 import {launcherScripts, runtimeFreshness, runtimeSource} from '../core/launcher.mjs';
 
@@ -32,11 +32,25 @@ try {
   const registry = {posix: launcherScripts().posix, windows: launcherScripts().windows};
   assert.ok(registry.posix.includes(RUNTIME_SOURCE_ENV + '=vendored'), 'POSIX launcher 传递来源');
   assert.ok(registry.windows.includes('set "' + RUNTIME_SOURCE_ENV + '=vendored"'), 'Windows launcher 传递来源');
+  assert.ok(registry.posix.includes(RUNTIME_DIR_ENV + '='), 'POSIX launcher 传递运行时目录');
+  assert.ok(registry.windows.includes('set "' + RUNTIME_DIR_ENV + '='), 'Windows launcher 传递运行时目录');
+  // 两份脚本必须指向同一解析路径，且缺失时给出可行动的错误码与提示。
+  for (const [label, text] of [['POSIX', registry.posix], ['Windows', registry.windows.replace(/\\/g, '/')]]) {
+    assert.ok(text.includes('.dairn/runtime/dairn-embedded.com'), label + ' 解析 vendored 运行时');
+    assert.ok(text.includes('DAIRN_NOT_AVAILABLE'), label + ' 缺失运行时给出 DAIRN_NOT_AVAILABLE');
+    assert.ok(/exit (\/b )?2/.test(text), label + ' 缺失运行时退出码 2');
+  }
+  // POSIX 用 LF；Windows .cmd 用 CRLF 且不得含非 ASCII 字符（cmd.exe 代码页会误解析）。
+  assert.ok(registry.posix.endsWith('\n') && !registry.posix.includes('\r'), 'POSIX launcher 只用 LF');
+  assert.ok(registry.windows.endsWith('\r\n'), 'Windows launcher 使用 CRLF');
+  const nonAscii = registry.windows.split('').filter(ch => ch.charCodeAt(0) > 127);
+  assert.equal(nonAscii.length, 0, 'Windows launcher 不含非 ASCII 字符');
+  assert.ok(POSIX_LAUNCHER_LINES.length > 10 && WINDOWS_LAUNCHER_LINES.length > 10, '脚本行数非空');
 
   const source = runtimeSource(h);
   const envSource = h.env(RUNTIME_SOURCE_ENV);
   if (!envSource) assert.equal(source, 'unknown', '未由 launcher 启动时来源为 unknown');
-  else assert.ok(['vendored', 'external', 'path', 'packaged'].includes(source), '来源取值受控：' + source);
+  else assert.ok(['vendored', 'external', 'packaged'].includes(source), '来源取值受控：' + source);
 
   const current = runtimeFreshness(h, base, sources);
   assert.equal(current.status, 'current', '工作树与内嵌源码一致');

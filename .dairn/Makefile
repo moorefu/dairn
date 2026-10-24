@@ -1,5 +1,5 @@
 .PHONY: doctor validate check
-DAIRN ?= ./.dairn/bin/dairn
+DAIRN ?= ./dairn
 doctor:
 	@$(DAIRN) doctor
 validate:

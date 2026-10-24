@@ -16,7 +16,7 @@ if unexpected:
     raise SystemExit('发布目录含有额外制品，请先清理：' + ', '.join(sorted(unexpected)))
 hashes = {name: hashlib.sha256((args.dist / name).read_bytes()).hexdigest() for name in names.values()}
 with zipfile.ZipFile(args.dist / names['wheel']) as archive:
-    ape = hashlib.sha256(archive.read('dairn/runtime/dairn-embedded.com')).hexdigest()
+    ape = hashlib.sha256(archive.read('dairn/.dairn/runtime/dairn-embedded.com')).hexdigest()
 record = {'artifacts': hashes, 'ape_sha256': ape}
 (args.dist / 'checksums.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
 print(json.dumps(record, indent=2))

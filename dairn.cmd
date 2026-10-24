@@ -1,36 +1,30 @@
 @echo off
+rem Dairn launcher (generated from quickjs/core/launcher-scripts.mjs; do not edit).
+rem Runtime resolution: DAIRN_RUNTIME, then .dairn\runtime\dairn-embedded.com.
 setlocal
-rem Dairn launcher: single entry point for source repo, npm, Wheel and ZIP.
-rem
-rem Runtime roles (do not mix):
-rem   - governance runtime snapshot: .dairn\runtime\ (vendored APE)
-rem     is executed directly by this launcher for daily commands; no build required.
-rem   - build output: root runtime\ (from python tools/build.py) is only for
-rem     builds, packaging and explicitly verifying new source via DAIRN_RUNTIME.
-rem   - source: quickjs\ is the source of truth; run build and vendor/upgrade
-rem     only when refreshing the governance runtime or preparing a release.
-rem
-rem Resolution order: DAIRN_RUNTIME -> .dairn\runtime -> packaged runtime\.
-rem Use goto labels instead of parentheses blocks: %ERRORLEVEL% inside a block is
-rem expanded before the runtime runs, which would swallow real failure codes.
+set "DAIRN_HOME=%~dp0"
 if defined DAIRN_RUNTIME goto dairn_external
-if exist "%~dp0.dairn\runtime\dairn-embedded.com" goto dairn_vendored
-if not exist "%~dp0runtime\dairn-embedded.com" goto dairn_missing
-set "DAIRN_RUNTIME_SOURCE=packaged"
-"%~dp0runtime\dairn-embedded.com" /zip/quickjs/main.mjs %*
-exit /b %ERRORLEVEL%
-
+if exist "%DAIRN_HOME%.dairn\runtime\dairn-embedded.com" goto dairn_vendored
+echo dairn: governance runtime not found (DAIRN_NOT_AVAILABLE) 1>&2
+echo   expected: %DAIRN_HOME%.dairn\runtime\dairn-embedded.com 1>&2
+echo   run this launcher from an extracted release or a project created with dairn init or adopt, 1>&2
+echo   or in the Dairn source repository build the runtime and set DAIRN_RUNTIME 1>&2
+exit /b 2
 :dairn_external
+set "DAIRN_RUNTIME_FILE=%DAIRN_RUNTIME%"
+rem Relative DAIRN_RUNTIME resolves against the launcher directory, matching POSIX.
+if not "%DAIRN_RUNTIME_FILE:~1,1%"==":" if not "%DAIRN_RUNTIME_FILE:~0,1%"=="\" set "DAIRN_RUNTIME_FILE=%DAIRN_HOME%%DAIRN_RUNTIME_FILE%"
+for %%I in ("%DAIRN_RUNTIME_FILE%") do set "DAIRN_RUNTIME_FILE=%%~fI"
+if not exist "%DAIRN_RUNTIME_FILE%" goto dairn_bad_runtime
 set "DAIRN_RUNTIME_SOURCE=external"
-"%DAIRN_RUNTIME%" /zip/quickjs/main.mjs %*
+for %%I in ("%DAIRN_RUNTIME_FILE%") do set "DAIRN_RUNTIME_DIR=%%~dpI"
+"%DAIRN_RUNTIME_FILE%" /zip/quickjs/main.mjs %*
 exit /b %ERRORLEVEL%
-
+:dairn_bad_runtime
+echo dairn: DAIRN_RUNTIME is not a file: %DAIRN_RUNTIME_FILE% 1>&2
+exit /b 2
 :dairn_vendored
 set "DAIRN_RUNTIME_SOURCE=vendored"
-"%~dp0.dairn\runtime\dairn-embedded.com" /zip/quickjs/main.mjs %*
+set "DAIRN_RUNTIME_DIR=%DAIRN_HOME%.dairn\runtime"
+"%DAIRN_HOME%.dairn\runtime\dairn-embedded.com" /zip/quickjs/main.mjs %*
 exit /b %ERRORLEVEL%
-
-:dairn_missing
-echo Dairn runtime missing: %~dp0.dairn\runtime\dairn-embedded.com and %~dp0runtime\dairn-embedded.com 1>&2
-echo Keep .dairn/runtime/ vendored for daily use; build with "python tools/build.py" only when refreshing the governance runtime. 1>&2
-exit /b 2

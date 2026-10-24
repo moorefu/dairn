@@ -52,20 +52,22 @@ try {
   else run('/bin/sh', [binary, ...args]);
   if (!zipOnly) {
     const target = stageOnly ? root : path.join(temp, 'package');
-    fs.mkdirSync(path.join(target, 'runtime'), {recursive: true});
+    const runtimeTarget = path.join(target, '.dairn', 'runtime');
+    fs.mkdirSync(runtimeTarget, {recursive: true});
     for (const name of ['dairn-embedded.com', 'runtime-integrity.json']) {
-      fs.copyFileSync(path.join(stage, name), path.join(target, 'runtime', name));
+      fs.copyFileSync(path.join(stage, name), path.join(runtimeTarget, name));
     }
     // 与 ZIP、Wheel 保持一致：APE 必须有执行位，否则 bash（macOS 的 /bin/sh）下
     // 的 sh 加载器无法通过 command -v 定位自身，dd/gzip 会读到空输入。
     if (process.platform !== 'win32') {
-      fs.chmodSync(path.join(target, 'runtime', 'dairn-embedded.com'), 0o755);
+      fs.chmodSync(path.join(runtimeTarget, 'dairn-embedded.com'), 0o755);
     }
     if (!stageOnly) {
       for (const name of ['bin', 'licenses']) fs.cpSync(path.join(stage, name), path.join(target, name), {recursive: true});
       fs.copyFileSync(path.join(stage, 'README.md'), path.join(target, 'README.md'));
       fs.copyFileSync(path.join(stage, 'LICENSE'), path.join(target, 'LICENSE'));
-      fs.copyFileSync(path.join(stage, 'dairn.sh'), path.join(target, 'dairn.sh'));
+      fs.copyFileSync(path.join(stage, 'dairn'), path.join(target, 'dairn'));
+      if (process.platform !== 'win32') fs.chmodSync(path.join(target, 'dairn'), 0o755);
       const pkg = JSON.parse(fs.readFileSync(path.join(stage, 'package.json'), 'utf8'));
       pkg.version = version;
       delete pkg.scripts;

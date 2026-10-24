@@ -13,10 +13,10 @@ dairn-quality:
   script:
     - test -n "$DAIRN_EXPECTED_POLICY_SHA256"
     - test -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - test -x /opt/dairn/dairn.sh
-    - /opt/dairn/dairn.sh validate --root "$CI_PROJECT_DIR" --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - /opt/dairn/dairn.sh guide impact --root "$CI_PROJECT_DIR" --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - /opt/dairn/dairn.sh check --root "$CI_PROJECT_DIR" --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - test -x /opt/dairn/dairn
+    - /opt/dairn/dairn validate --root "$CI_PROJECT_DIR" --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - /opt/dairn/dairn guide impact --root "$CI_PROJECT_DIR" --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - /opt/dairn/dairn check --root "$CI_PROJECT_DIR" --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
   artifacts:
     when: always
     paths:

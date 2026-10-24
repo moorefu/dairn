@@ -1,4 +1,2 @@
-bin/dairn text eol=lf
-bin/dairn.cmd text eol=crlf
 runtime/*.com binary
 runtime/runtime-integrity.json text eol=lf

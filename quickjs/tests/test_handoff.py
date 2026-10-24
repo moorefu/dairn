@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CLI = ROOT / 'dairn.sh'
+CLI = ROOT / 'dairn'
 
 
 class HandoffE2E(unittest.TestCase):

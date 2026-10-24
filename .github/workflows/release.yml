@@ -40,7 +40,7 @@ jobs:
         env:
           # 构建任务刚生成 runtime/；按构建产物的语义显式指定，避免走 vendored 快照。
           DAIRN_RUNTIME: ${{ github.workspace }}/runtime/dairn-embedded.com
-        run: sh ./dairn.sh docs check
+        run: ./dairn docs check
       - name: 分发资产与 docs find 回归
         run: python -B -X utf8 -m unittest quickjs.tests.test_assets_lint -v
       - uses: actions/upload-artifact@v4
@@ -124,16 +124,16 @@ jobs:
           assert len(candidates) == 1, candidates
           with zipfile.ZipFile(candidates[0]) as zipped:
               runtime = [name for name in zipped.namelist()
-                         if name.endswith('/runtime/dairn-embedded.com')]
+                         if name.endswith('/.dairn/runtime/dairn-embedded.com')]
               integrity = [name for name in zipped.namelist()
-                           if name.endswith('/runtime/runtime-integrity.json')]
+                           if name.endswith('/.dairn/runtime/runtime-integrity.json')]
               assert len(runtime) == 1 and len(integrity) == 1, (runtime, integrity)
               target = pathlib.Path('runtime')
               target.mkdir(parents=True, exist_ok=True)
               (target / 'dairn-embedded.com').write_bytes(zipped.read(runtime[0]))
               (target / 'runtime-integrity.json').write_bytes(zipped.read(integrity[0]))
           PY
-          chmod +x runtime/dairn-embedded.com dairn.sh ci/protected/*.sh
+          chmod +x runtime/dairn-embedded.com dairn ci/protected/*.sh
           jq --version >/dev/null && openssl version >/dev/null && sha256sum --version >/dev/null
       - name: Python 集成回归（Linux 套件）
         # verify-linux.py 会清除 CI 平台变量，模拟本地开发者环境；
@@ -175,9 +175,9 @@ jobs:
           assert len(candidates) == 1, candidates
           with zipfile.ZipFile(candidates[0]) as zipped:
               runtime = [name for name in zipped.namelist()
-                         if name.endswith('/runtime/dairn-embedded.com')]
+                         if name.endswith('/.dairn/runtime/dairn-embedded.com')]
               integrity = [name for name in zipped.namelist()
-                           if name.endswith('/runtime/runtime-integrity.json')]
+                           if name.endswith('/.dairn/runtime/runtime-integrity.json')]
               assert len(runtime) == 1 and len(integrity) == 1, (runtime, integrity)
               target = pathlib.Path('runtime')
               target.mkdir(parents=True, exist_ok=True)
