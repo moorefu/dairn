@@ -40,6 +40,19 @@ try {
     const r=host.run([qjs,failing],cwd,10);
     assert(r.code===13 && !r.timedOut,'nonzero status lost: '+JSON.stringify(r));
   });
+  test('同时排空超过管道容量的 stdout 和 stderr', () => {
+    host.write(child,"import * as std from 'std'; print('x'.repeat(131072)); std.out.flush(); std.err.puts('y'.repeat(131072)); std.err.flush(); std.exit(0);\n");
+    const r=host.run([qjs,child],cwd,10);
+    assert(r.code===0&&!r.timedOut,'大输出阻塞或失败: '+JSON.stringify({code:r.code,timedOut:r.timedOut}));
+    assert(r.output.includes('x'.repeat(131072))&&r.output.includes('y'.repeat(131072)),'输出被截断');
+  });
+  test('输出超过 1 MiB 时拒绝并清理子进程', () => {
+    host.write(child,"import * as std from 'std'; print('z'.repeat(2097152)); std.exit(0);\n");
+    let rejected=false;
+    try { host.run([qjs,child],cwd,10); }
+    catch(error) { rejected=String(error).includes('output exceeded 1 MiB'); }
+    assert(rejected,'超量输出未被拒绝');
+  });
   test('argv preserves spaces, quotes and shell metacharacters', () => {
     const args=['a b','quote"value','x&echo injected','100%','中文😀'];
     host.write(child,"import * as std from 'std'; print(JSON.stringify(scriptArgs.slice(1))); std.exit(0);\n");
@@ -57,6 +70,21 @@ try {
     try {const r=host.run([base+'/definitely-missing'],cwd,3); failed=r.code!==0 || r.timedOut;}
     catch(_) {failed=true;}
     assert(failed,'missing command was reported passed');
+  });
+  if (os.platform === 'win32') test('DLL 初始化失败保留退出码与诊断', () => {
+    const tool = base + '/failed-tool.exe';
+    const script = base + '/dll-init.mjs';
+    const bytes = host.readBytes(qjs);
+    const fd = os.open(tool, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600);
+    assert(fd >= 0, '无法创建退出码夹具');
+    try { assert(os.write(fd, bytes.buffer, 0, bytes.length) === bytes.length, '夹具写入不完整'); }
+    finally { os.close(fd); }
+    try {
+      host.write(script, "import * as std from 'std'; std.exit(-1073741502);\n");
+      const result = host.run([tool, script], cwd, 10);
+      assert(result.code === -1073741502 || result.code === 3221225794, '退出码丢失');
+      assert(result.output.includes('0xC0000142'), '缺少初始化失败诊断');
+    } finally { os.remove(tool); os.remove(script); }
   });
   test('invalid arguments rejected', () => {
     let failed=false;try{host.run('sh -c exit 0',cwd,1);}catch(_){failed=true;}
@@ -76,8 +104,11 @@ try {
     assert(sha256Bytes(read)==='3d804d24c5e0d6a98067c572e217c58c372be51996e187c389cfec2fdd3734ae','sha256 differs');
     os.remove(file);
   });
-  test('git non-zero exit propagates (Windows sh fallback)', () => {
-    const r=host.run(['git','rev-parse','--verify','refs/heads/dairn-definitely-missing-ref'],cwd,15);
+  test('Git 非零退出和 stderr 被保留', () => {
+    // QuickJS/cosmopolitan 在 Windows 不替应用 PATHEXT；显式 .exe 是原生
+    // os.exec 的契约，避免把命令解析失败误判成 Git 内容错误。
+    const git=os.platform==='win32'?'git.exe':'git';
+    const r=host.run([git,'rev-parse','--verify','refs/heads/dairn-definitely-missing-ref'],cwd,15);
     assert(r.code!==0,'git nonzero status lost: '+JSON.stringify(r));
     assert(/fatal|unknown revision|Needed a single revision/i.test(String(r.output||'')),
            'git error output missing: '+JSON.stringify(r.output));

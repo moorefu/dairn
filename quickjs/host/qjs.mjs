@@ -90,45 +90,85 @@ function executable(name, cwd) {
   }
   throw new Error('Executable not found on PATH: ' + name);
 }
+function openCapture(cwd) {
+  const explicit = std.getenv('TMPDIR');
+  const local = normalize(cwd) + '/.dairn/tmp';
+  const directories = explicit ? [explicit] : [std.getenv('TEMP'), std.getenv('TMP')].filter(Boolean);
+  if (!directories.length) directories.push(os.platform === 'win32' ? 'C:/Windows/Temp' : '/tmp');
+  if (!explicit && exists(normalize(cwd) + '/.dairn/lock.json')) directories.push(local);
+  const failures = [];
+  for (const directory of [...new Set(directories.filter(Boolean).map(normalize))]) {
+    try {
+      if (directory === local) {
+        // 自动回退仅使用项目内部目录，拒绝链接将捕获文件导向项目外部。
+        for (const path of [normalize(cwd) + '/.dairn', local]) {
+          const [entry, error] = os.lstat(path);
+          if (error === 0 && (entry.mode & os.S_IFMT) === os.S_IFLNK) throw Error('临时目录包含符号链接');
+        }
+        mkdirs(local);
+        if (!realpath(local).startsWith(realpath(cwd).replace(/\/$/, '') + '/')) throw Error('临时目录越出项目');
+      }
+      const path = directory + SEP + 'dairn-' + os.getpid() + '-' + Date.now() + '-' + (++seq) + '.txt';
+      const fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600);
+      if (fd >= 0) return {path, fd, directory};
+      failures.push(path + ' (' + fd + ')');
+    } catch (error) { failures.push(directory + ': ' + error.message); }
+  }
+  throw Error('Cannot open command output: ' + failures.join('; ') + '; set TMPDIR/TEMP to a writable directory');
+}
 function run(argv, cwd, timeout = 120, capture = true) {
   if (!Array.isArray(argv) || !argv.length || !argv.every(s => typeof s === 'string' && s)) throw new Error('Command must be argv array');
   if (!Number.isFinite(timeout) || timeout < 1 || timeout > 3600) throw new Error('Invalid timeout');
-  const temp = (std.getenv('TMPDIR') || std.getenv('TEMP') || std.getenv('TMP') || (os.platform === 'win32' ? 'C:/Windows/Temp' : '/tmp')) + SEP + 'dairn-' + os.getpid() + '-' + (Date.now()) + '-' + (++seq) + '.txt';
-  let fd = -1;
+  let temp = null, errorTemp = null;
+  let fd = -1, errorFd = -1;
   try {
-    // Open output once; the child never sees shell-escaped string command lines.
     if (capture) {
-      fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600);
-      if (fd < 0) throw new Error('Cannot open command output: ' + fd);
+      const opened = openCapture(cwd);
+      temp = opened.path; fd = opened.fd;
     }
-    const opts = { cwd, block: false, usePath: true };
-    if (capture) { opts.stdout = fd; opts.stderr = fd; }
     const start = Date.now();
     const command = [executable(argv[0], cwd), ...argv.slice(1)];
-    const pid = os.exec(command, opts);
-    if (pid <= 0) throw new Error('Cannot start process: ' + argv[0] + ' (' + pid + ')');
-    if (fd >= 0) { os.close(fd); fd = -1; }
+    // Git 成功时只回传 stdout：Windows autocrlf 会在 stderr 打印换行警告，
+    // 与 `-z` 路径列表或 JSON 输出混合会破坏机器解析。其他工具保持合并输出。
+    const mergeStderr = !isGitCommand(argv);
     let exitCode = null, timedOut = false;
-    while (exitCode === null) {
-      const [got, status] = os.waitpid(pid, os.WNOHANG);
-      if (got < 0) throw new Error('waitpid failed: ' + got);
-      if (got === pid) {
-        // Cosmopolitan 在 Windows 返回原始 DWORD 退出码，POSIX 才使用编码状态。
-        const signal = status & 0x7f;
-        exitCode = os.platform === 'win32' ? status : signal === 0 ? (status >> 8) & 0xff : -signal;
-        break;
+    // Windows 原生子进程无法可靠继承 Cosmopolitan 打开的文件描述符：直接重定向
+    // 会让输出回到控制台，Python 等工具还会以非零状态退出。所有带捕获的原生子
+    // 进程都经 Worker 建立真实管道并由同一进程持续排空。
+    if (os.platform === 'win32' && capture) {
+      const opened = openCapture(cwd);
+      errorTemp = opened.path; errorFd = opened.fd;
+      const result = runWindowsPipes(command, cwd, timeout, fd, errorFd >= 0 ? errorFd : fd);
+      exitCode = result.code; timedOut = result.timedOut;
+    } else {
+      // Windows 已在 executable() 中按 PATHEXT 解析为绝对路径，不能再次搜索
+      // PATH；POSIX 保留 execvp 的 PATH 解析（git/go/python3 等是裸命令名）。
+      const opts = {cwd, block:false, usePath: os.platform !== 'win32'};
+      if (capture) { opts.stdout = fd; opts.stderr = fd; }
+      const pid = os.exec(command, opts);
+      if (pid <= 0) throw new Error('Cannot start process: ' + argv[0] + ' (' + pid + ')');
+      if (fd >= 0) { os.close(fd); fd = -1; }
+      while (exitCode === null) {
+        const [got, status] = os.waitpid(pid, os.WNOHANG);
+        if (got < 0) throw new Error('waitpid failed: ' + got);
+        if (got === pid) {
+          const signal = status & 0x7f;
+          exitCode = os.platform === 'win32' ? status : signal === 0 ? (status >> 8) & 0xff : -signal;
+          break;
+        }
+        if (Date.now() - start >= timeout * 1000) {
+          timedOut = true;
+          os.kill(pid, os.SIGTERM);
+          os.sleep(150);
+          const [reaped] = os.waitpid(pid, os.WNOHANG);
+          if (reaped === 0) { os.kill(pid, os.SIGKILL ?? 9); os.waitpid(pid, 0); }
+          break;
+        }
+        os.sleep(25);
       }
-      if (Date.now() - start >= timeout * 1000) {
-        timedOut = true;
-        os.kill(pid, os.SIGTERM);
-        os.sleep(150);
-        const [reaped] = os.waitpid(pid, os.WNOHANG);
-        if (reaped === 0) { os.kill(pid, os.SIGKILL ?? 9); os.waitpid(pid, 0); }
-        exitCode = null;
-        break;
-      }
-      os.sleep(25);
     }
+    if (fd >= 0) { os.close(fd); fd = -1; }
+    if (errorFd >= 0) { os.close(errorFd); errorFd = -1; }
     // Reject excessive output BEFORE allocating a potentially huge JavaScript string.
     // A process with unbounded logging still needs an outer CI disk quota.
     let output = '';
@@ -137,98 +177,45 @@ function run(argv, cwd, timeout = 120, capture = true) {
       if (err !== 0) throw new Error('Cannot stat command output: '+err);
       if (info.size > 1048576) throw new Error('Command output exceeded 1 MiB');
       output = std.loadFile(temp) ?? '';
+      if (errorTemp && (mergeStderr || timedOut || exitCode !== 0)) output += std.loadFile(errorTemp) ?? '';
       if (output.length > 1048576) throw new Error('Command output exceeded 1 MiB');
     }
-    // Git for Windows crashes with an access violation when its stdout/stderr
-    // handles are inherited file descriptors created by Cosmopolitan. Older
-    // builds surfaced that as a negative Windows exception code; newer builds
-    // (2.56+ observed 2026-10) truncate it to small positive codes such as 15.
-    // Git's legitimate exit space is tiny (0..3 plus 128..165 fatal codes), so
-    // on win32 any other code falls back to Git's own POSIX sh, which performs
-    // the redirection itself. Python/node tolerate the same handles.
-    const plausibleGitExit = code => (code >= 0 && code <= 3) || (code >= 128 && code <= 165);
-    if (os.platform === 'win32' && capture && isGitCommand(argv) && exitCode !== null &&
-        (exitCode < 0 || !plausibleGitExit(exitCode))) {
-      const retried = runGitViaSh(argv, cwd, timeout);
-      if (retried) return retried;
-    }
+    const dllInitFailed = os.platform === 'win32' &&
+      (exitCode === -1073741502 || exitCode === 3221225794);
+    if (dllInitFailed) output += (output ? '\n' : '') +
+      'Windows 子进程初始化失败 (0xC0000142): ' + argv[0] +
+      '；工具可能已安装，请核对进程权限、DLL 和执行环境。';
     return { code: exitCode, output, timedOut, duration_sec: Math.round((Date.now() - start) / 10) / 100 };
   } finally {
     if (fd >= 0) os.close(fd);
-    if (capture) os.remove(temp);
+    if (errorFd >= 0) os.close(errorFd);
+    if (temp) os.remove(temp);
+    if (errorTemp) os.remove(errorTemp);
   }
 }
 function isGitCommand(argv) {
-  if (!argv || !argv.length) return false;
+  if (!Array.isArray(argv) || !argv.length) return false;
   const base = normalize(String(argv[0])).split('/').pop().toLowerCase();
   return base === 'git' || base === 'git.exe';
 }
-function quoteSh(value) { return "'" + String(value).replace(/'/g, "'\\''") + "'"; }
-function findGitShell(argv, cwd) {
-  const candidates = [];
-  const override = std.getenv('DAIRN_GIT_SH');
-  if (override) candidates.push(normalize(override));
-  try {
-    const exe = normalize(executable(argv[0], cwd));
-    const dir = exe.replace(/\/[^/]*$/, '');
-    candidates.push(dir + '/sh.exe', dir + '/../bin/sh.exe', dir + '/../usr/bin/sh.exe');
-  } catch (_) { /* fall through to override/PATH probes */ }
-  for (const candidate of candidates) if (candidate && exists(candidate)) return candidate;
-  return null;
-}
-function runGitViaSh(argv, cwd, timeout) {
-  const sh = findGitShell(argv, cwd);
-  if (!sh) throw new Error('git crashed under redirected stdio on Windows and Git sh.exe was not found; set DAIRN_GIT_SH to Git for Windows bin/sh.exe');
-  const base = (std.getenv('TMPDIR') || std.getenv('TEMP') || std.getenv('TMP') || 'C:/Windows/Temp') + SEP + 'dairn-git-' + os.getpid() + '-' + (Date.now()) + '-' + (++seq);
-  const out = base + '.out.txt';
-  const errOut = base + '.err.txt';
+function runWindowsPipes(argv, cwd, timeout, stdout, stderr) {
+  const worker = new os.Worker('./native-process.mjs');
+  const state = new Int32Array(new SharedArrayBuffer(24));
   const start = Date.now();
-  try {
-    // 成功时只回传 stdout：Windows autocrlf 会在 stderr 打印换行警告，
-    // 与 `-z` 路径列表混合会破坏机器解析；失败时把 stderr 附回以便诊断。
-    const cmd = argv.map(quoteSh).join(' ') + ' 1> ' + quoteSh(out) + ' 2> ' + quoteSh(errOut);
-    const pid = os.exec([sh, '-c', cmd], { cwd, block: false, usePath: true });
-    if (pid <= 0) throw new Error('Cannot start Git sh wrapper: ' + pid);
-    let exitCode = null, timedOut = false;
-    while (exitCode === null) {
-      const [got, status] = os.waitpid(pid, os.WNOHANG);
-      if (got < 0) throw new Error('waitpid failed: ' + got);
-      if (got === pid) {
-        // Cosmo 在 Windows 返回原始 DWORD（sh.exe 的 128 就是 128），
-        // 不能套用 POSIX status 编码，否则 128 会被算成 0。
-        if (os.platform === 'win32') exitCode = status;
-        else {
-          const signal = status & 0x7f;
-          exitCode = signal === 0 ? (status >> 8) & 0xff : -signal;
-        }
-        break;
-      }
-      if (Date.now() - start >= timeout * 1000) {
-        timedOut = true;
-        os.kill(pid, os.SIGTERM);
-        os.sleep(150);
-        const [reaped] = os.waitpid(pid, os.WNOHANG);
-        if (reaped === 0) { os.kill(pid, os.SIGKILL ?? 9); os.waitpid(pid, 0); }
-        exitCode = null;
-        break;
-      }
-      os.sleep(25);
+  worker.postMessage({argv, cwd, timeout, stdout, stderr, state:state.buffer});
+  while (Atomics.load(state, 0) !== 2) {
+    const elapsed = Date.now() - start;
+    if ((Atomics.load(state, 0) === 0 && elapsed > 5000) || elapsed > timeout * 1000 + 5000) {
+      const pid = Atomics.load(state, 1);
+      if (pid > 0) os.kill(pid, os.SIGKILL ?? 9);
+      throw Error('Native process capture worker timed out');
     }
-    const readLimited = path => {
-      const [info, err] = os.stat(path);
-      if (err !== 0) return '';
-      if (info.size > 1048576) throw new Error('Command output exceeded 1 MiB');
-      const text = std.loadFile(path) ?? '';
-      if (text.length > 1048576) throw new Error('Command output exceeded 1 MiB');
-      return text;
-    };
-    let output = readLimited(out);
-    if (timedOut || exitCode !== 0) output += readLimited(errOut);
-    return { code: exitCode, output, timedOut, duration_sec: Math.round((Date.now() - start) / 10) / 100 };
-  } finally {
-    os.remove(out);
-    os.remove(errOut);
+    os.sleep(10);
   }
+  if (Atomics.load(state, 4)) throw Error('Command output exceeded 1 MiB');
+  if (Atomics.load(state, 5)) throw Error('Native process capture failed: ' + Atomics.load(state, 5));
+  const timedOut = !!Atomics.load(state, 3);
+  return {code:timedOut ? null : Atomics.load(state, 2), timedOut};
 }
 function realpath(path) {
   const normalized = normalize(path);
