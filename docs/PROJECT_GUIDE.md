@@ -4,6 +4,8 @@
 
 Dairn 是确定性的工程治理内核，不调用模型，不代替 GitHub 的审批、分支保护或部署平台。CLI 入口为 `quickjs/main.mjs`；`quickjs/core/` 处理项目、风险、检查、证据与工作流；`quickjs/host/qjs.mjs` 适配原生进程与文件系统；`quickjs/assets/` 分发规范、技能和模板。
 
+能力驱动分析入口为 `dairn analyze plan`（默认 dry-run，仅对受信策略允许的只读 execute analyzer 在超时预算内执行）与 `dairn context`（Phase 1 上下文解析 MVP）。二者属于 advisory 决策/检索层，不构成 Gate 判定；契约见 `dairn docs show dairn.engineering.analyzer-selection` 与 `dairn docs show dairn.engineering.context-intelligence`。
+
 `tools/build.py` 与 `tools/build.cjs` 使用 `quickjs.lock.json` 固定的 QuickJS，将当前源码嵌入 APE，生成 ZIP、Wheel 和 npm 制品。Python 和 npm 只提供构建、安装和调用入口，不替代治理内核。源码构建到根目录 `runtime/`；`.dairn/runtime/` 是维护者显式同步的自测快照，两者不得混淆。
 
 ## 本地开发与门禁

@@ -42,6 +42,8 @@ Dairn 全称为 **Dairn**，对外定位为 **AI-Native Software Engineering Too
 
 单项 `dairn check --all` 之外的定向命令只做部分验证，不能冒充完整门禁；`dairn validate` 只做结构校验，不代表测试通过。真实执行结果必须来自命令输出，不得用文字代替。
 
+需要语言或领域分析时，先运行 `dairn analyze plan --base <base>`：它默认是 dry-run，会复用有效缓存并显式列出 `request-authorization`、能力缺口与未知项；只有受信策略 `.dairn/governance/analysis.json` 白名单内的只读 analyzer 才可在 `--apply` 下自动执行，计划输出是 advisory，不能替代真实门禁。
+
 ## Production feedback closure
 
 For operational incidents or production regressions, discover `dairn.governance.lifecycle` and `dairn.operations.traceability`; activate `dairn-operational-feedback`, `dairn-incident-response`, `dairn-bugfix` or `dairn-postmortem` as appropriate. Preserve evidence and refer to existing authoritative Issue/Incident/CD records where available; create FB/INC/BUG/REL/ACT only for independent tracking needs, protect incident response from waiting on documentation, and never treat Note creation as a substitute for external evidence or authorized deployment.

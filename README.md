@@ -9,7 +9,7 @@
 
 [GitHub](https://github.com/moorefu/dairn) · [构建指南](BUILDING.md) · [治理指南](docs/GOVERNANCE.md) · [MIT License](LICENSE)
 
-**项目状态（截至 2026-10-24）**：本 README 同时呈现**当前可用的 MVP** 和**目标架构**，以 2026-10-24 的 Analyzer 破坏性更名批次为代码核对基线。`[Current]` 表示已在源码中实现、有对应命令与测试；`[Planned]` 表示尚未落地，示例不可直接照搬执行。**`Dairn Analyzers` 命名已落地**：`dairn analyzers`、`.dairn/analyzers.json`（`dairn.analyzers.v1`）、`guide impact --analyzer`；旧 `stubs` 命令、`.dairn/stubs.json`、`dairn-stub-v1` 协议与 `DAIRN_EXPECTED_STUBS_SHA256` 已全部删除，**无兼容层、无自动迁移**。本文不宣称 GitHub 受保护 CI 已在本仓库生产部署。
+**项目状态（截至 2026-10-24）**：本 README 同时呈现**当前可用的 MVP** 和**目标架构**，以 2026-10-24 的 Analyzer 破坏性更名批次为代码核对基线。`[Current]` 表示已在源码中实现、有对应命令与测试；`[Planned]` 表示尚未落地，示例不可直接照搬执行。**`Dairn Analyzers` 命名已落地**：`dairn analyzers`、`.dairn/analyzers.json`（`dairn.analyzers.v1`）、`guide impact --analyzer`；旧 `stubs` 命令、`.dairn/stubs.json`、`dairn-stub-v1` 协议与 `DAIRN_EXPECTED_STUBS_SHA256` 已全部删除，**无兼容层、无自动迁移**。本文不宣称 GitHub 受保护 CI 已在本仓库生产部署。同一批次新增两项 advisory 能力：**能力驱动的按需分析**（`dairn analyze plan`）与 **Context Intelligence Phase 1**（`dairn context`）；它们不替代真实检查，也不构成 Gate 判定。
 
 ---
 
@@ -102,10 +102,11 @@ flowchart TD
 | **Dairn Analyzers（surface 域）** | **[Current · 原子更名完成]** | `analyzers list/templates/doctor/init`、`guide impact --analyzer`；`.dairn/analyzers.json`（`dairn.analyzers.v1`）；旧 `stubs` 接口已删除、无兼容层 |
 | **Analysis Suite / `analyze run`** | **[Current · MVP]** | `analyze run <id> | --suite <id>`：串行执行、`dairn.analysis-run.v1` 记录（completed/tool-error/timeout/…），失败不冒充成功 |
 | **Report Adapters 与报告导入** | **[Current · MVP]** | `analyze import`：SARIF 2.1.0 / JUnit XML / Dairn JSON → `dairn.quality-observation.v1`，来源恒为 `unverified-import` |
+| **Capability 驱动的按需分析（Analyzer Selection Planner）** | **[Current · MVP]** | `analyze plan`：确定性推导 needs、复用本地缓存、按策略授权执行；默认 dry-run 不执行工具，`status` ∈ `ready`/`needs-authorization`/`missing-capability`，缺口显式报告 |
 | **Quality Fitness** | **[Current · MVP]** | `quality fitness`：`dairn.quality-goals.v1` 目标 × 本地 Observation → PASS/FAIL/UNKNOWN/ADVISORY；缺数据绝不猜 PASS |
 | **Quality Fitness & Continuous Improvement** | **[Current · MVP]** | 可信基线比较、Coverage XML/LCOV 适配、长期趋势与债务收益 |
 | **Capability-Aware Agent / Skill Participation** | **[Current · MVP]** | 触发面扩展（影响事件、检查失败）、输出契约消费与成本预算 |
-| **Project Engineering Memory 的完整 Context Resolver** | **[Planned]** | 来源索引、当前适用性、任务/专业定向上下文；已有事实和 Handoff 是基础 |
+| **Context Intelligence（Phase 1）** | **[Current · MVP]** | `context`：任务感知上下文包（路径/符号/Spec/测试/变更关系 + 精度与来源），未知项显式 `UNKNOWN`；无向量库、无语义索引 |
 
 > **测试与部署状态**：基线前一提交 `61d1db7` 的提交说明报告“容器 141 项回归通过，原生五组测试退出码 0”；基线提交 `0e62a11` 本身是 CI Windows 环境中 Git 2.56 升级引发的集成回归修复，未附带新的容器回归记录。以上均为提交作者的测试记录，**不是本 README 的独立复测结论**。本仓库当前 `main` 仍未开启分支保护，Rulesets 为空；提交 CI 模板、Signer/Publisher 代码本身不构成已经上线的受保护证据链。
 
@@ -261,6 +262,16 @@ dairn analyze run --suite service-quality --base origin/main
 # 只读导入已有报告（SARIF/JUnit/Dairn JSON；恒为 unverified-import）
 dairn analyze import ci-sarif --artifact reports/security.sarif
 
+# 能力驱动的按需分析：默认 dry-run 不执行任何工具；--apply 仅执行策略允许的只读 analyzer
+# --task 只是 advisory 标签；--out 写 JSON 副本（不覆盖已有文件）；退出码 0 ready / 3 needs-authorization|missing-capability / 2 用法
+dairn analyze plan --base origin/main
+dairn analyze plan --base origin/main --task "surface api review" --apply --json --out .dairn/tmp/analyzer-plan.json
+
+# 任务感知上下文包：带来源与精度标注的路径/符号/Spec/测试/变更关系（Phase 1 MVP）
+# --change 需要 --base；--for 只做 advisory 聚焦；退出码 0 产出 pack（ok/partial）/ 1 无证据（empty）/ 2 用法
+dairn context --change --base origin/main
+dairn context "surface analysis" --for security --json --out .dairn/tmp/context-pack.json
+
 # 质量目标 vs 本地观察的 advisory 判定
 dairn quality fitness --json
 
@@ -355,7 +366,7 @@ Required Checks    Execution Phase   Capability Gaps
 
 ## Dairn Analyzers：传统工程工具的统一执行入口 [Current · surface 域已落地]
 
-**Analyzer 是唯一正式的工程分析扩展单元。** 原子更名已完成：`dairn stubs` 命令、`.dairn/stubs.json`（`schema:1`/`surface-analysis`/`dairn-stub-v1`）与 `DAIRN_EXPECTED_STUBS_SHA256` 全部移除，出现旧配置即报 `UNSUPPORTED_LEGACY_ANALYZER_CONFIG`，无别名、无自动迁移。当前版本执行 `domain=surface` 的公共接口分析；报告适配与 Suite 编组属于后续批次。
+**Analyzer 是唯一正式的工程分析扩展单元。** 原子更名已完成：`dairn stubs` 命令、`.dairn/stubs.json`（`schema:1`/`surface-analysis`/`dairn-stub-v1`）与 `DAIRN_EXPECTED_STUBS_SHA256` 全部移除，出现旧配置即报 `UNSUPPORTED_LEGACY_ANALYZER_CONFIG`，无别名、无自动迁移。当前版本执行 `domain=surface` 的公共接口分析；`analyze run`/`analyze import`、报告适配与能力驱动的按需选择（`analyze plan`）已落地。
 
 典型接入对象包括：
 
@@ -383,7 +394,7 @@ Dairn 不重新实现上述工具的全部分析算法。它统一管理可用�
       "id": "surface",
       "domain": "surface",
       "mode": "execute",
-      "capabilities": ["quality.surface-diff"],
+      "capabilities": ["surface.api-diff"],
       "execution": {
         "argv": ["go", "run", "tools/dairn/analyzers/go/main.go"],
         "cwd": ".",
@@ -412,6 +423,52 @@ Analyzer 的执行和结果分三层：
 3. **Fitness Verdict / Trusted Gate**：结合受信目标和检查矩阵判断是否满足要求；此层不能由 Analyzer 自己决定。
 
 工具成功退出 **不代表** 零发现；报告缺失 **不代表** 零漏洞或 100% 覆盖率。外部导入报告若没有可信来源证明，不能自动提升为 `ci-verified`。
+
+## Capability 驱动的按需分析 [Current · MVP]
+
+Analyzer 不再被无条件执行，也不再由 Agent 手工挑选。Dairn 从观察到的变更、查询意图、质量目标和受信策略中**确定性推导分析需求**，再匹配项目已声明的 provider，并按精度阶梯判断能否满足：`text < reported < heuristic < observed-static < syntax < semantic < contract`。只有被 `.dairn/governance/analysis.json` 的 `auto_execute` 白名单允许、且处于超时预算内的只读 execute analyzer，才可能在 `--apply` 时执行；默认 dry-run **不执行任何工具**。
+
+```mermaid
+flowchart LR
+    OBS["Observed change / task intent / quality goals"] --> NEED["Derive analysis needs<br/>deterministic, no model"]
+    NEED --> MATCH["Match declared providers<br/>+ precision ladder"]
+    MATCH --> CACHE{"Valid cached result?"}
+    CACHE -- yes --> REUSE["reuse (local-cache, provenance recorded)"]
+    CACHE -- no --> POLICY{"Trusted policy allowlist<br/>+ timeout budget?"}
+    POLICY -- yes --> EXEC["bounded read-only execute<br/>(--apply only)"]
+    POLICY -- no --> AUTH["request-authorization<br/>(stays pending)"]
+    MATCH -- "no provider / precision insufficient" --> GAP["explicit gap<br/>NO_PROVIDER / PRECISION_INSUFFICIENT"]
+```
+
+**示例（illustrative，输出字段以契约 Spec 为准）：**
+
+```sh
+# 默认 dry-run：只输出 needs/decisions/gaps，不执行任何工具（退出码 0 ready / 3 待授权或缺失能力）
+dairn analyze plan --base origin/main
+
+# 仅在策略允许时执行白名单内的只读 analyzer；其余决策仍待授权；--out 写 JSON 副本
+dairn analyze plan --base origin/main --apply --json --out .dairn/tmp/analyzer-plan.json
+```
+
+`.dairn/governance/analysis.json`（`dairn.analysis-policy.v1`；文件缺失即安全默认 `auto_execute: []`，不会自动执行任何工具）：
+
+```json
+{
+  "schema": "dairn.analysis-policy.v1",
+  "auto_execute": ["py-api"],
+  "max_timeout_seconds": 120,
+  "reuse": true,
+  "required": [
+    {"capability": "contract.compatibility", "when": "surface-change"}
+  ]
+}
+```
+
+`required` 的 `when` 取 `always`/`change`/`surface-change`/`downstream-change`，可选 `precision` 只能抬高该 capability 的精度下限，不能降低内置要求。未知键、非法枚举与符号链接指向的策略文件一律 fail closed（退出码 2），不会静默退回默认值。
+
+三条边界必须同时成立：**自动发现不等于自动安装**（不安装依赖、不下载二进制、不修改环境）；**自动选择不等于无条件执行**（只有白名单内、有界、只读的 execute analyzer 才可能自动运行）；**“无需分析器”不豁免必需检查**（缺失 provider 时输出显式缺口，绝不静默通过或伪造 PASS）。完整 schema、退出码、缺口原因与精度语义见 `dairn docs show dairn.engineering.analyzer-selection`。
+
+**当前限制（诚实说明）：** 本版本仅 `domain=surface` 的 execute analyzer 可执行，其余 capability 由项目自定义 provider 提供或显式列为缺口；精度是 provider 声明的类别，Dairn 无法证明其真的达到 `syntax`/`semantic`；builtin facts 仍有界，动态派发、生成代码与反射可能漏报；缓存失效保守（工作区脏即失效）；`plan` 是 advisory，其 `status` 不是门禁结论。
 
 ## Quality Fitness & Continuous Improvement [Current · MVP]
 
@@ -551,17 +608,98 @@ Dairn 不把工程记忆等同于“保存聊天记录”。项目真正值得�
 
 **Project Engineering Memory 是对既有权威来源的可重建视图，而不是要求开发者另填第二套 `memory.json`。** 源代码归 Git、审批归 SCM、真实 CI 归 CI、设计决策归项目原始 Specs/ADR。缓存索引只能引用原始内容及 SHA，不能自称权威。
 
-历史决定可以保留，但旧架构图不能永久冒充当前架构约束；旧性能基准也不应跨环境作为可靠比较值。未来 Context Resolver 应提供来源、Subject、摘要、有效性和不确定性标记。
+历史决定可以保留，但旧架构图不能永久冒充当前架构约束；旧性能基准也不应跨环境作为可靠比较值。Phase 1 的 `context` 已提供来源、Subject、精度与显式不确定性标记；完整的当前适用性判断仍属于后续阶段。
 
 ```sh
-# 当前可用：获取 Git 变化、本地 Run 证据与已有相关文件引用
+# 当前可用：任务感知上下文包（返回路径/符号/Spec/测试/变更关系 + 精度与来源）
+dairn context --change --base origin/main
+dairn context "surface analysis" --for security --json
+
+# 当前可用：只读 Git 变化与本地 Run 证据摘要
 dairn handoff --base origin/main --json
 
 # 目标接口 [Planned]：当前尚不可调用
-dairn context --module payment
-dairn context --change origin/main
 dairn handoff --for security.threat-analysis
 ```
+
+## Dairn Context Intelligence（Phase 1 MVP）
+
+**定位：Dairn 不是更快的 grep。** Context Intelligence 的目标不是索引更多文本，而是回答工程上下文问题：入口在哪里、谁调用它、哪个契约或测试保护它、改了什么、最少需要加载哪些文件。答案必须带真实路径/行号/符号、来源 SHA 与精度标签；证据不足时省略或标记 `UNKNOWN`，绝不根据名字相似度虚构关系。
+
+Phase 1 已落地 `dairn context`：一个确定性的、有界的上下文包（`dairn.context-pack.v1`），聚合四层来源：
+
+| 层 | 来源 | 用途 | 精度 |
+| --- | --- | --- | --- |
+| L1 Text Search | 委托 `git grep`（不自行实现搜索引擎；≤200 命中，截断标记 UNKNOWN） | 定位路径与字面匹配，不需要索引 | `text` |
+| L2 Code Intelligence | facts 符号/导入/模块边、显式 relation registry、经 Analyzer Selection Planner 的外部分析器/LSP/SCIP | 符号、定义、调用方、模块关系 | 由 provider 决定（最高到 `semantic`） |
+| L3 Engineering Memory | Specs 索引、Agent Notes、ADR、契约、显式关系中的测试、Git 历史 | 设计取舍、契约与测试保护 | `reported` / 显式关系 |
+| L4 Change Context | 当前 diff/影响报告、Governance Plan、验证状态、未解决缺口/Evidence | 与本次变更相关的上下文 | 继承来源精度 |
+
+**示例（illustrative，非真实项目输出）：**
+
+```sh
+dairn context "surface analysis" --for security --json
+dairn context --change --base origin/main --limit 8
+dairn context "analyzer selection" --json --out .dairn/tmp/context-pack.json
+```
+
+上下文包字段（节选；完整契约见 `dairn docs show dairn.engineering.context-intelligence`）：
+
+```json
+{
+  "schema": "dairn.context-pack.v1",
+  "status": "ok|partial|empty",
+  "query": "surface analysis",
+  "query_terms": ["surface", "analysis"],
+  "focus": {"name": "security", "suggested_capabilities": ["security.scan"], "note": "advisory focus"},
+  "subject": {"head": "<commit-sha>", "base": "origin/main", "base_commit": "<commit-sha>", "workspace": "clean"},
+  "requested_change": false,
+  "change": {"status": "not-requested"},
+  "text_matches": [{"path": "path/to/file", "line": 1, "text": "<literal line>", "score": 0}],
+  "symbols": [{"path": "path/to/source", "symbol": "<symbol>", "language": "<lang>", "module": "<module>", "score": 0, "reason": "declared-symbol-name-match"}],
+  "relations": {"status": "available", "source": ".dairn/relations.json", "matches": [{"spec_id": "<spec-id>", "symbol": "<symbol>", "bindings": {"tests": ["path/to/test"], "docs": []}, "assurance": "explicit"}], "explicit_bindings": 1, "note": "<why>"},
+  "documents": {"specs": [{"id": "<spec-id>", "path": "path/to/spec.md", "score": 0}], "notes": [{"path": "path/to/note.md", "title": "<title>", "date": "<date>", "score": 0}], "scanned_notes": 0},
+  "history": {"available": true, "commits": [{"sha": "<sha>", "date": "<date>", "subject": "<subject>"}], "scanned": 60, "matched": 1},
+  "governance": {"status": "ready", "plan_sha256": "<sha256>", "plan_status": "<status>", "requirements": [], "gaps": []},
+  "verification": {"status": "executed-at-head|stale|unknown|not-executed", "local_observed": 0, "stale": 0, "unknown": 0, "note": "<note>"},
+  "analysis_plan": {"schema": "dairn.analyzer-plan.v1", "status": "<status>", "summary": {}, "decisions": [], "gaps": [], "unknowns": [], "limitations": []},
+  "minimal_files": [{"path": "path/to/file", "score": 0, "reasons": []}],
+  "unknowns": [{"kind": "TEXT_RESULTS_TRUNCATED", "detail": "<detail>"}],
+  "provenance": {"head": "<commit-sha>", "base_commit": "<commit-sha>", "generated_at": "<timestamp>", "sources": ["git", "project-facts", "assets-manifest", "explicit-relations"], "precision": "observed-static+text", "note": "<note>"},
+  "limitations": [],
+  "pack_sha256": "<sha256>"
+}
+```
+
+Bounds：`--limit` 只作用于 `minimal_files` 与文本匹配（默认 12，取值 1..40）；Spec 命中 ≤8，Agent Notes ≤10（扫描深度 ≤3、≤200 个文件），符号 ≤40，历史 ≤10（最近 60 个提交内），关系匹配 ≤20，变更影响 ≤40、下游模块 ≤20；输出确定、稳定排序。缺失证据以 14 类 UNKNOWN 显式列出（如 `NO_EVIDENCE`、`MISSING_CAPABILITY`、`TEXT_RESULTS_TRUNCATED`）；`--change` 未给 `--base` 时标记 `CHANGE_CONTEXT_UNAVAILABLE`。简单字面查询直接走 L1，不要求索引；**Phase 1 不引入向量库或 embedding 语义检索**。语义检索是未来可选的 Provider，必须经过真实任务验证。`--json` 保持 stdout 纯 JSON；`--out` 写入新文件（不覆盖已有文件，拒绝治理证据树），stdout 仍输出同一份 pack。`context` 只聚合 `docs find`、`guide impact`、`handoff`、`analyze plan` 等既有来源并标注精度，不复制规则、不接管 Agent 的搜索循环或工具权限。退出码：`0` 产出 pack（status `ok`/`partial`），`1` status `empty`（无证据），`2` 用法/配置错误。
+
+**当前限制（诚实说明）：** 启发式扫描上限为 500 个源文件、每文件 128 KiB；模块影响传播有界；需要语义精度的能力（如 `symbol.references`）缺少 provider 时会显式列为缺口；Dairn 目前不能宣称搜索效果优于 ripgrep/LSP/Sourcegraph。
+
+### 度量计划（计划中的评估，不是已测结果）
+
+A/B 真实工程任务：A 组使用原生 rg/read/git/LSP；B 组在同一工具之上叠加 Dairn Context Intelligence。
+
+| 指标 | 观察内容 |
+| --- | --- |
+| time-to-first-correct-edit-location | 首次定位到正确修改位置所需时间 |
+| relevant-spec/test discovery rate | 相关 Spec 与测试的发现率 |
+| agent tool-call count | 完成任务的工具调用次数 |
+| context token usage | 上下文 token 消耗 |
+| stale/incorrect relation rate | 陈旧或错误关系的比例 |
+| missed-test rate | 漏掉应运行测试的比例 |
+| extra index cost/latency | 额外索引成本与延迟 |
+
+对抗性场景：同名函数、动态派发、生成代码、陈旧 ADR、缺失 SCIP 索引、未提交的工作区变更。
+
+### Context Intelligence 路线图
+
+| 阶段 | 范围 | 状态 |
+| --- | --- | --- |
+| Phase 1 | Context Resolver MVP：返回带来源的路径/符号/Spec/测试/变更关系 | **[Current · MVP]** |
+| Phase 2 | Analyzer Code Intelligence：外部索引/AST 经 Analyzer Selection Planner 接入 | [Planned] |
+| Phase 3 | Engineering Memory Retrieval：ADR/Git/Incident/Quality Fitness/Refactor Contract/Evidence 与陈旧性判断 | [Planned] |
+| Phase 4 | Agent Harness 集成：按需为 Claude Code/Codex 生成最小上下文包；Dairn 不接管其工具权限 | [Planned] |
+
 
 ## Check · Evidence · Attestation · Trusted Gate
 
@@ -732,9 +870,10 @@ Windows 请使用 `.dairn\bin\dairn.cmd`。具体离线制品、平台限制、�
 | **Refactor Contract / Technical Debt Baseline** | **[Current · MVP]** | 契约检查执行器、Subject/Run 与 Gate 强绑定，质量趋势 |
 | **Governance Feedback** | **[Current · MVP]** | 纠正 Flaky 推断、引入缺陷/返工/成本实证与 A/B |
 | **Dairn Analyzers** | **[Current · A-01]** | Runner/Suite/Report Adapter 与 `analyze run`/`analyze import` |
+| **Capability 驱动的按需分析（Analyzer Selection Planner）** | **[Current · MVP]** | 更多 capability provider、LSP/SCIP 集成、策略可观测性 |
 | **Quality Fitness & Continuous Improvement** | **[Planned]** | 架构 Fitness、SARIF/JUnit/Coverage 导入、质量基线与趋势 |
 | **Capability-Aware Agent & Skill Participation** | **[Planned]** | 发现专业能力、按需参与的建议和输出契约 |
-| **Project Engineering Memory / Context Resolver** | **[Planned，已有部分基础]** | 来源/适用性索引、跨 Agent 有效上下文、拒绝陈旧事实 |
+| **Context Intelligence / Project Engineering Memory** | **[Current · Phase 1]** | Phase 2 外部 Code Intelligence、Phase 3 记忆陈旧性判断、Phase 4 Harness 集成 |
 
 **优先级原则**：先验证真实受保护 CI 的信任边界和现有 Planner/Gate 约束一致性，再将新增 Quality 指标绑定到强制门禁。Analyzer 的只读执行与 Agent Capability Discovery 可并行推进。Analyzer 命名已落地（`dairn analyzers`）；**旧 `stubs` 接口已删除，无兼容层**。
 
@@ -747,6 +886,8 @@ Windows 请使用 `.dairn\bin\dairn.cmd`。具体离线制品、平台限制、�
 | **L0 最小治理** | README 提交后 `governance plan --base <sha>` | Risk L0，极少额外阶段与必需检查 | 小改动是否没有多余仪式？ |
 | **L2 不可降级** | 修改认证/协议文件，执行 `governance plan/explain` | 完整检查矩阵、SCM 人工审批需求 | 高风险保障是否被保留？ |
 | **能力缺口** | 在隔离项目中故意移除必需检查执行器，运行 `governance plan` | `MISSING_CAPABILITY`、非成功状态 | 缺配置是否会被误认为通过？ |
+| **按需分析缺口** | 对需要 `contract.compatibility` 的变更运行 `analyze plan --base <sha>`，且不配置语义 provider | 显式 gap（`NO_PROVIDER`/`PRECISION_INSUFFICIENT`），plan status 非 ready | 缺能力是否被伪装成通过？ |
+| **任务上下文** | 同一任务对比原生 rg/read 与 `context` 的定位路径 | 带来源与精度的最小文件集，未知项显式列出 | 是否减少无效搜索？ |
 | **渐进重构** | 新建 `refactor` 契约并运行 `compare/verify` | 已知失败与新增失败分开，退出条件不明时报 `needs-review` | 是否能管理跨 PR 技术债？ |
 | **跨 Agent 接手** | 本地修改、运行检查后执行 `handoff --json` | Git HEAD/工作区指纹、Run 来源与陈旧标记 | 是否减少重复摸索？ |
 
@@ -793,7 +934,7 @@ Windows 使用 `dairn.cmd`。更改 `quickjs/core/`、`quickjs/host/` 或 `quick
 欢迎围绕以下方向讨论、提交 Issue 或 PR：
 
 - Agent 无关的工程治理协议与 CLI 体验；
-- Analyzer Runner、跨语言工具报告 Adapter 和可复用分析模板；
+- Analyzer Runner、能力驱动的按需分析、上下文解析、跨语言工具报告 Adapter 和可复用分析模板；
 - 可执行 Architecture Fitness Functions、契约与性能回归验证；
 - 受信 CI/SCM 证据绑定、负向测试与跨平台可靠性；
 - 工程记忆、Agent Handoff、质量反馈与治理成本实证。
