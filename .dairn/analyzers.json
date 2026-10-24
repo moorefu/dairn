@@ -10,7 +10,7 @@
       ],
       "execution": {
         "argv": [
-          "python3",
+          "python",
           "tools/dairn/analyzers/python/main.py"
         ],
         "cwd": ".",

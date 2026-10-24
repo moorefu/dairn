@@ -2,7 +2,7 @@
 
 本文记录 Dairn 发布链路中必须由仓库管理员和 CI 平台实际配置、实际运行并留存证据的控制项。源码测试通过不能替代这些平台控制；本文件与 `.github/rulesets/*.json` 只是可导入的配置物料，**导入、启用和平台生效必须在 GitHub 上由管理员执行并留存证据**。
 
-> 当前状态（2026-10-23）：`main.protected=false`，仓库 rulesets 列表为空；签名流水线模板尚未作为工作流部署。以下条目在真实平台上执行并通过前，不得标记为已验收。
+> 历史快照（2026-10-23）：当时 `main.protected=false`，仓库 rulesets 列表为空，签名模板未部署。本轮未取得可认证的最新平台状态（2026-10-24，匿名 API 限流），不能据此断言当前保护状态。以下条目在真实平台上执行并留存新证据前，不得标记为已验收。
 
 ## 一、GitHub 平台保护物料
 
@@ -143,7 +143,7 @@ git push --force origin "$(git rev-parse 'latest~1'):refs/tags/latest"          
 
 - 构建任务使用管理员提供的外部 `DAIRN_CI_BIN`、固定 `DAIRN_EXPECTED_APE_SHA256`、`DAIRN_EXPECTED_RUNTIME_SHA256` 和 `DAIRN_EXPECTED_POLICY_SHA256`。
 - 受保护构建检出必须洁净；`ci/protected/build-protected.sh` 会拒绝未提交改动或未追踪文件，并把同一流水线的来源写入 `ci-build-origin.json`。
-- 签名任务同样要求源检出洁净，但它会从同一流水线恢复构建证据 artifact（`.dairn/governance/evidence/`、`.dairn/work/`）；`ci/protected/sign-protected.sh` 的洁净检查用 git pathspec 排除这两个受 SHA256 与任务账本绑定的 Dairn 数据目录，其余未提交改动或未追踪文件仍拒绝签名。
+- 签名任务同样要求源检出洁净，只从同一流水线恢复 `.dairn/governance/evidence/` artifact；`ci/protected/sign-protected.sh` 复核 bundle 成员摘要、独立检查记录与构建来源，不依赖 `.dairn/work/` 任务账本。脚本的洁净检查允许证据数据目录，其余未提交改动或未追踪文件仍拒绝签名。
 - 签名任务使用独立 runner 或 HSM/KMS 挂载私钥。签名 runner 不运行项目测试或分析器，只验证同一流水线的来源、机器证据、提交和外部 pin。
 - 通过 GitHub Environment、runner 组和审批规则限制签名任务；PR、普通 push 和 fork 无法读取私钥。
 - 以真实受保护分支 push 演练构建、签名、验签和失败路径，保存 workflow、job、artifact 摘要与签名声明。环境变量模拟不构成生产验收。

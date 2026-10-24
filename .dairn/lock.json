@@ -1,7 +1,7 @@
 {
   "schema": 2,
-  "version": "0.1.0-rc.1",
-  "runtime_sha256": "76398cd9ea4a8d938d535770bae8ce75ac774aa673d627eaefbc66d00829bc5f",
+  "version": "0.1.0-nightly.20261024123943",
+  "runtime_sha256": "448d22ae181b8f49a54f8ec31104f5c049578cbd33c3ea88cad881d63c05cbff",
   "config": {
     "schema": 2,
     "name": "dairn",
@@ -88,7 +88,7 @@
     ".dairn/.gitattributes": "d31d39269c338522b79747346ccd45caa99cab82887d51d9ed4290d3af3047ec",
     ".dairn/Makefile": "ca61c8d9c72c180832df19072191927c85eccbbc62774510dd67a6ce8c3590d0",
     ".dairn/bin/dairn": "9761e6b5a7997fe39d02186d2a50f459f0fa4b2d01c9cb5634d91418907895cc",
-    ".dairn/bin/dairn.cmd": "79726741e39d33e10c5235743d88dff7b4107a86957e0d568a8ac6e4b9178cdd",
+    ".dairn/bin/dairn.cmd": "3d521f42d80cf4da380c093b216819fd610c0113b5ada0cb0d69da63a3cdaa76",
     "AGENTS.md": "9976e7b68f467ff6e574443966b4894f17f9331c4f627724be9e6becb6ffc1e9",
     "docs/GOVERNANCE_SPEC.md": "e62d48174e03279cce928c1430545c81311bd5af38b6628f6c7943f16cca54e9"
   }

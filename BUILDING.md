@@ -1,6 +1,8 @@
 # 构建与验证
 
-仓库提供 Python PEP 517 和 npm 入口。**发布版本以 `v<版本>` 标签为准；没有标签时使用 `package.json` 的 `version`**。CI 在标签推送时通过 `DAIRN_VERSION` 传递标签版本，本地可用同名环境变量演练。`tools/release.json` 只管理分发名称与源码范围，不得定义版本。CLI、npm、ZIP 使用该 SemVer 版本，Release 标签加 `v` 前缀；Python 元数据与 Wheel 自动转换为 PEP 440 格式（`-alpha.N` → `aN`、`-beta.N` → `bN`、`-rc.N` → `rcN`）。
+仓库提供 Python PEP 517 和 npm 入口。**发布版本以 `v<版本>` 标签为准；没有标签时使用 `package.json` 的 `version`**。CI 在标签推送时通过 `DAIRN_VERSION` 传递标签版本，本地可用同名环境变量演练。`tools/release.json` 只管理分发名称与源码范围，不得定义版本。CLI、npm、ZIP 使用该 SemVer 版本，Release 标签加 `v` 前缀；Python 元数据与 Wheel 自动转换为 PEP 440 格式（`-alpha.N` → `aN`、`-beta.N` → `bN`、`-rc.N` → `rcN`、`-nightly.时间戳` → `.dev时间戳`）。
+
+开发构建采用 `主版本.次版本.修订号-nightly.YYYYMMDDHHMMSS`，时间戳固定使用北京时间（UTC+8）。运行 `python tools/nightly-version.py` 预览下一版本，添加 `--apply` 才更新 `package.json`，保留三段基础版本并替换原有预发布后缀。每轮构建开始前刷新一次；Python、npm、ZIP、校验和及验收共用这个固定版本，不在每个构建子进程中重新取时间。这样同一版本仍可复现，已有发布制品也不会被新版本覆盖。
 
 Python 工程采用 `pyproject.toml` + `src/dairn/` 布局；npm 入口为 `package.json` + `bin/dairn.cjs`。构建工具集中在 `tools/`，分发测试位于 `tools/tests/`，共享的 QuickJS 下载锁为根目录 `quickjs.lock.json`。
 
@@ -21,6 +23,7 @@ Python 工程采用 `pyproject.toml` + `src/dairn/` 布局；npm 入口为 `pack
 ## 打包与自举
 
 ```sh
+python tools/nightly-version.py --apply  # 新的一轮 nightly；之后各入口保持该版本
 python tools/build.py          # Python 3.10+，生成 Wheel 和 ZIP
 npm run build                 # Node.js 18+，生成 npm tarball 和同一 ZIP
 python tools/checksums.py      # 校验发布目录仅有三类制品并写入清单
@@ -38,27 +41,23 @@ POSIX 首次启动 APE 需要 `uname`、`mkdir`、`dd`、`gzip`、`chmod`、`mv`
 
 `dairn init` / `dairn adopt` 会在目标项目生成 launcher 文件（`.dairn/bin/dairn`、`.dairn/bin/dairn.cmd`、`.dairn/.gitattributes`，以及项目自有的 `.dairn/launcher.json`），模板来自嵌入运行时。它们只影响目标项目，不改变发布制品的字节；发布构建与 6 平台矩阵安装 npm/Wheel/ZIP 后仍使用包内运行时，并执行 `docs check`，不依赖目标项目的 launcher。
 
-本仓库的 `runtime/` 是构建产物（`.gitignore` 中 `/runtime/`）：fresh checkout 不能直接运行 `./dairn.sh`，需先 `python tools/build.py` 或 `npm run build` 生成。发布工作流的 `test-python` job 不重新下载 QuickJS，而是从已构建的发布 ZIP 中提取 `<prefix>/runtime/dairn-embedded.com` 与 `<prefix>/runtime/runtime-integrity.json` 到仓库 `runtime/`，再运行 `tools/verify-linux.py`（完整 Python 套件 + native 测试，需要 Go/git/gcc）；本地等价做法是先构建，再运行同一脚本。
+本仓库的 `runtime/` 是构建产物（`.gitignore` 中 `/runtime/`）：fresh checkout 不能直接运行 `./dairn.sh`，需先 `python tools/build.py` 或 `npm run build` 生成。发布工作流的 `test-python` job 不重新下载 QuickJS，而是从已构建的发布 ZIP 中提取 `<prefix>/runtime/dairn-embedded.com` 与 `<prefix>/runtime/runtime-integrity.json` 到仓库 `runtime/`，再运行 `tools/verify-linux.py`（完整 Python 套件 + native 测试，需要 Go/git/openssl/jq）；本地等价做法是先构建，再运行同一脚本。
 
 ### Windows 实机验收
 
-在 Windows x64 + Git for Windows 上先 `python tools/build.py`，再运行 `python tools/verify-windows.py`（需要 node/git/npm/go；Go 默认从 `C:\Program Files\Go\bin` 查找，也可用 `--go-bin` 指定）。**没有 Go 工具链时加 `--skip-go`**：跳过 `go-env/go-init/go-checks`，CLI、launcher、native host/policy、npm、wheel 步骤照常执行并参与总体验收（`go_skipped=true`，`acceptance_passed` 不含 Go）。
+日常集成使用 `python tools/check-source.py integration`，跨平台只需要 Python、Git 和已构建的 QuickJS。它在临时 Git 项目中运行实际的语法检查、单元计算、独立子进程调用和构建检查，验证成功、非零退出、超时三类 Run，再验证 vendor 升级和离线启动；真实日志与 Run 副本在 `validation/source-checks/integration/`。该流程不需要 Go、gcc、Node 或 npm，不替代三类发布制品的完整验收。
 
-要在本机把 Go `-race` 也纳入总体验收，提供 C 编译器目录并加 `--require-go-checks`，例如本机 MSYS2：
+在 Windows x64 + Git for Windows 上先 `python tools/build.py`，再运行 `python tools/verify-windows.py`（需要 node/git/npm；需要 Go 时默认从 `C:\Program Files\Go\bin` 查找，也可用 `--go-bin` 指定）。Go 门禁使用普通 `go test ./...`，不启用 race/CGO；没有 Go 工具链时加 `--skip-go`，跳过 `go-env/go-init/go-checks`，其余 CLI、launcher、native host/policy、npm、wheel 步骤照常执行并参与总体验收。
 
-```powershell
-python -B -X utf8 tools\verify-windows.py --cc-bin 'E:\msys64\mingw64\bin' --require-go-checks
-```
-
-脚本会把 `--cc-bin` 放到 PATH 最前并设置 `CC=gcc`、`CGO_ENABLED=1`，Go 临时缓存/临时对象放在 ASCII 路径（MSYS2 gcc 对非 ASCII `GOTMPDIR` 支持不稳定）。
+Go race/CGO 不属于默认或 CI 验收；需要普通 Go 门禁时直接运行 `python -B -X utf8 tools\verify-windows.py`，没有 Go 工具链则加 `--skip-go`。
 
 其中 `quickjs.tests.test_windows` 覆盖普通生命周期、junction 边界、真实子进程门禁，以及项目 launcher 文件、vendored 运行时离线执行、缺失运行时 127 报错、`core.autocrlf=true` 克隆后的受管哈希稳定性；`test_host_native.mjs` 用构建缓存中的原生 `qjs-*.com` 运行（没有缓存时回退 APE），覆盖 `host.readBytes` + 内建 SHA256。Go 步骤使用临时 `GOCACHE/GOTMPDIR/GOMODCACHE`，避免宿主机全局 Go 缓存 ACL 影响结果。
 
-本机实测（`go1.27.3 windows/amd64` + MSYS2 `gcc 16.1.0`，`--cc-bin E:\msys64\mingw64\bin --require-go-checks`）：全部 12 个步骤通过，`go_checks` 的 `lint/unit/integration(-race)/build` 4/4 通过，`go_checks_required=true`、`acceptance_passed=true`、`original_unchanged=true`。
-
 Windows 相关实现约束：
 
-- **Git 捕获回退**：Git for Windows 子进程在 Cosmo 传递的文件句柄下可能以 Windows 异常码退出。`host.run` 检测到该情况时改用 Git 自带的 `sh.exe` 做文件重定向捕获（成功只取 stdout，失败附 stderr）；`DAIRN_GIT_SH` 可覆盖 sh 路径。Git 是 Dairn 的必需依赖，`sh.exe` 随 Git for Windows 安装。
+- **Git 输出捕获**：Windows 的 `host.run` 直接以 QuickJS 原生 `os.exec`/Worker 创建并同时排空 stdout/stderr 原生管道，Git、Python、Node 均不经过 `sh.exe`；命令名按 `PATHEXT` 解析为显式 `.exe`，`.cmd/.bat` 仅通过 `cmd.exe` 的 `call` 启动。主线程仍保留超时控制，输出超过 1 MiB 或子进程初始化失败会 fail closed。原生管道由 Worker 负责持续读取，避免 Cosmo 文件句柄重定向和管道容量死锁。
+- **临时目录**：系统 Temp 无法创建捕获文件时，已初始化项目自动回退 `.dairn/tmp/`。显式设置的 `TMPDIR` 失败仍报错；自动回退拒绝符号链接和越界路径，不修改全局环境。
+- **嵌套 APE**：Windows 上 Cosmopolitan 通过 `_COSMO_FDS_V2` 把父进程 fd 表传入子进程。原生工具（Python/Node 等）再启动 APE 孙进程时，该变量指向未继承的句柄，表现为 stdout 丢失或退出码 `0xC0000005`。`tools/check-source.py` 在 Windows 启动时清除该变量，使源码门禁内的嵌套 APE 正常工作；若项目自有检查也会在原生工具内再次调用 Dairn/APE，应在入口处做同样清理，而不是把空日志当成检查通过。
 - **二进制摘要**：vendored 运行时 SHA256 使用 `host.readBytes` + 内建 `sha256Bytes`，不依赖 `certutil`（其输出在部分 Windows 版本/重定向下不可捕获）；外部工具仅作回退。
 - **fresh clone**：`.dairn/cache/`、`.dairn/tmp/` 被忽略；空的 `operations/*` 目录不会被 Git 记录，校验按“暂无记录”处理；`dairn validate` / `dairn doctor` 在 fresh clone 中应通过。
 
@@ -92,7 +91,7 @@ Linux 可在 `python:3.12-bookworm` 容器中执行该脚本。Windows Podman �
 除矩阵外还有两个集成回归 job，均被 `accepted` 汇总门禁：
 
 - **test-python**（`ubuntu-24.04`）：从发布 ZIP 提取运行时，运行 `tools/verify-linux.py` 的 15 个 Python 套件 + native policy/host；工作流清空 CI 平台变量，模拟本地开发者环境。
-- **test-python-windows**（`windows-2025`）：与 Linux 套件同源复用 build job 的 `dairn-packages` artifact——从发布 ZIP 提取运行时，并把 wheel/npm 制品复制到 `dist/`（`verify-windows.py --artifacts incoming`），不在 Windows 重新构建任何制品；不下载 QuickJS、不跑 `python tools/build.py`。随后定位 MSYS2/MinGW gcc（镜像预装或 `C:\msys64\pacman` 安装），运行 `tools/verify-windows.py --artifacts incoming --cc-bin <gcc目录> --require-go-checks`。脚本同样清空 CI 平台变量；覆盖 launcher/vendored runtime、npm/Wheel 安装、Go `-race`（纳入总体验收）与 fresh-clone 受管哈希；产物写入 `validation/windows` 并上传 artifact。
+- **test-python-windows**（`windows-2025`）：与 Linux 套件同源复用 build job 的 `dairn-packages` artifact——从发布 ZIP 提取运行时，并把 wheel/npm 制品复制到 `dist/`（`verify-windows.py --artifacts incoming --skip-go`），不在 Windows 重新构建任何制品；不下载 QuickJS、不跑 `python tools/build.py`，也不安装 MinGW。脚本同样清空 CI 平台变量；覆盖 launcher/vendored runtime、npm/Wheel 安装与 fresh-clone 受管哈希；产物写入 `validation/windows` 并上传 artifact。
 
 各任务独立保存结果，不跳过失败；矩阵、test-python 与 test-python-windows 全部成功后汇总才通过。Windows ARM64 由系统兼容层执行 APE 的 Windows x64 入口。流程支持 push、PR 和手动运行，上游版本统一从锁文件读取；发布只由标签触发。
 

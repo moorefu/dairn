@@ -72,6 +72,8 @@ vendored 模式：
 5. 注册时校验：完整性清单必须是 JSON，含 64 位小写 `sha256` 与非空 `engine_version`；实际二进制 SHA256 由 Dairn 内建实现直接读取二进制计算（不依赖外部工具），仅在二进制读取不可用时回退 `sha256sum` → `shasum -a 256` → `certutil -hashfile`，并与清单比对；`engine_version` 与执行该命令的 Dairn 版本不一致即失败。任何一步失败都不会写入 vendored 配置。
 6. `dairn doctor` 复核：两个 launcher 文件存在、`launcher.json` 合法且路径等于受管路径；vendored 模式下还校验运行时与完整性文件存在、JSON 合法、清单摘要与配置摘要一致、实际二进制摘要与记录一致。任一项失败即报告问题。
 
+`doctor` 同时探测 Git 与已声明技术栈的工具。Python 项目优先探测检查 argv 中实际配置的 Python 解释器；工具无法启动、退出码非零或探测超时都加入 `problems`，结果为 `unready` 并以 1 退出。未显式设置 `TMPDIR` 且系统临时目录无法创建捕获文件时，已初始化项目自动回退到 `.dairn/tmp/`，拒绝符号链接或越界路径。显式 `TMPDIR` 不可用时直接失败；所有候选目录都失败时，错误给出路径和 `TMPDIR/TEMP` 提示，不得把探测失败当作环境就绪。
+
 ## Agent 与 CI 调用规则
 
 - 仓库 `AGENTS.md` 的受管块记录 launcher 路径与简写声明；Agent 先按它调用，不假设全局 `dairn` 可用。
@@ -94,6 +96,11 @@ vendored 模式：
 | 退出 127 / `DAIRN_NOT_AVAILABLE` | 检查 `DAIRN_BIN`、`.dairn/launcher.json`、`.dairn/bin/dairn` 是否可执行；让维护者启用 vendored 运行时或设置 `DAIRN_BIN` |
 | `doctor` 报 launcher missing | 运行 `dairn upgrade --apply` 生成受管 launcher 文件 |
 | `doctor` 报摘要不匹配 | 重新放置官方发行版与对应完整性清单；不要修改清单去迁就二进制 |
+| `doctor` 报工具不可用或超时 | 核对报告中的具体命令、退出码和 PATH；Python 命令须与项目检查配置一致 |
+| `Cannot open command output` | 将 `TMPDIR`（或 `TEMP`）设置为当前进程可写的临时目录后重试；不要绕过工具探测 |
+| Windows 弹窗或退出码 `0xC0000142` | 子进程初始化失败，不等于工具未安装；核对进程权限、DLL 和执行环境。Windows 宿主通过 QuickJS Worker 同时排空 stdout/stderr 管道，避免 Cosmopolitan 文件句柄重定向问题；初始化失败仍以非零退出，不反复重试 |
+| Windows 下嵌套 APE 输出为空或退出码 `0xC0000005` | Cosmopolitan 用 `_COSMO_FDS_V2` 传递 fd 表；原生工具（Python/Node 等）再启动 APE 孙进程时该变量指向未继承句柄。在会派生 APE 的原生检查入口清除 `_COSMO_FDS_V2`/`_COSMO_FDS` 后再启动子进程；不要重试或把空日志当作通过 |
+| `Runtime assets differ from project lock` | 当前 CLI 内嵌资产与项目 lock 不一致；用已验证的对应运行时执行 `upgrade --plan`，审阅后 `upgrade --apply`。vendored 项目还须同步对应运行时并带 `--vendor-runtime .dairn/runtime`，不要手改 lock 摘要 |
 | 运行时版本与执行的 Dairn 版本不一致 | 改用与当前 Dairn 版本匹配的官方发行版重新注册，不要手动改 `version` 字段 |
 | 离线 / 无网络环境 | 从离线发行包获取运行时与完整性清单；launcher 不会联网补齐 |
 | Hook 脚本找不到命令 | 用 `dairn hooks install --launcher <绝对路径>` 重新生成 Hook |

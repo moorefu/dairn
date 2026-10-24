@@ -11,38 +11,33 @@
       "checks": {
         "lint": {
           "argv": [
-            "dairn",
-            "docs",
-            "check"
+            "python",
+            "tools/check-source.py",
+            "lint"
           ],
           "cwd": "."
         },
         "unit": {
           "argv": [
-            "python3",
-            "-m",
-            "pytest",
-            "-m",
-            "not integration"
+            "python",
+            "tools/check-source.py",
+            "unit"
           ],
           "cwd": "."
         },
         "integration": {
           "argv": [
-            "python3",
-            "-m",
-            "pytest",
-            "-m",
+            "python",
+            "tools/check-source.py",
             "integration"
           ],
           "cwd": "."
         },
         "build": {
           "argv": [
-            "python3",
-            "-m",
-            "build",
-            "--no-isolation"
+            "python",
+            "tools/check-source.py",
+            "build"
           ],
           "cwd": "."
         }
@@ -63,5 +58,16 @@
       "integration",
       "build"
     ]
-  }
+  },
+  "snapshot_exclusions": [
+    "/.build/",
+    "/dist/",
+    "/runtime/",
+    "/validation/",
+    "/node_modules/",
+    "__pycache__/",
+    "*.pyc",
+    "/.pytest_cache/",
+    "/.ruff_cache/"
+  ]
 }

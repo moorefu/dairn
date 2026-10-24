@@ -170,7 +170,7 @@ a=./demo/.dairn/bin/dairn
 "$a" check --root ./demo --all
 ```
 
-在 Windows 下使用 `demo\.dairn\bin\dairn.cmd`。检查会使用项目配置的真实工具链；Go 测试、`-race` 等项目检查可能需要 Go、CGO/C 编译器等额外依赖。
+在 Windows 下使用 `demo\.dairn\bin\dairn.cmd`。检查会使用项目配置的真实工具链；Go 普通测试可能需要 Go 工具链，Go race/CGO 不属于默认验收。
 
 ### 接入已有项目：先发现，再决定是否写入
 
