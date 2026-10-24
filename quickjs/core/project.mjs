@@ -26,6 +26,8 @@ import {captureFacts,acceptFacts,factSnapshotPath} from './facts.mjs';
 import {buildAnalyzerPlan,renderPlan} from './analyzer-plan.mjs';
 import {buildContextPack,renderContextPack,MAX_LIMIT} from './context.mjs';
 /* Dairn QuickJS 项目生命周期与分发层；写入前规划全部项目变更。 */
+/* 旧版本生成的受管 Makefile；本版本不再生成，upgrade 时随旧启动器一起退役。 */
+const LEGACY_MAKEFILE='.dairn/Makefile';
 import {sha256} from './sha256.mjs';
 import {guidance} from './guidance.mjs';
 import {minimumChecks, policyValidate, invariant, relative} from './policy.mjs';
@@ -253,7 +255,6 @@ function makeDesired(h,root,config,prior){
   entries['docs/GOVERNANCE_SPEC.md']='# Dairn\n\nAI-Native Software Engineering Toolkit.\n\n'+
     'Project policy: `.dairn/governance/project.json`; authoritative reference specs: `dairn docs find <topic>`.\n\n'+
     'Capability-driven analysis: `dairn analyze plan [--base <ref>] [--apply]` derives needs, reuses valid local results and executes only policy-allowlisted read-only analyzers; task-aware context: `dairn context [query] [--change]` returns sourced, precision-labeled evidence with explicit UNKNOWNs. Both are advisory and never a Gate verdict.\n';
-  entries['.dairn/Makefile']='.PHONY: doctor validate check\nDAIRN ?= ./dairn\ndoctor:\n\t@$(DAIRN) doctor\nvalidate:\n\t@$(DAIRN) validate\ncheck:\n\t@$(DAIRN) check\n';
   // 项目内 launcher 是受管入口；launcher.json 是项目自有配置（见 planFor 排除列表）。
   const launchers=launcherScripts();
   entries[LAUNCHER_POSIX]=launchers.posix;
@@ -300,9 +301,9 @@ function planFor(h,root,entries,lock){
   // This release starts with the dairn-* namespace. There is no compatibility
   // translation, implicit deletion, or lock migration for retired asset names.
   // A future same-namespace upgrade must explicitly account for removed assets.
-  // 旧版本把项目启动器放在 .dairn/bin/；本版本迁到项目根 dairn/dairn.cmd 并退役旧受管文件。
-  // 除这类显式迁移外，受管资源集合只增不减，避免静默删除他人文件。
-  const LEGACY_MANAGED=new Set([LEGACY_LAUNCHER_POSIX,LEGACY_LAUNCHER_WINDOWS]);
+  // 旧版本把项目启动器放在 .dairn/bin/、并生成 .dairn/Makefile；本版本退役这些受管文件，
+  // 把启动器迁到项目根 dairn/dairn.cmd。除这类显式迁移外，受管资源集合只增不减，避免静默删除他人文件。
+  const LEGACY_MANAGED=new Set([LEGACY_LAUNCHER_POSIX,LEGACY_LAUNCHER_WINDOWS,LEGACY_MAKEFILE]);
   const retired=Object.keys(before).filter(rel=>!(rel in full));
   const unexpected=retired.filter(rel=>!LEGACY_MANAGED.has(rel));
   invariant(unexpected.length===0,'Managed assets no longer in this Dairn release: '+unexpected.join(', ')+'. Manual review required.');

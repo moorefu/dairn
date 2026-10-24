@@ -20,7 +20,7 @@ Agent 读取目标项目的 `AGENTS.md` 和 `.agents/skills/dairn-*/SKILL.md`，
 
 ## 根启动器与 vendored runtime
 
-`dairn init` / `dairn adopt` 生成项目根启动器（受管文件）：POSIX `dairn`、Windows `dairn.cmd`，以及保持启动器行尾的 `.dairn/.gitattributes`。推荐入口是根启动器；文档、AGENTS 托管块和 `.dairn/Makefile`（`DAIRN ?= ./dairn`）中的 `dairn` 都是它的简写。项目自有 `.dairn/launcher.json` 不参与受管文件哈希：init/adopt 时创建，upgrade 缺失时补齐，内容由 `--vendor-runtime` 更新。
+`dairn init` / `dairn adopt` 生成项目根启动器（受管文件）：POSIX `dairn`、Windows `dairn.cmd`，以及保持启动器行尾的 `.dairn/.gitattributes`。推荐入口是根启动器；文档与 AGENTS 托管块中的 `dairn` 都是它的简写。项目自有 `.dairn/launcher.json` 不参与受管文件哈希：init/adopt 时创建，upgrade 缺失时补齐，内容由 `--vendor-runtime` 更新。
 
 启动器的运行时解析顺序固定为：显式 `DAIRN_RUNTIME`（构建/验证）→ 启动器同目录的 `.dairn/runtime/dairn-embedded.com`（vendored）→ 报错 `DAIRN_NOT_AVAILABLE` 并以 2 退出；不再回退到安装包内的 `runtime/`，也不做隐式安装或联网下载。源码仓库根 `runtime/` 只是构建产物，必须用 `DAIRN_RUNTIME` 显式选择。
 

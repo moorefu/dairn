@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "version": "0.1.0-nightly.20261024123943",
-  "runtime_sha256": "69e656270dd709c97077ddd18eb75e4de50052274c5ed809cb8d6d57f4bb8550",
+  "runtime_sha256": "8302b3af2fa4be7da5b5eb6ba253914b50a98c1cb2e66eeebdf9ea788fc275b1",
   "config": {
     "schema": 2,
     "name": "dairn",
@@ -86,7 +86,6 @@
     ".agents/skills/dairn-workflow-router/SKILL.md": "8d028bc7e93500484fccd001e6f6cc187f04a59d473482a9c370f632a9895cf2",
     ".agents/skills/dairn-workflow-router/agents/openai.yaml": "0429fc8709831573b26b695fd8b46e1fdc5f37b53a6b47bd6941ef94ebec1561",
     ".dairn/.gitattributes": "f414e9951ccce8606c6d92cf9220e3a5a38af0c5d461f4ebd271704db15b0fa4",
-    ".dairn/Makefile": "5c5995a8c86bc51c001e1e198f267473c3356247c0f96aba114447686db755cd",
     "AGENTS.md": "39089727e8527e269fe7aabc36eb70dd5c8a2b652280b58aa2964d5014adb3ef",
     "dairn": "52bcd4db3c6bf0a697412ad34fd9bd892487260cb799340832a9bb3f327e2f7c",
     "dairn.cmd": "23eba37f99b09dd6661a85b469780acebe8af8eaaae73481c1b4d4cea4e20ee9",

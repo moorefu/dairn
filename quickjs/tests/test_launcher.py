@@ -76,6 +76,7 @@ class ProjectLauncher(unittest.TestCase):
         self.assertTrue((self.root / 'dairn').is_file())
         self.assertTrue((self.root / 'dairn.cmd').is_file())
         self.assertFalse((self.root / '.dairn/bin/dairn').exists())
+        self.assertFalse((self.root / '.dairn/Makefile').exists())
         self.assertTrue((self.root / '.dairn/runtime/dairn-embedded.com').is_file())
         self.assertTrue((self.root / '.dairn/runtime/runtime-integrity.json').is_file())
         config = self.launcher_config()
@@ -170,17 +171,20 @@ class ProjectLauncher(unittest.TestCase):
         self.assertIn('adopt', (result.stdout + result.stderr).lower())
 
     def test_upgrade_retires_legacy_managed_launchers(self):
-        # 模拟旧布局项目：受管启动器在 .dairn/bin/ 下，launcher.json 记录旧文件名。
+        # 模拟旧布局项目：受管启动器在 .dairn/bin/ 下、.dairn/Makefile 仍受管，launcher.json 记录旧文件名。
         legacy = self.root / '.dairn/bin'
         legacy.mkdir()
         posix = b'#!/bin/sh\necho legacy\n'
         win = b'@echo off\r\necho legacy\r\n'
+        makefile = b'.PHONY: doctor validate check\nDAIRN ?= ./dairn\ndoctor:\n\t@$(DAIRN) doctor\n'
         (legacy / 'dairn').write_bytes(posix)
         (legacy / 'dairn.cmd').write_bytes(win)
+        (self.root / '.dairn/Makefile').write_bytes(makefile)
         lock_path = self.root / '.dairn/lock.json'
         lock = json.loads(lock_path.read_text(encoding='utf-8'))
         lock['managed']['.dairn/bin/dairn'] = hashlib.sha256(posix).hexdigest()
         lock['managed']['.dairn/bin/dairn.cmd'] = hashlib.sha256(win).hexdigest()
+        lock['managed']['.dairn/Makefile'] = hashlib.sha256(makefile).hexdigest()
         lock_path.write_text(json.dumps(lock, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
         config_path = self.root / '.dairn/launcher.json'
         config = json.loads(config_path.read_text(encoding='utf-8'))
@@ -189,10 +193,11 @@ class ProjectLauncher(unittest.TestCase):
         config_path.write_text(json.dumps(config, indent=2) + '\n', encoding='utf-8')
         plan = self.obj('upgrade', '--plan', '--root', self.root)
         removed = {action['path'] for action in plan['actions'] if action['status'] == 'remove'}
-        self.assertEqual(removed, {'.dairn/bin/dairn', '.dairn/bin/dairn.cmd'})
+        self.assertEqual(removed, {'.dairn/bin/dairn', '.dairn/bin/dairn.cmd', '.dairn/Makefile'})
         self.ok('upgrade', '--apply', '--root', self.root)
         self.assertFalse((legacy / 'dairn').exists())
         self.assertFalse((legacy / 'dairn.cmd').exists())
+        self.assertFalse((self.root / '.dairn/Makefile').exists())
         config = self.launcher_config()
         self.assertEqual(config['launcher'], 'dairn')
         self.assertEqual(config['windows_launcher'], 'dairn.cmd')
