@@ -15,7 +15,8 @@ import {assessCapabilities, discoverRepository} from './capabilities.mjs';
 import {locateContract, locateRun, compareDebt, verifyExitConditions, writeContract} from './refactor.mjs';
 import {validateRefactorContract} from './project-context.mjs';
 import {collectRunHistory, recommendAdaptations} from './governance-feedback.mjs';
-import {LAUNCHER_POSIX,LAUNCHER_WINDOWS,LAUNCHER_CONFIG,RUNTIME_DIR,LEGACY_LAUNCHER_POSIX,LEGACY_LAUNCHER_WINDOWS,launcherScripts,defaultLauncherConfig,readLauncherConfig,launcherInfo,payloadLauncherConfig,inspectRuntimePayload,vendorRuntime,verifyLauncher,runtimeSource,runtimeFreshness} from './launcher.mjs';
+import {LAUNCHER_POSIX,LAUNCHER_WINDOWS,LAUNCHER_CONFIG,RUNTIME_DIR,LEGACY_LAUNCHER_POSIX,LEGACY_LAUNCHER_WINDOWS,defaultLauncherConfig,readLauncherConfig,launcherInfo,payloadLauncherConfig,inspectRuntimePayload,vendorRuntime,verifyLauncher,runtimeSource,runtimeFreshness} from './launcher.mjs';
+import {templateReader,navigation,ciTemplate,projectReadme,projectGuide,governanceSpec,claudeMd,rootGitattributes,dairnGitattributes,launcherScripts} from './scaffold.mjs';
 import {configuredAnalyzers,analyzerInit,analyzerDoctor,analyzerTemplates,resolveAnalysisSuite} from './analyzers.mjs';
 import {executeAnalyzer,importAnalysisReport} from './analyzer-runner.mjs';
 import {loadQualityGoals} from './quality-goals.mjs';
@@ -124,104 +125,9 @@ function moduleConfig(h,root,o){
     return {name:key,path:f.path,profiles:f.stack==='spring-boot'?['java','spring-boot']:[f.stack],checks:commands(h,f.stack,f.path)};
   });
 }
-function navigation(){return BEGIN+'\nDairn — AI-Native Software Engineering Toolkit.\n'+
-  'Project launcher: `./dairn` (Windows: `dairn.cmd`); `dairn` below is shorthand for this launcher. Never install Dairn during a task; if the launcher is missing, stop and report.\n'+
-  'Run `dairn doctor`, `dairn validate`, or `dairn check --base <trusted-ref>` before PR/MR.\n'+
-  'Discover shared guidance with `dairn docs find <topic>`; additional Skills via `dairn skills add <name> --apply`.\n'+
-  'Project governance policy: `.dairn/governance/project.json`; decisions: `.agents/notes/`.\n'+
-  'Project-specific context: `README.md` and `docs/PROJECT_GUIDE.md`; run `dairn guide plan` to enrich with observed facts.\n'+
-  'For task continuity use `dairn work start <task> --id <id>` and `dairn work next --id <id>`; inspect impact using `dairn guide impact`.\n'+
-  'Task slices: `dairn tasks check` / `dairn tasks ready`; release asset consistency: `dairn docs check`; local hooks: `dairn hooks install --apply`.\n'+
-  'For language-specific analysis run `dairn analyzers templates` then `dairn analyzers init --template LANGUAGE --id NAME --apply` and `dairn guide impact --analyzer <analyzer-id>`.\n'+
-  'AI Agents call Dairn; Dairn does not invoke a model. Codex and DeepSeek Harness use AGENTS.md; Claude Code follows CLAUDE.md.\n'+END;}
-function ciTemplate(provider){
-  if(provider==='github')return `name: Dairn governance quality gate
-on: [pull_request]
-permissions:
-  contents: read
-jobs:
-  dairn:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      # CI administrators provision a trusted Dairn launcher/runtime via DAIRN_CI_BIN.
-      - name: Validate and check
-        env:
-          DAIRN_EXPECTED_POLICY_SHA256: \${{ vars.DAIRN_EXPECTED_POLICY_SHA256 }}
-          BASE_SHA: \${{ github.event.pull_request.base.sha }}
-          DAIRN_ENFORCE_DOC_DRIFT: \${{ vars.DAIRN_ENFORCE_DOC_DRIFT }}
-          DAIRN_CI_BIN: \${{ vars.DAIRN_CI_BIN }}
-        run: |
-          test -n "$DAIRN_EXPECTED_POLICY_SHA256" && test -n "$BASE_SHA"
-          DAIRN_BIN_VALUE="\${DAIRN_CI_BIN:-./dairn}"
-          sh "$DAIRN_BIN_VALUE" guide drift --base "$BASE_SHA"
-          sh "$DAIRN_BIN_VALUE" guide impact --base "$BASE_SHA"
-          if [ "\${DAIRN_ENFORCE_DOC_DRIFT:-false}" = "true" ]; then sh "$DAIRN_BIN_VALUE" guide drift --base "$BASE_SHA" --strict; fi
-          sh "$DAIRN_BIN_VALUE" validate --base "$BASE_SHA"
-          sh "$DAIRN_BIN_VALUE" check --base "$BASE_SHA"
-`;
-  return `stages: [quality]
-variables:
-  GIT_DEPTH: "0"
-dairn:quality:
-  stage: quality
-  script:
-    - test -n "$DAIRN_EXPECTED_POLICY_SHA256" && test -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - DAIRN_BIN_VALUE="\${DAIRN_CI_BIN:-./dairn}"
-    - sh "$DAIRN_BIN_VALUE" guide drift --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - sh "$DAIRN_BIN_VALUE" guide impact --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - if [ "\${DAIRN_ENFORCE_DOC_DRIFT:-false}" = "true" ]; then sh "$DAIRN_BIN_VALUE" guide drift --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --strict; fi
-    - sh "$DAIRN_BIN_VALUE" validate --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - sh "$DAIRN_BIN_VALUE" check --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-  artifacts:
-    when: always
-    paths: [.dairn/governance/evidence/]
-`;
-}
-function projectReadme(config){
-  const profile=config.modules.map(m=>'- `'+m.path+'` — '+m.profiles.join(', ')).join('\n');
-  return '# '+config.name+'\n\n'+
-    '> TODO: Describe the product purpose, its users, and primary behavior using verified project information.\n\n'+
-    '## Modules\n\n'+profile+'\n\n'+
-    '## Development\n\n'+
-    'Run `dairn doctor` to inspect the configured toolchains and `dairn check --all` for a full technical baseline.\n'+
-    'For an existing Git repository, use `dairn check --base <trusted-ref>` for change-scoped checks.\n\n'+
-    '## Documentation\n\n'+
-    '- [Project guide](docs/PROJECT_GUIDE.md) — architecture, verification and project-specific constraints.\n'+
-    '- [Governance entry](docs/GOVERNANCE_SPEC.md) — rules and specification discovery.\n'+
-    '- `AGENTS.md` — concise instructions for AI-assisted changes.\n\n'+
-    '## Status\n\n'+
-    'This README was scaffolded, not inferred from an architecture review. Replace the TODO only after examining the actual code and decisions.\n';
-}
-function projectGuide(config){
-  const lines=config.modules.map(m=>{
-    const checks=Object.entries(m.checks||{}).map(([kind,x])=>
-      '  - '+kind+': `'+x.argv.join(' ')+'` (cwd: `'+x.cwd+'`)').join('\n');
-    return '- **'+m.name+'** (`'+m.path+'`; '+m.profiles.join(', ')+')\n'+checks;
-  }).join('\n');
-  return '# Project Guide — '+config.name+'\n\n'+
-    '> This is a project-owned document: Dairn creates it only when missing and does not lock or overwrite its content.\n'+
-    '> TODO fields are unknowns, not verified facts. The `dairn-project-guidance` Skill should research and refine them.\n\n'+
-    '## Context and Boundaries\n\n'+
-    'TODO: Confirm product goals, users, upstream/downstream systems, and non-goals from code and existing documentation.\n\n'+
-    '## Architecture\n\n'+
-    'TODO: Record actual components, module responsibilities, data flows and significant constraints; cite the source paths.\n\n'+
-    '## Development and Testing\n\n'+
-    'The following are **configured commands, not claims of successful execution**:\n\n'+lines+'\n\n'+
-    'TODO: Confirm prerequisites, real test commands and environment-specific dependencies by running them.\n\n'+
-    '## Security and Operational Boundaries\n\n'+
-    'TODO: Document actual secret handling, trust boundaries, observability and recovery assumptions; do not infer protections.\n\n'+
-    '## Decisions and Specifications\n\n'+
-    'Dairn governance entry: [GOVERNANCE_SPEC.md](GOVERNANCE_SPEC.md).\n\n'+
-    'Use `.agents/notes/` for significant decisions. Use `dairn docs find <topic>` for shared Dairn specifications.\n'+
-    'Create project-specific `docs/specs/` topic documents only when a real, stable contract needs a source of truth.\n\n'+
-    '## Known Unknowns\n\n'+
-    '- TODO: Verify unresolved assumptions and missing documentation, then remove this checklist as facts are established.\n';
-}
 function makeDesired(h,root,config,prior){
   const m=assetIndex(h), entries={};
+  const tpl=templateReader(h);
   // 受管规则：一个文件一旦进入 lock.managed，就必须在后续所有版本的 desired 集合里继续存在，
   // 否则计划会把它当成“本版本已移除的受管资产”而 fail closed。项目自有文件（如 root
   // .gitattributes、CLAUDE.md）只在缺失时创建；已受管时继续按受管内容刷新。
@@ -236,7 +142,7 @@ function makeDesired(h,root,config,prior){
     entries['.agents/notes/archived/sha256.json']='{}\n';
     if(!file(h,j(root,'.gitignore')))entries['.gitignore']='# Dairn transient analyzer and runtime cache\n.dairn/cache/\n.dairn/tmp/\n';
     entries['.dairn/analyzers.json']=fmt({schema:'dairn.analyzers.v1',analyzers:[]});
-    if(!file(h,j(root,'CLAUDE.md'))||wasManaged('CLAUDE.md'))entries['CLAUDE.md']='# Claude Code\n\nSee [AGENTS.md](AGENTS.md) for the authoritative, provider-neutral Dairn instructions.\nUse the project launcher `./dairn` (Windows: `dairn.cmd`) instead of a globally installed `dairn`; do not install Dairn, and use the `dairn-agent-workflow` Skill in `.agents/skills/` for deterministic checks.\n';
+    if(!file(h,j(root,'CLAUDE.md'))||wasManaged('CLAUDE.md'))entries['CLAUDE.md']=claudeMd(tpl);
     if(config.sample){
       invariant(config.modules.length===1&&JSON.stringify(config.modules[0].profiles)==='["go"]','--sample requires a Go-only project');
       const prefix=config.modules[0].path==='.'?'':config.modules[0].path+'/';
@@ -247,25 +153,23 @@ function makeDesired(h,root,config,prior){
   }
   // Project content is generated only on first adoption; it is NEVER added to runtime-managed hashes.
   if(!prior){
-    if(!file(h,j(root,'README.md')))entries['README.md']=projectReadme(config);
-    if(!file(h,j(root,'docs/PROJECT_GUIDE.md')))entries['docs/PROJECT_GUIDE.md']=projectGuide(config);
+    if(!file(h,j(root,'README.md')))entries['README.md']=projectReadme(tpl,config);
+    if(!file(h,j(root,'docs/PROJECT_GUIDE.md')))entries['docs/PROJECT_GUIDE.md']=projectGuide(tpl,config);
   }
   // .dairn/cache 与 .dairn/tmp 是临时目录（.gitignore 整目录忽略），
   // 不生成受管 marker：否则 fresh clone 缺少这些文件会让 verifyRuntimeLock 失败。
-  entries['docs/GOVERNANCE_SPEC.md']='# Dairn\n\nAI-Native Software Engineering Toolkit.\n\n'+
-    'Project policy: `.dairn/governance/project.json`; authoritative reference specs: `dairn docs find <topic>`.\n\n'+
-    'Capability-driven analysis: `dairn analyze plan [--base <ref>] [--apply]` derives needs, reuses valid local results and executes only policy-allowlisted read-only analyzers; task-aware context: `dairn context [query] [--change]` returns sourced, precision-labeled evidence with explicit UNKNOWNs. Both are advisory and never a Gate verdict.\n';
+  entries['docs/GOVERNANCE_SPEC.md']=governanceSpec(tpl);
   // 项目内 launcher 是受管入口；launcher.json 是项目自有配置（见 planFor 排除列表）。
-  const launchers=launcherScripts();
+  const launchers=launcherScripts(tpl);
   entries[LAUNCHER_POSIX]=launchers.posix;
   entries[LAUNCHER_WINDOWS]=launchers.windows;
-  entries['.dairn/.gitattributes']='runtime/*.com binary\nruntime/runtime-integrity.json text eol=lf\n';
+  entries['.dairn/.gitattributes']=dairnGitattributes(tpl);
   // 根 .gitattributes 是项目自有文件：只在缺失时创建，用于保证受管启动器的换行稳定。
   // 一旦在旧版本里被创建并纳入受管集合，就继续按受管内容维护（见 wasManaged）。
-  if(!file(h,j(root,'.gitattributes'))||wasManaged('.gitattributes'))entries['.gitattributes']='# Dairn launchers: POSIX script must stay LF, Windows script must stay CRLF.\ndairn text eol=lf\ndairn.cmd text eol=crlf\n';
+  if(!file(h,j(root,'.gitattributes'))||wasManaged('.gitattributes'))entries['.gitattributes']=rootGitattributes(tpl);
   if(!prior||!file(h,j(root,LAUNCHER_CONFIG)))entries[LAUNCHER_CONFIG]=fmt(defaultLauncherConfig(runtimeVersion(h)));
-  if(['github','both'].includes(config.ci))entries['.github/workflows/dairn.yml']=ciTemplate('github');
-  if(['gitlab','both'].includes(config.ci))entries['.gitlab-ci.yml']=ciTemplate('gitlab');
+  if(['github','both'].includes(config.ci))entries['.github/workflows/dairn.yml']=ciTemplate(tpl,'github');
+  if(['gitlab','both'].includes(config.ci))entries['.gitlab-ci.yml']=ciTemplate(tpl,'gitlab');
   return entries;
 }
 function managedBlock(content){
@@ -278,8 +182,9 @@ function planFor(h,root,entries,lock){
   const before=lock?.managed||{}, next={}, actions=[];
   const full={...entries};let prior=file(h,j(root,'AGENTS.md'))?read(h,j(root,'AGENTS.md')):null;
   const block=prior===null?null:managedBlock(prior);
-  let generated='# Agent instructions\n\n'+navigation()+'\n';
-  if(prior!==null){generated=block?prior.slice(0,block.a)+navigation()+prior.slice(block.b):prior+(prior.endsWith('\n')?'':'\n')+'\n'+navigation()+'\n';}
+  const nav=navigation(templateReader(h));
+  let generated='# Agent instructions\n\n'+nav+'\n';
+  if(prior!==null){generated=block?prior.slice(0,block.a)+nav+prior.slice(block.b):prior+(prior.endsWith('\n')?'':'\n')+'\n'+nav+'\n';}
   full['AGENTS.md']=generated;
   for(const [rel,content] of Object.entries(full).sort(([a],[b])=>a.localeCompare(b))){
     const path=j(root,rel);relative(rel);
@@ -289,7 +194,7 @@ function planFor(h,root,entries,lock){
     let status;
     if(rel==='AGENTS.md'){
       status=unsafe?'conflict':(block && (!before[rel]||sha256(block.raw)!==before[rel]))?'conflict':old===content?'unchanged':old===null?'create':'update';
-      next[rel]=sha256(navigation());
+      next[rel]=sha256(nav);
     }else{
       status=unsafe?'conflict':old===null?'create':old===content?'unchanged':!before[rel]||sha256(old)!==before[rel]?'conflict':'update';
       if(!['.dairn/governance/project.json','.dairn/analyzers.json','.gitignore','CLAUDE.md','.agents/notes/archived/sha256.json','README.md','docs/PROJECT_GUIDE.md',LAUNCHER_CONFIG].includes(rel) &&

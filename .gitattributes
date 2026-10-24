@@ -6,3 +6,5 @@
 *.xz binary
 dairn text eol=lf
 dairn.cmd text eol=crlf
+# 脚手架模板以 LF 存储（装配时才转 CRLF），避免 checkout 换行转换破坏黄金哈希。
+quickjs/assets/templates/project/** text eol=lf

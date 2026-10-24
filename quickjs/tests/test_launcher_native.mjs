@@ -1,11 +1,10 @@
-// 原生 QuickJS 契约测试：launcher 脚本常量、运行时来源与源码陈旧度判定。
+// 原生 QuickJS 契约测试：launcher 脚本模板、运行时来源与源码陈旧度判定。
 // 这些函数只读工作树、不写项目；临时目录由测试自行清理。
 import * as std from 'std';
 import {host as h} from '../host/qjs.mjs';
 import {sha256} from '../core/sha256.mjs';
-import {
-  POSIX_LAUNCHER_LINES, WINDOWS_LAUNCHER_LINES, RUNTIME_SOURCE_ENV, RUNTIME_DIR_ENV,
-} from '../core/launcher-scripts.mjs';
+import {RUNTIME_SOURCE_ENV, RUNTIME_DIR_ENV} from '../core/launcher-scripts.mjs';
+import {templateReader} from '../core/scaffold.mjs';
 import {launcherScripts, runtimeFreshness, runtimeSource} from '../core/launcher.mjs';
 
 const assert = {
@@ -29,7 +28,8 @@ try {
     {path: 'quickjs/core/a.mjs', sha256: sha256('alpha')},
   ];
 
-  const registry = {posix: launcherScripts().posix, windows: launcherScripts().windows};
+  const scripts = launcherScripts(templateReader(h));
+  const registry = {posix: scripts.posix, windows: scripts.windows};
   assert.ok(registry.posix.includes(RUNTIME_SOURCE_ENV + '=vendored'), 'POSIX launcher 传递来源');
   assert.ok(registry.windows.includes('set "' + RUNTIME_SOURCE_ENV + '=vendored"'), 'Windows launcher 传递来源');
   assert.ok(registry.posix.includes(RUNTIME_DIR_ENV + '='), 'POSIX launcher 传递运行时目录');
@@ -45,7 +45,10 @@ try {
   assert.ok(registry.windows.endsWith('\r\n'), 'Windows launcher 使用 CRLF');
   const nonAscii = registry.windows.split('').filter(ch => ch.charCodeAt(0) > 127);
   assert.equal(nonAscii.length, 0, 'Windows launcher 不含非 ASCII 字符');
-  assert.ok(POSIX_LAUNCHER_LINES.length > 10 && WINDOWS_LAUNCHER_LINES.length > 10, '脚本行数非空');
+  assert.ok(registry.posix.split('\n').length > 10 && registry.windows.split('\r\n').length > 10, '脚本行数非空');
+  // 模板是启动器的唯一源码；哈希固定用于发现任何意外改动（仓库根/分发/项目内共用）。
+  assert.equal(sha256(registry.posix), '52bcd4db3c6bf0a697412ad34fd9bd892487260cb799340832a9bb3f327e2f7c', 'POSIX launcher 模板哈希稳定');
+  assert.equal(sha256(registry.windows), '23eba37f99b09dd6661a85b469780acebe8af8eaaae73481c1b4d4cea4e20ee9', 'Windows launcher 模板哈希稳定');
 
   const source = runtimeSource(h);
   const envSource = h.env(RUNTIME_SOURCE_ENV);

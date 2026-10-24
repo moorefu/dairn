@@ -1,0 +1,26 @@
+name: Dairn governance quality gate
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  dairn:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # CI administrators provision a trusted Dairn launcher/runtime via DAIRN_CI_BIN.
+      - name: Validate and check
+        env:
+          DAIRN_EXPECTED_POLICY_SHA256: ${{ vars.DAIRN_EXPECTED_POLICY_SHA256 }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DAIRN_ENFORCE_DOC_DRIFT: ${{ vars.DAIRN_ENFORCE_DOC_DRIFT }}
+          DAIRN_CI_BIN: ${{ vars.DAIRN_CI_BIN }}
+        run: |
+          test -n "$DAIRN_EXPECTED_POLICY_SHA256" && test -n "$BASE_SHA"
+          DAIRN_BIN_VALUE="${DAIRN_CI_BIN:-./dairn}"
+          sh "$DAIRN_BIN_VALUE" guide drift --base "$BASE_SHA"
+          sh "$DAIRN_BIN_VALUE" guide impact --base "$BASE_SHA"
+          if [ "${DAIRN_ENFORCE_DOC_DRIFT:-false}" = "true" ]; then sh "$DAIRN_BIN_VALUE" guide drift --base "$BASE_SHA" --strict; fi
+          sh "$DAIRN_BIN_VALUE" validate --base "$BASE_SHA"
+          sh "$DAIRN_BIN_VALUE" check --base "$BASE_SHA"

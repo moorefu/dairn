@@ -1,0 +1,3 @@
+# Dairn launchers: POSIX script must stay LF, Windows script must stay CRLF.
+dairn text eol=lf
+dairn.cmd text eol=crlf

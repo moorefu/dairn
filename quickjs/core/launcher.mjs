@@ -13,7 +13,8 @@
  * loadFile 会按文本处理），因此 sha256File 调用系统工具或 h.readBytes。
  */
 import {sha256Bytes, sha256} from './sha256.mjs';
-import {POSIX_LAUNCHER_LINES, WINDOWS_LAUNCHER_LINES, RUNTIME_SOURCE_ENV, RUNTIME_DIR_ENV} from './launcher-scripts.mjs';
+import {RUNTIME_SOURCE_ENV, RUNTIME_DIR_ENV} from './launcher-scripts.mjs';
+export {launcherScripts} from './scaffold.mjs';
 const join = (a, b) => a.replace(/\/$/, '') + '/' + b;
 const file = (h, p) => h.exists(p) && !h.isDirectory(p);
 const isObj = x => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -34,15 +35,6 @@ export const RUNTIME_INTEGRITY = '.dairn/runtime/runtime-integrity.json';
 /* 旧版本把项目启动器放在 .dairn/bin/；upgrade 负责迁移并退役这两个受管文件。 */
 export const LEGACY_LAUNCHER_POSIX = '.dairn/bin/dairn';
 export const LEGACY_LAUNCHER_WINDOWS = '.dairn/bin/dairn.cmd';
-
-/* 返回 launcher 脚本文本。POSIX 用 LF；.cmd 用 CRLF，与 .dairn/.gitattributes
- * 的 eol 声明一致，保证跨平台 checkout 后受管哈希稳定。 */
-export function launcherScripts() {
-  return {
-    posix: POSIX_LAUNCHER_LINES.join('\n') + '\n',
-    windows: WINDOWS_LAUNCHER_LINES.join('\r\n') + '\r\n',
-  };
-}
 
 export function defaultLauncherConfig(version = null) {
   return {
