@@ -11,6 +11,7 @@ CLI=ROOT/('dairn.cmd' if os.name=='nt' else 'dairn.sh')
 
 class Guidance(unittest.TestCase):
     def setUp(self):
+        (ROOT/'.dairn/tmp').mkdir(parents=True, exist_ok=True)
         self.temp=tempfile.TemporaryDirectory(prefix='dairn-guidance-', dir=str(ROOT/'.dairn/tmp'))
         self.root=Path(self.temp.name)/'repo'
         self.env={**os.environ, 'GIT_CEILING_DIRECTORIES': str(Path(self.temp.name).parent),

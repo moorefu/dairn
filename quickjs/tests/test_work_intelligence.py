@@ -6,6 +6,7 @@ ROOT=Path(__file__).resolve().parents[2]
 CLI=ROOT/('dairn.cmd' if os.name=='nt' else 'dairn.sh')
 class WorkIntelligence(unittest.TestCase):
     def setUp(self):
+        (ROOT/'.dairn/tmp').mkdir(parents=True, exist_ok=True)
         self.tmp=tempfile.TemporaryDirectory(prefix='dairn-v10-', dir=str(ROOT/'.dairn/tmp'))
         self.repo=Path(self.tmp.name)/'service'
         self.env={**os.environ, 'GIT_CEILING_DIRECTORIES': str(Path(self.tmp.name).parent),
