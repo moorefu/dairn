@@ -1,0 +1,5 @@
+interface:
+  display_name: "dairn-grill"
+  short_description: "Design-tree interview that clears open decisions before specification"
+policy:
+  allow_implicit_invocation: true

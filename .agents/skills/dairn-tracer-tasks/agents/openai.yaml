@@ -1,0 +1,5 @@
+interface:
+  display_name: "dairn-tracer-tasks"
+  short_description: "Dairn governed engineering skill"
+policy:
+  allow_implicit_invocation: false

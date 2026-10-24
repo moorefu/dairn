@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "project": "dairn",
+  "modules": [
+    {
+      "name": "app",
+      "path": ".",
+      "profiles": [
+        "python"
+      ],
+      "checks": {
+        "lint": {
+          "argv": [
+            "dairn",
+            "docs",
+            "check"
+          ],
+          "cwd": "."
+        },
+        "unit": {
+          "argv": [
+            "python3",
+            "-m",
+            "pytest",
+            "-m",
+            "not integration"
+          ],
+          "cwd": "."
+        },
+        "integration": {
+          "argv": [
+            "python3",
+            "-m",
+            "pytest",
+            "-m",
+            "integration"
+          ],
+          "cwd": "."
+        },
+        "build": {
+          "argv": [
+            "python3",
+            "-m",
+            "build",
+            "--no-isolation"
+          ],
+          "cwd": "."
+        }
+      }
+    }
+  ],
+  "required_checks": {
+    "L0": [
+      "lint"
+    ],
+    "L1": [
+      "lint",
+      "unit"
+    ],
+    "L2": [
+      "lint",
+      "unit",
+      "integration",
+      "build"
+    ]
+  }
+}
