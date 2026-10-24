@@ -34,5 +34,15 @@ for(const p of ordinaryPaths) {
 for(const p of dataPaths) {const c=classify([p]);eq(c.risk,'L0');eq(c.governance_mode,'G0');}
 // 普通模块内改动只选择相关模块，不应误触发全模块检查。
 if(moduleSelection(selectPolicy,['examples/analyzer.go']).length>=selectPolicy.modules.length)throw new Error('ordinary change selected all modules');
+// 策略级快照排除：合法生成物模式通过；非数组、越界、过宽或非字符串模式拒绝。
+const validPolicy={schema_version:1,project:'service',modules:[{name:'app',path:'.',profiles:['generic'],
+  checks:{lint:{argv:['true']},unit:{argv:['true']},integration:{argv:['true']},build:{argv:['true']}}}],
+  required_checks:{L0:['lint'],L1:['lint','unit'],L2:['lint','unit','integration','build']}};
+if(policyValidate(validPolicy).length)throw new Error('baseline policy rejected: '+policyValidate(validPolicy).join('; '));
+if(policyValidate({...validPolicy,snapshot_exclusions:['/dist/','__pycache__/','*.pyc']}).length)throw new Error('valid snapshot_exclusions rejected');
+if(policyValidate({...validPolicy,snapshot_exclusions:null}).length)throw new Error('null snapshot_exclusions rejected');
+for(const bad of ['dist/','../escape/',['C:/absolute/'],['*'],['a\\b'],[42],[],['/']]){
+  if(!policyValidate({...validPolicy,snapshot_exclusions:bad}).length)throw new Error('invalid snapshot_exclusions accepted: '+JSON.stringify(bad));
+}
 print('PASS: QuickJS native portable policy cases');
 std.exit(0);

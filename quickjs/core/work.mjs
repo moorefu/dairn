@@ -82,8 +82,9 @@ function machineProblems(h,root,t,requirePassed=false){
   // Worktree capture and policy hashing are comparison-wide, not per-run: compute
   // them lazily once so a task with several historical runs stays linear.
   const exclusions=taskExclusions(t);
-  let currentWorktree=null,currentPolicy=null;
-  const worktree=()=>currentWorktree??(currentWorktree=captureWorktree(h,root,120,exclusions));
+  let currentWorktree=null,currentPolicy=null,currentSnapshotExclusions=null;
+  const snapshotExclusions=()=>{if(currentSnapshotExclusions===null){try{const policyTxt=h.read(root.replace(/\/$/,'')+'/.dairn/governance/project.json');const policy=JSON.parse(policyTxt);currentSnapshotExclusions=Array.isArray(policy.snapshot_exclusions)?policy.snapshot_exclusions:[];}catch(_){currentSnapshotExclusions=[];}}return currentSnapshotExclusions;};
+  const worktree=()=>currentWorktree??(currentWorktree=captureWorktree(h,root,120,exclusions,{snapshot_exclusions:snapshotExclusions()}));
   const policyHash=()=>{if(currentPolicy===null)currentPolicy=sha256(h.read(root.replace(/\/$/,'')+'/.dairn/governance/project.json'));return currentPolicy;};
   for(const stage of t.stages)for(const link of stage.machine_runs||[]){
     try{

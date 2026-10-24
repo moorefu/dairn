@@ -1,4 +1,5 @@
 /* Dairn QuickJS 跨平台治理策略。 */
+import {normalizeSnapshotExclusions} from './worktree.mjs';
 export const levels = ['L0', 'L1', 'L2'];
 export const governance = ['G0', 'G1', 'G2', 'G3'];
 export const minimumChecks = {L0:['lint'], L1:['lint','unit'], L2:['lint','unit','integration','build']};
@@ -34,6 +35,13 @@ export function policyValidate(data) {
     }
   }
   check(data?.required_checks && typeof data.required_checks === 'object' && !Array.isArray(data.required_checks) && JSON.stringify(Object.keys(data.required_checks).sort()) === JSON.stringify(levels.slice().sort()), 'required_checks must contain L0,L1,L2 exactly');
+  if (data?.snapshot_exclusions !== undefined && data?.snapshot_exclusions !== null) {
+    // 生成物边界由受信策略声明；非法模式直接拒绝，避免静默放大或缩小输入闭包。
+    check(Array.isArray(data.snapshot_exclusions) && data.snapshot_exclusions.length > 0,
+      'snapshot_exclusions must be a non-empty array of patterns');
+    try { normalizeSnapshotExclusions(data.snapshot_exclusions); }
+    catch (error) { errors.push('snapshot_exclusions ' + (error && error.message || error)); }
+  }
   if (data?.required_checks) for (const level of levels) {
     const checks = data.required_checks[level];
     check(Array.isArray(checks) && checks.length > 0 && checks.every(s => typeof s === 'string' && s.length > 0), 'required_checks.' + level + ' invalid');

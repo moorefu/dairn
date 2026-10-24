@@ -278,8 +278,11 @@ function checks(h,root,opts,st,raw,validation,stats) {
   // 捕获失败（例如 tracked symlink 输入）fail closed：记录为整体失败但仍写
   // 证据文件，让门禁 reason 可审计，而不是让整个 check 无证据崩溃。
   let worktree=null,worktreeError=null;
+  const captureExclusions=opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[];
+  // 生成物边界来自受信项目策略；同一 Run 的 before/after 必须使用同一闭包。
+  const captureOptions={snapshot_exclusions:Array.isArray(st.policy?.snapshot_exclusions)?st.policy.snapshot_exclusions:[]};
   if(opts.task||opts.hook||opts.all){
-    try{worktree=captureWorktree(h,root,opts.timeout,opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[]);}
+    try{worktree=captureWorktree(h,root,opts.timeout,captureExclusions,captureOptions);}
     catch(e){worktreeError=String(e&&e.message||e);}
   }
   const records=[];
@@ -342,7 +345,7 @@ function checks(h,root,opts,st,raw,validation,stats) {
     if(!opts.all && headCommit!==st.head) throw Error('Git HEAD changed during check; evidence cannot be written');
     let snapAfter=null,snapAfterFailed=false;
     if(opts.task&&worktree&&!worktreeError){
-      try{snapAfter=captureWorktree(h,root,opts.timeout,opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[]);}
+      try{snapAfter=captureWorktree(h,root,opts.timeout,captureExclusions,captureOptions);}
       catch(e){snapAfterFailed=true;}
     }
     if(opts.task){
