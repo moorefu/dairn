@@ -97,17 +97,10 @@ export function applyAnalyzerImpact(report,results){
 const template=(name,files,argv,probe,requires,description)=>({name,files,argv,probe,requires,description});
 const f=(asset,path)=>({asset:'/zip/quickjs/assets/analyzer-templates/'+asset,path:'tools/dairn/analyzers/'+path});
 const TEMPLATES={
-  go:template('go',[f('go-surface/main.go','go/main.go')],['go','run','tools/dairn/analyzers/go/main.go'],['go','version'],'Go 1.20+; Git','Go parser AST (reference implementation)'),
   python:template('python',[f('python-surface/main.py','python/main.py')],['python3','tools/dairn/analyzers/python/main.py'],['python3','--version'],'Python 3.9+; Git','Python stdlib ast signatures'),
   javascript:template('javascript',[f('javascript-surface/main.mjs','javascript/main.mjs')],['node','tools/dairn/analyzers/javascript/main.mjs'],['node','--version'],'Node.js 18+; Git','JavaScript exports; heuristic syntax scan'),
-  typescript:template('typescript',[f('typescript-surface/main.mjs','typescript/main.mjs')],['node','tools/dairn/analyzers/typescript/main.mjs'],['node','--version'],'Node.js 18+; Git; TypeScript-aware parsing is project-defined','TypeScript exported declarations; heuristic surface scan'),
   java:template('java',[f('java-surface/Main.java','java/Main.java')],['java','tools/dairn/analyzers/java/Main.java'],['java','-version'],'JDK 11+ source launcher; Git','Java public declarations; heuristic surface scan'),
-  rust:template('rust',[f('rust-surface/Cargo.toml','rust/Cargo.toml'),f('rust-surface/main.rs','rust/src/main.rs'),f('rust-surface/.gitignore','rust/.gitignore')],['cargo','run','--quiet','--manifest-path','tools/dairn/analyzers/rust/Cargo.toml','--'],['cargo','--version'],'Rust + Cargo; serde / serde_json crates (vendor or permit initial fetch); Git','Rust pub declarations via project-owned Cargo adapter'),
-  php:template('php',[f('php-surface/main.php','php/main.php')],['php','tools/dairn/analyzers/php/main.php'],['php','--version'],'PHP 7.4+; Git','PHP public function/class signatures'),
-  lua:template('lua',[f('lua-surface/main.lua','lua/main.lua')],['luajit','tools/dairn/analyzers/lua/main.lua'],['luajit','-v'],'LuaJIT with lua-cjson (OpenResty environments); Git','Lua exported functions; heuristic scan'),
   shell:template('shell',[f('shell-surface/main.sh','shell/main.sh')],['sh','tools/dairn/analyzers/shell/main.sh'],['sh','-c','command -v jq >/dev/null && command -v git >/dev/null'],'POSIX sh; jq; Git','POSIX shell function signatures'),
-  ruby:template('ruby',[f('ruby-surface/main.rb','ruby/main.rb')],['ruby','tools/dairn/analyzers/ruby/main.rb'],['ruby','--version'],'Ruby 2.7+; Git','Ruby method/class signatures'),
-  csharp:template('csharp',[f('csharp-surface/Surface.csproj','csharp/Surface.csproj'),f('csharp-surface/Program.cs','csharp/Program.cs'),f('csharp-surface/.gitignore','csharp/.gitignore')],['dotnet','run','--project','tools/dairn/analyzers/csharp/Surface.csproj','--'],['dotnet','--version'],'.NET SDK 8+; Git','C# public methods and classes; heuristic scan'),
 };
 export function analyzerTemplates(){return Object.values(TEMPLATES).map(s=>({name:s.name,files:s.files.map(x=>x.path),argv:s.argv,toolchain:s.probe[0],requires:s.requires,analysis:s.description,project_owned:true}));}
 export function analyzerDoctor(h,root){
@@ -125,7 +118,7 @@ export function analyzerDoctor(h,root){
  }
  return {schema:1,configured:configured.map(s=>({id:s.id,domain:s.domain,mode:s.mode||'execute',argv:s.execution.argv,cwd:s.execution.cwd||'.'})),tools,ready:tools.every(x=>x.status!=='missing'),notes:'Probes are advisory and do not install dependencies. Templates are opt-in and execute only via guide impact --analyzer ID.'};
 }
-export function analyzerInit(h,root,{template='go',id='surface',apply=false}={}){
+export function analyzerInit(h,root,{template='python',id='surface',apply=false}={}){
  assert(Object.hasOwn(TEMPLATES,template),'unknown template: '+template);
  assert(/^[a-z][a-z0-9-]{1,48}$/.test(id),'invalid analyzer id');
  const source=TEMPLATES[template],manifest=safe(h,root,CONFIG_PATH);

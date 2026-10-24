@@ -42,8 +42,8 @@ Agent 与 CI 约定：
 
 ```sh
 dairn analyzers templates --root ./service
-dairn analyzers init --root ./service --template go --id surface
-dairn analyzers init --root ./service --template go --id surface --apply
+dairn analyzers init --root ./service --template python --id surface
+dairn analyzers init --root ./service --template python --id surface --apply
 dairn analyzers doctor --root ./service
 dairn guide impact --root ./service --base origin/main --analyzer surface
 ```

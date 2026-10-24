@@ -2,9 +2,9 @@
 """Project-owned Python interface analyzer using the standard library (optional Dairn Analyzer)."""
 import ast
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 
 def signatures(src):
@@ -40,7 +40,7 @@ def run(req, response):
         rel = Path(name)
         if rel.suffix != '.py' or rel.is_absolute() or '..' in rel.parts:
             continue
-        before = subprocess.run(['git', '-C', str(root), 'show', f'{base}:{name}'], capture_output=True)
+        before = subprocess.run(['git', '-C', str(root), 'show', f'{base}:{name}'], check=False, capture_output=True)
         pre = signatures(before.stdout.decode('utf-8')) if before.returncode == 0 else {}
         candidate = root / rel
         if candidate.is_symlink():

@@ -22,8 +22,8 @@ Core 不内置某种语言的 AST SDK。一个 Analyzer 的 `execution.argv` 为
 
 ## Built-in optional template catalog
 
-`dairn analyzers templates` lists Go, Python, Java, JavaScript, TypeScript, Rust, PHP, Lua/OpenResty, Shell, Ruby and C# starter adapters. Templates are **examples**, not guaranteed type-complete parsers. Go/Python use standard-library AST; Java/JS/TS/PHP/Lua/Shell/Ruby/C# examples use intentionally bounded heuristics; Rust uses a `pub` declaration scanner built as a Cargo project. Rust requires serde/serde_json supplied by Cargo (vendor for offline work); Lua requires lua-cjson; Shell requires jq; C# requires .NET 8+.
+`dairn analyzers templates` lists Python, JavaScript, Java and Shell starter adapters (the catalog is intentionally small until the surface domain stabilizes; more languages will follow). Templates are **examples**, not guaranteed type-complete parsers. Python uses the standard-library AST; Java/JavaScript/Shell examples use intentionally bounded heuristics. Shell requires jq.
 
-`analyzers init` is **read-only by default**; only `--apply` copies project-owned code and updates `.dairn/analyzers.json`. Rust/C# install multiple files atomically relative to the manifest; any collision or symlink blocks the operation. Templates do not run during `init`, `doctor` or default `check`. `analyzers doctor` probes commands only. For accurate semantic or type-level compatibility, a project should replace its starter adapter with a vetted parser.
+`analyzers init` is **read-only by default**; only `--apply` copies project-owned code and updates `.dairn/analyzers.json`. Multi-file templates (when present) install atomically relative to the manifest; any collision or symlink blocks the operation. Templates do not run during `init`, `doctor` or default `check`. `analyzers doctor` probes commands only. For accurate semantic or type-level compatibility, a project should replace its starter adapter with a vetted parser.
 
 The analyzer request requires a pinned `subject.base_commit` to compute meaningful before/after signatures. The default lightweight `guide impact` still works without a template.

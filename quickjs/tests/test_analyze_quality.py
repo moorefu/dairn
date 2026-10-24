@@ -75,14 +75,14 @@ class AnalyzeQualityCapability(unittest.TestCase):
     # ---- A-02: analyze run + suite ----
     def test_analyze_run_produces_analysis_run_v1(self):
         base = self.commit()
-        (self.root / 'api.go').write_text('package hello\nfunc A(){}\n')
+        (self.root / 'api.py').write_text('def a():\n    return 1\n')
         self.commit('change')
-        self.run_dairn('analyzers', 'init', '--template', 'go', '--id', 'go-api', '--apply')
-        out = self.obj('analyze', 'run', 'go-api', '--base', base, '--json')
+        self.run_dairn('analyzers', 'init', '--template', 'python', '--id', 'py-api', '--apply')
+        out = self.obj('analyze', 'run', 'py-api', '--base', base, '--json')
         run = out['runs'][0]
         self.assertEqual(run['schema'], 'dairn.analysis-run.v1')
         self.assertEqual(run['status'], 'completed')
-        self.assertEqual(run['analyzer_id'], 'go-api')
+        self.assertEqual(run['analyzer_id'], 'py-api')
         self.assertEqual(run['assurance'], 'local-observed')
         self.assertIn('never a gate verdict', run['note'])
         self.assertTrue(run['changes_count'] >= 1)
@@ -90,7 +90,7 @@ class AnalyzeQualityCapability(unittest.TestCase):
 
     def test_suite_execution_and_unknown_target(self):
         base = self.commit()
-        self.run_dairn('analyzers', 'init', '--template', 'go', '--id', 'a1', '--apply')
+        self.run_dairn('analyzers', 'init', '--template', 'python', '--id', 'a1', '--apply')
         doc = json.loads((self.root / '.dairn/analyzers.json').read_text())
         doc['suites'] = [{'id': 's-all', 'analyzers': ['a1']}]
         self.registry(doc)
@@ -153,11 +153,11 @@ class AnalyzeQualityCapability(unittest.TestCase):
         (self.root / 'reports').mkdir()
         (self.root / 'reports/security.sarif').write_text(json.dumps(SARIF))
         base = self.commit()
-        (self.root / 'api.go').write_text('package hello\nfunc B(x int){}\n')
+        (self.root / 'api.py').write_text('def b(x):\n    return x\n')
         self.commit('change')
-        self.run_dairn('analyzers', 'init', '--template', 'go', '--id', 'go-api', '--apply')
+        self.run_dairn('analyzers', 'init', '--template', 'python', '--id', 'py-api', '--apply')
         self.registry({'schema': 'dairn.analyzers.v1', 'analyzers': [
-            {'id': 'go-api', 'domain': 'surface', 'execution': {'argv': ['go', 'run', 'tools/dairn/analyzers/go/main.go'], 'cwd': '.', 'timeout_seconds': 120}},
+            {'id': 'py-api', 'domain': 'surface', 'execution': {'argv': ['python3', 'tools/dairn/analyzers/python/main.py'], 'cwd': '.', 'timeout_seconds': 120}},
             {'id': 'ci-sarif', 'domain': 'security', 'mode': 'import',
              'report': {'path': 'reports/security.sarif', 'format': 'sarif-2.1.0'}},
         ]})
@@ -167,7 +167,7 @@ class AnalyzeQualityCapability(unittest.TestCase):
              'producer': 'ci-sarif', 'enforcement': 'required'},
             {'id': 'surface-stable', 'attribute': 'compatibility', 'type': 'regression',
              'metric': 'surface.changes', 'operator': '<=', 'threshold': 0,
-             'producer': 'go-api', 'enforcement': 'required'},
+             'producer': 'py-api', 'enforcement': 'required'},
             {'id': 'missing-data', 'attribute': 'coverage', 'type': 'trend',
              'metric': 'tests.failed', 'operator': '<=', 'threshold': 0,
              'producer': 'no-such-analyzer', 'enforcement': 'advisory'},

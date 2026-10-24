@@ -251,11 +251,11 @@ dairn check --base origin/main
 ```sh
 # 分析器目录、模板接入与显式 surface 精确影响分析
 dairn analyzers list
-dairn analyzers init --template go --id go-api --apply
-dairn guide impact --base origin/main --analyzer go-api
+dairn analyzers init --template python --id py-api --apply
+dairn guide impact --base origin/main --analyzer py-api
 
 # 受控执行：生成 advisory Analysis Run（不是 Check Run）
-dairn analyze run go-api --base origin/main
+dairn analyze run py-api --base origin/main
 dairn analyze run --suite service-quality --base origin/main
 
 # 只读导入已有报告（SARIF/JUnit/Dairn JSON；恒为 unverified-import）
@@ -397,10 +397,10 @@ Dairn 不重新实现上述工具的全部分析算法。它统一管理可用�
 项目分析配置统一放在 `.dairn/analyzers.json`，项目分析脚本放在 `tools/dairn/analyzers/`。分析请求为 `dairn.analyzer-request.v1`，响应为 `dairn.surface-result.v1`；受信 CI 环境要求外部固定的 `DAIRN_EXPECTED_ANALYZERS_SHA256`。
 
 ```sh
-dairn analyzers templates                      # 查看 11 语言模板
-dairn analyzers init --template go --id go-api --apply
+dairn analyzers templates                      # 查看 Python/JavaScript/Java/Shell 模板
+dairn analyzers init --template python --id py-api --apply
 dairn analyzers doctor                         # 只探测本地工具链
-dairn guide impact --base origin/main --analyzer go-api
+dairn guide impact --base origin/main --analyzer py-api
 ```
 
 ### Analysis Run 不等于 Check Run

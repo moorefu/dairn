@@ -33,37 +33,19 @@ class MultilanguageAnalyzers(unittest.TestCase):
         self.git('init','-q');self.git('config','user.email','test@example.test');self.git('config','user.name','Test')
     def test_catalog_and_readonly_plan(self):
         names={x['name'] for x in self.obj('analyzers','templates')}
-        self.assertEqual(names,{'go','python','javascript','typescript','java','rust','php','lua','shell','ruby','csharp'})
+        self.assertEqual(names,{'python','javascript','java','shell'})
         original=(self.root/'.dairn/analyzers.json').read_bytes()
         for name in names:
             p=self.obj('analyzers','init','--template',name,'--id',name+'-analyzer')
             self.assertFalse(p['applied'])
             self.assertEqual(original,(self.root/'.dairn/analyzers.json').read_bytes())
             self.assertTrue(all(not (self.root/x).exists() for x in p['files'][:-1]))
-    def test_multifile_install_and_validation(self):
-        for name in ('rust','csharp'):
-            p=self.obj('analyzers','init','--template',name,'--id',name+'-analyzer','--apply')
-            self.assertGreater(len(p['files']),2)
-            self.assertTrue(all((self.root/x).exists() for x in p['files']))
-            self.assertIn('target/\n' if name=='rust' else 'bin/\nobj/\n',(self.root/'tools/dairn/analyzers'/name/'.gitignore').read_text())
-        installed=self.obj('analyzers','list')['configured']
-        self.assertEqual(len(installed),2)
-        self.run_dairn('validate')
-        doctor=self.run_dairn('analyzers','doctor',ok=False)
-        report=json.loads(doctor.stdout)
-        self.assertEqual(doctor.returncode,2)  # missing Cargo/dotnet must not be reported as ready
-        self.assertEqual(len(report['tools']),2)
-        self.assertFalse(report['ready'])
     def test_real_language_execution_through_quickjs(self):
         self.git_setup()
         cases={
-            'go':('api_extra.go','package hello\nfunc Extra(){}\n','package hello\nfunc Extra(x int){}\n'),
             'python':('api.py','def api():\n return 1\n','def api(x):\n return x\n'),
             'javascript':('api.mjs','export function api() {}\n','export function api(x) {}\n'),
-            'typescript':('api.ts','export function api(): void {}\n','export function api(x: number): void {}\n'),
             'java':('Api.java','public class Api {\n public void example() {}\n}\n','public class Api {\n public void example(int x) {}\n}\n'),
-            'php':('api.php','<?php\nfunction example() {}\n','<?php\nfunction example($x) {}\n'),
-            'ruby':('api.rb','def example()\nend\n','def example(x)\nend\n'),
             'shell':('api.sh','example() { :; }\n','example() { echo ok; }\n')
         }
         for name,(filename,before,_) in cases.items():
@@ -79,13 +61,12 @@ class MultilanguageAnalyzers(unittest.TestCase):
                 self.assertEqual(impact['analyzer_analysis']['source'],'analyzer-run')
                 self.assertTrue(any(c['path']==filename for c in impact['analyzer_analysis']['changes']),str(impact['analyzer_analysis']))
     def test_collision_is_atomic(self):
-        p=self.root/'tools/dairn/analyzers/rust/Cargo.toml';p.parent.mkdir(parents=True);p.write_text('existing')
+        p=self.root/'tools/dairn/analyzers/java/Main.java';p.parent.mkdir(parents=True);p.write_text('existing')
         original=(self.root/'.dairn/analyzers.json').read_bytes()
-        result=self.run_dairn('analyzers','init','--template','rust','--id','rust-id','--apply',ok=False)
+        result=self.run_dairn('analyzers','init','--template','java','--id','java-id','--apply',ok=False)
         self.assertNotEqual(result.returncode,0)
         self.assertEqual(p.read_text(),'existing')
         self.assertEqual(original,(self.root/'.dairn/analyzers.json').read_bytes())
-        self.assertFalse((self.root/'tools/dairn/analyzers/rust/src/main.rs').exists())
     def test_symlink_ancestor_rejected(self):
         outside=Path(self.temp.name)/'outside';outside.mkdir()
         (self.root/'tools').symlink_to(outside,target_is_directory=True)

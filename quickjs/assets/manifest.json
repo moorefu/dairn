@@ -518,21 +518,6 @@
     },
     {
       "type": "analyzer-templates",
-      "path": "csharp-surface/Program.cs",
-      "sha256": "9cf0cf54292f0df17d0aca0e16a3e35ef7ea462185b49530d76f95ad9530d8d4"
-    },
-    {
-      "type": "analyzer-templates",
-      "path": "csharp-surface/Surface.csproj",
-      "sha256": "031da6a6f6d810b9f23ffe7818f3acefb7b0ff54b0eb8c6752735ad58d254904"
-    },
-    {
-      "type": "analyzer-templates",
-      "path": "go-surface/main.go",
-      "sha256": "7887ef64777a8c7f732af950649375f198635f96e8c6e81072198c4ce3d02d84"
-    },
-    {
-      "type": "analyzer-templates",
       "path": "java-surface/Main.java",
       "sha256": "38a7ff179ad3d73da97efc6664f07335e8758d11c114fc9d39c3575ea520ca30"
     },
@@ -543,48 +528,13 @@
     },
     {
       "type": "analyzer-templates",
-      "path": "lua-surface/main.lua",
-      "sha256": "45b1c06961489060aff54126435e953ea455170f10430770a889940de8568d17"
-    },
-    {
-      "type": "analyzer-templates",
-      "path": "php-surface/main.php",
-      "sha256": "dfc6088190f19c2155139898a1674f162da3ae293a6b04286d82749184af0aa7"
-    },
-    {
-      "type": "analyzer-templates",
-      "path": "python-surface/__pycache__/main.cpython-313.pyc",
-      "sha256": "b0bf61f50cc22e4f8c5efaeb66a03e827e0009a30bf8250bad19d77573bd429d"
-    },
-    {
-      "type": "analyzer-templates",
       "path": "python-surface/main.py",
-      "sha256": "5c998d4751ad9c9fa7200c2115835cdc9df82c75053fca683688ddcf9e033249"
-    },
-    {
-      "type": "analyzer-templates",
-      "path": "ruby-surface/main.rb",
-      "sha256": "9fb82227710145c2e64f536261679170dce2a1f24c7a4bc584363b414ab3a587"
-    },
-    {
-      "type": "analyzer-templates",
-      "path": "rust-surface/Cargo.toml",
-      "sha256": "ddf461ae8d2722dabd57e31e6b343fd15f7ab0eb92015e6c6fac68f8c7597239"
-    },
-    {
-      "type": "analyzer-templates",
-      "path": "rust-surface/main.rs",
-      "sha256": "2a9fe0c303f3ac5ceef7c1f5c64b5763bf27b05cff39ff4a63216924c641a3c3"
+      "sha256": "83198939d016f63225acbee91747e433a4642abd353d637407d12af19cfadb5d"
     },
     {
       "type": "analyzer-templates",
       "path": "shell-surface/main.sh",
       "sha256": "8f8a382b5e7e11ece98d7f220ce734e8396d02d687afcece53fbc225f01a6e91"
-    },
-    {
-      "type": "analyzer-templates",
-      "path": "typescript-surface/main.mjs",
-      "sha256": "11513b4e9cd32e602dcbf7103dc6dc6dc041999782c6bf108f296980d02703ee"
     }
   ],
   "engine_sources": [
