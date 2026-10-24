@@ -1,5 +1,6 @@
 import {addRelationsToImpact} from './relations.mjs';
-import {runStub,applyStubImpact} from './stubs.mjs';
+import {runAnalyzer} from './analyzer-runner.mjs';
+import {applyAnalyzerImpact} from './analyzers.mjs';
 /* Deterministic, bounded, redaction-conscious project facts and doc drift.
  * Only observed paths, declared dependencies and configured commands; no generated prose.
  * Snapshot is project-owned and NEVER refreshed during drift detection.
@@ -227,9 +228,9 @@ export function impactReport(h,root,config,opts={}){
     counts:{changes:impacts.length,affected_documents:r.affected_docs.length},impacts,edges,graph,downstream_modules:[...downstream].sort(),affected_docs:r.affected_docs,
     note:'Static heuristic: identifies potential impacts, not semantic proof or an approval. Review source and spec; retain evidence.'};
   addRelationsToImpact(h,root,report,r.current,{base:opts.base||null});
-  if(opts.precision){
-    const stub=runStub(h,root,opts.precision,{base:opts.base||null});
-    applyStubImpact(report,stub);
+  if(opts.analyzer){
+    const analyzer=runAnalyzer(h,root,opts.analyzer,{base:opts.base||null});
+    applyAnalyzerImpact(report,analyzer);
   }
   return report;
 }

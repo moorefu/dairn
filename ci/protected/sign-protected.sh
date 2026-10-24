@@ -1,6 +1,6 @@
 #!/bin/sh
 # Isolated signer: verify same-pipeline evidence bytes, then sign the statement.
-# No project tests, no stubs, no work ledger, no checkout of PR code run here.
+# No project tests, no analyzers, no work ledger, no checkout of PR code run here.
 set -eu
 : "${DAIRN_SIGNING_PRIVATE_KEY_PATH:?Private-key file path must be CI-controlled}"
 : "${DAIRN_TRUSTED_CI_PUBLIC_KEY:?Public-key file must be CI-controlled}"

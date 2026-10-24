@@ -241,14 +241,14 @@ class AgentProtocol(unittest.TestCase):
         self.assertEqual(rep['relationships']['explicit_bindings'],1)
         self.assertIn('relation-registry',[x['category'] for x in rep['impacts']])
         self.assertIn('project.auth',str(rep['impacts']))
-    def configure_stub(self):
-        analyzer=RUNTIME/'examples/stubs/go-surface/main.go'
-        (self.root/'.dairn/stubs.json').write_text(json.dumps({'schema':1,'stubs':[{'id':'surface','kind':'surface-analysis','argv':['go','run',str(analyzer)],'cwd':'.','timeout_seconds':120}]}))
-    def test_project_stub_uses_go_toolchain(self):
-        self.configure_stub();base=self.commit_base();self.go_change()
-        rep=self.obj('guide','impact','--base',base,'--precision','surface','--root',self.root)
-        self.assertEqual(rep['stub_analysis']['stub_id'],'surface')
-        self.assertTrue(rep['stub_analysis']['changes'])
+    def configure_analyzer(self):
+        analyzer=RUNTIME/'examples/analyzers/go-surface/main.go'
+        (self.root/'.dairn/analyzers.json').write_text(json.dumps({'schema':'dairn.analyzers.v1','analyzers':[{'id':'surface','domain':'surface','mode':'execute','execution':{'argv':['go','run',str(analyzer)],'cwd':'.','timeout_seconds':120}}]}))
+    def test_project_analyzer_uses_go_toolchain(self):
+        self.configure_analyzer();base=self.commit_base();self.go_change()
+        rep=self.obj('guide','impact','--base',base,'--analyzer','surface','--root',self.root)
+        self.assertEqual(rep['analyzer_analysis']['analyzer_id'],'surface')
+        self.assertTrue(rep['analyzer_analysis']['changes'])
     def test_spec_binding_deleted_symbol_still_affects_baseline(self):
         self.add_relation();self.cmd('guide','facts','--apply','--root',self.root,ok=True)
         base=self.commit_base()
@@ -256,15 +256,15 @@ class AgentProtocol(unittest.TestCase):
         rep=self.obj('guide','impact','--base',base,'--root',self.root)
         self.assertEqual(rep['relationships']['explicit_bindings'],1)
     def test_multiline_go_ast_signature_detected(self):
-        self.configure_stub();base=self.commit_base()
+        self.configure_analyzer();base=self.commit_base()
         src=self.root/'hello.go';src.write_text('package hello\n\nfunc Greeting(\n    user string,\n) string { return user }\n')
-        rep=self.obj('guide','impact','--base',base,'--precision','surface','--root',self.root)
-        self.assertTrue(any(x['path']=='hello.go' and 'func:Greeting' in x['symbol'] for x in rep['stub_analysis']['changes']))
+        rep=self.obj('guide','impact','--base',base,'--analyzer','surface','--root',self.root)
+        self.assertTrue(any(x['path']=='hello.go' and 'func:Greeting' in x['symbol'] for x in rep['analyzer_analysis']['changes']))
         self.assertEqual(rep['status'],'review-required')
     def test_invalid_go_syntax_fails_precise_analysis(self):
-        self.configure_stub();base=self.commit_base()
+        self.configure_analyzer();base=self.commit_base()
         src=self.root/'hello.go';src.write_text('package hello\nfunc Greeting(\n')
-        self.assertNotEqual(self.cmd('guide','impact','--base',base,'--precision','surface','--root',self.root).returncode,0)
+        self.assertNotEqual(self.cmd('guide','impact','--base',base,'--analyzer','surface','--root',self.root).returncode,0)
     def test_task_records_do_not_escalate_to_l2(self):
         base=self.commit_base()
         self.work('start','Do some housekeeping','--id','tidy')

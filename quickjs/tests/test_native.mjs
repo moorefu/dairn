@@ -17,7 +17,7 @@ if(!failed)throw new Error('Risk downgrade accepted');
 // risk=L2、governance_mode=G2、risk_triggers 含 governance-critical，且
 // moduleSelection 必须返回全部模块；普通低信任工具/示例保持 L1，数据目录仍为 L0。
 const criticalPaths=['ci/protected/build-protected.sh','ci/templates/github-protected.yml','tools/bootstrap.sh','tools/bootstrap.ps1','tools/build.py','tools/build.cjs','tools/build-npm.sh','tools/build-zip.mjs','tools/zip.mjs','tools/dairn_build_backend.py','tools/release_config.py','tools/release.json','tools/publish-release.py','bin/dairn.cjs','dairn.sh','dairn.cmd','build.sh','build.cmd','install.sh','package.json','pyproject.toml','src/dairn/cli.py','src/dairn/__init__.py','quickjs.lock.json','AGENTS.md','Makefile','.gitlab-ci.yml','.github/rulesets/main-branch.json'];
-const ordinaryPaths=['tools/verify-linux.py','tools/verify-packages.py','tools/verify-podman.py','tools/verify-windows.py','tools/checksums.py','tools/prepare-regression.py','tools/source_workspace.py','examples/stubs/go-surface/main.go','examples/review-record.json'];
+const ordinaryPaths=['tools/verify-linux.py','tools/verify-packages.py','tools/verify-podman.py','tools/verify-windows.py','tools/checksums.py','tools/prepare-regression.py','tools/source_workspace.py','examples/analyzers/go-surface/main.go','examples/review-record.json'];
 const dataPaths=['.dairn/governance/evidence/run-qjs-checks.json','.dairn/work/task-1.json'];
 const selectPolicy={schema_version:1,modules:[{path:'.'},{path:'tools'}]};
 for(const p of criticalPaths) {
@@ -33,6 +33,16 @@ for(const p of ordinaryPaths) {
 }
 for(const p of dataPaths) {const c=classify([p]);eq(c.risk,'L0');eq(c.governance_mode,'G0');}
 // 普通模块内改动只选择相关模块，不应误触发全模块检查。
-if(moduleSelection(selectPolicy,['examples/stub.go']).length>=selectPolicy.modules.length)throw new Error('ordinary change selected all modules');
+if(moduleSelection(selectPolicy,['examples/analyzer.go']).length>=selectPolicy.modules.length)throw new Error('ordinary change selected all modules');
+// 策略级快照排除：合法生成物模式通过；非数组、越界、过宽或非字符串模式拒绝。
+const validPolicy={schema_version:1,project:'service',modules:[{name:'app',path:'.',profiles:['generic'],
+  checks:{lint:{argv:['true']},unit:{argv:['true']},integration:{argv:['true']},build:{argv:['true']}}}],
+  required_checks:{L0:['lint'],L1:['lint','unit'],L2:['lint','unit','integration','build']}};
+if(policyValidate(validPolicy).length)throw new Error('baseline policy rejected: '+policyValidate(validPolicy).join('; '));
+if(policyValidate({...validPolicy,snapshot_exclusions:['/dist/','__pycache__/','*.pyc']}).length)throw new Error('valid snapshot_exclusions rejected');
+if(policyValidate({...validPolicy,snapshot_exclusions:null}).length)throw new Error('null snapshot_exclusions rejected');
+for(const bad of ['dist/','../escape/',['C:/absolute/'],['*'],['a\\b'],[42],[],['/']]){
+  if(!policyValidate({...validPolicy,snapshot_exclusions:bad}).length)throw new Error('invalid snapshot_exclusions accepted: '+JSON.stringify(bad));
+}
 print('PASS: QuickJS native portable policy cases');
 std.exit(0);

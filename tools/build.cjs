@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {spawnSync} = require('node:child_process');
 const root = path.resolve(__dirname, '..');
-const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:alpha|beta|rc)\.(?:0|[1-9][0-9]*))?$/;
+const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:alpha|beta|rc)\.(?:0|[1-9][0-9]*)|nightly\.[1-9][0-9]{13}))?$/;
 function packageVersion() {
   return JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 }

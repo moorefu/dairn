@@ -1,0 +1,21 @@
+{
+  "schema": "dairn.analyzers.v1",
+  "analyzers": [
+    {
+      "id": "py-surface",
+      "domain": "surface",
+      "mode": "execute",
+      "capabilities": [
+        "quality.surface-diff"
+      ],
+      "execution": {
+        "argv": [
+          "python",
+          "tools/dairn/analyzers/python/main.py"
+        ],
+        "cwd": ".",
+        "timeout_seconds": 120
+      }
+    }
+  ]
+}

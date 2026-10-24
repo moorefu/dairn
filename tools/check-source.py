@@ -1,0 +1,92 @@
+"""执行 Dairn 源码仓库的真实门禁，不安装工具或依赖。"""
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+# Windows 上 Cosmopolitan 用 _COSMO_FDS_V2 向子进程传递 fd 表；原生工具
+# （Python/Node 等）再启动 APE 孙进程时，该变量指向未经继承的句柄，表现为
+# stdout 丢失或 0xC0000005。源码门禁的全部子进程必须运行在干净环境里。
+if os.name == 'nt':
+    for _name in ('_COSMO_FDS_V2', '_COSMO_FDS'):
+        os.environ.pop(_name, None)
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / 'validation/source-checks'
+PYTHON = [sys.executable, '-B', '-X', 'utf8']
+CLI = ROOT / ('dairn.cmd' if os.name == 'nt' else 'dairn.sh')
+
+# Windows PowerShell 可能以 GBK 连接 stdout；门禁日志包含中文路径和原始
+# QuickJS 错误时，报告器自身不能因为编码异常遮蔽真正的退出码。
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, 'reconfigure'):
+        stream.reconfigure(encoding='utf-8', errors='replace')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('stage', choices=('lint', 'unit', 'integration', 'build'))
+    args = parser.parse_args()
+    OUT.mkdir(parents=True, exist_ok=True)
+    temp = OUT / 'tmp'
+    temp.mkdir(exist_ok=True)
+    env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1',
+           'TMPDIR': str(temp), 'TEMP': str(temp), 'TMP': str(temp)}
+    runtime = ROOT / 'runtime/dairn-embedded.com'
+    if not runtime.is_file():
+        parser.error('缺少 runtime/，请先运行 python tools/build.py')
+    env['DAIRN_QJS_BIN'] = str(runtime)
+    native = [str(runtime)] if os.name == 'nt' else ['/bin/sh', str(runtime)]
+    artifact_dir = None
+    if args.stage == 'lint':
+        commands = [[str(CLI), 'docs', 'check'],
+                    PYTHON + ['-m', 'unittest', 'quickjs.tests.test_assets_lint', '-v']]
+    elif args.stage == 'unit':
+        commands = [native + [str(ROOT / 'quickjs/tests' / name)] for name in
+                    ('test_core.mjs', 'test_native.mjs', 'test_governance_native.mjs',
+                     'test_handoff_native.mjs', 'test_gov_native.mjs')]
+        commands += [PYTHON + ['-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_*.py', '-v']]
+    elif args.stage == 'integration':
+        env['DAIRN_TEST_EVIDENCE_DIR'] = str(OUT / 'integration')
+        commands = [native + [str(ROOT / 'quickjs/tests/test_host_native.mjs')],
+                    PYTHON + ['-m', 'unittest', 'quickjs.tests.test_integration_light',
+                              'quickjs.tests.test_doctor', '-v']]
+    else:
+        npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
+        if not npm:
+            parser.error('缺少 npm；构建门禁不会自动安装工具')
+        artifact_dir = Path(tempfile.mkdtemp(prefix='build-', dir=OUT))
+        commands = [PYTHON + ['tools/build.py', '--out', str(artifact_dir)],
+                    [npm, 'run', 'build', '--', '--out', str(artifact_dir)],
+                    PYTHON + ['tools/checksums.py', '--dist', str(artifact_dir)]]
+    results = []
+    for index, command in enumerate(commands, 1):
+        log = OUT / (args.stage + '-' + str(index) + '.log')
+        try:
+            with log.open('wb') as stream:
+                result = subprocess.run(command, cwd=ROOT, env=env, stdout=stream,
+                                        stderr=subprocess.STDOUT, timeout=3000)
+            code = result.returncode
+            error = None
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            code, error = 1, str(exc)
+        results.append({'argv': command, 'exit_code': code, 'log': str(log.relative_to(ROOT)), 'error': error})
+        print(args.stage, index, '退出码', code, '日志', log.relative_to(ROOT), flush=True)
+        if code:
+            print(error or log.read_text(encoding='utf-8', errors='replace')[-6000:], flush=True)
+            break
+    passed = len(results) == len(commands) and all(item['exit_code'] == 0 for item in results)
+    (OUT / (args.stage + '.json')).write_text(json.dumps(
+        {'schema': 1, 'stage': args.stage, 'passed': passed,
+         'artifact_dir': str(artifact_dir.relative_to(ROOT)) if artifact_dir else None,
+         'results': results},
+        ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    return 0 if passed else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -34,21 +34,25 @@ Agent 与 CI 约定：
 - launcher、`launcher.json` 与 vendored 运行时只是执行入口和完整性校验，不是审批或 CI 签名证据；信任仍由受保护 CI 与外部 pin 提供。
 - 完整契约（`launcher.json` 字段、`--vendor-runtime` 校验、`work next` 的 `invocation` 块、故障排查）见发行资产 `quickjs/assets/specs/engineering/launcher.md`，可用 `dairn docs show dairn.engineering.launcher` 读取。
 
+## 检查输入快照与生成物排除
+
+`dairn check` 在技术检查前后捕获工作树快照，Run 的 `input_coverage` 记录输入闭包是否完整：存在未声明的忽略文件时证据记为 `invalidated`，即使技术检查都通过也不能作为推进或门禁证据。生成物、缓存和构建输出通过项目自有策略 `.dairn/governance/project.json` 的 `snapshot_exclusions` 声明；模式支持目录（`build/`）、锚定路径与文件基名（`*.pyc`），只能匹配被 Git 忽略的路径，命中已跟踪或未被忽略的未跟踪输入时 fail closed。策略内容进入 Run 的 `policy_sha256`，受保护 CI 用外部 `DAIRN_EXPECTED_POLICY_SHA256` 固定，不能用排除项隐藏源码、测试或配置。完整契约见发行资产 `quickjs/assets/specs/engineering/evidence-snapshot.md`，可用 `dairn docs show dairn.engineering.evidence-snapshot` 读取。
+
 ## 资产一致性与发布门禁
 
 `dairn docs check` 校验发行版内嵌的 `specs/` 与 `skills/` 资产：frontmatter 必填字段、稳定 ID 唯一性、`related` 与相对链接、Skill 与 `agents/openai.yaml` 的权限声明一致性，以及正文引用的 CLI 命令是否真实存在；任何 `make`/`scripts/*.py` 旧命令引用都会失败。发布构建依次执行 `python tools/build.py`、`npm run build`、`sh ./dairn.sh docs check` 与 `python -m unittest quickjs.tests.test_assets_lint`，制品矩阵的各类安装包也会执行 `docs check`，失败即阻断发布。`dairn docs find/show/context` 从 spec frontmatter 读取稳定 ID，不依赖手工清单。
 
-## 项目自有分析模板
+## 项目自有分析模板（Dairn Analyzers）
 
 ```sh
-dairn stubs templates --root ./service
-dairn stubs init --root ./service --template go --id surface
-dairn stubs init --root ./service --template go --id surface --apply
-dairn stubs doctor --root ./service
-dairn guide impact --root ./service --base origin/main --precision surface
+dairn analyzers templates --root ./service
+dairn analyzers init --root ./service --template python --id surface
+dairn analyzers init --root ./service --template python --id surface --apply
+dairn analyzers doctor --root ./service
+dairn guide impact --root ./service --base origin/main --analyzer surface
 ```
 
-默认只规划，`--apply` 才复制到 `tools/dairn/stubs/` 并更新项目自有的 `.dairn/stubs.json`。Dairn 不下载分析器工具链；项目可以审查、修改或替换模板。
+默认只规划，`--apply` 才复制到 `tools/dairn/analyzers/` 并更新项目自有的 `.dairn/analyzers.json`（`dairn.analyzers.v1`）。Dairn 不下载分析器工具链；项目可以审查、修改或替换模板。旧 `dairn stubs` 命令与 `.dairn/stubs.json` 协议已按破坏性更名移除：旧命令直接报错，旧配置出现即拒绝（`UNSUPPORTED_LEGACY_ANALYZER_CONFIG`），无兼容别名、无自动迁移。
 
 | 模板 | 依赖与分析方式 |
 | --- | --- |
@@ -65,7 +69,13 @@ dairn guide impact --root ./service --base origin/main --precision surface
 
 这些模板输出分析线索，不构成语义兼容证明或签名信任依据。`doctor` 只探测本地依赖；缺少显式请求的分析器、超时或无效响应会失败。
 
-分析协议为 `dairn-stub-v1`。内核直接执行配置的 argv，追加绝对路径的请求和响应 JSON，不拼接 shell 命令。请求包含 `schema`、`kind`、`stub_id`、`root`、`base_commit`、`head_commit`、`protocol`；响应回传身份并提供 `changes`。内核验证结构、路径、大小与超时。脏工作区不复用分析缓存，缓存不作为签名门禁证据。Windows 的 `.cmd/.bat` 分析器需显式经过 `cmd.exe`。
+分析协议为 `dairn.analyzer-request.v1` / `dairn.surface-result.v1`。内核直接执行配置的 argv，追加绝对路径的请求和响应 JSON，不拼接 shell 命令。请求包含 `schema`、`analyzer_id`、`domain`（当前仅 `surface`）、`subject{source_commit,base_commit}`、`root`、`scope`、`limits`；响应回传身份并提供 `changes`。内核验证结构、路径、大小与超时。受信 CI 环境要求外部固定的 `DAIRN_EXPECTED_ANALYZERS_SHA256`。脏工作区不复用分析缓存（`.dairn/cache/analyzers/`），缓存不作为签名门禁证据。Windows 的 `.cmd/.bat` 分析器需显式经过 `cmd.exe`。
+
+## 分析执行与质量判定（advisory 层）
+
+`dairn analyze run <id> | --suite <id> [--base <ref>]` 受控执行分析器并生成 `dairn.analysis-run.v1` 记录（completed/tool-error/timeout/report-error/invalidated/not-run）；`dairn analyze import <id> [--artifact PATH]` 只读导入 SARIF 2.1.0 / JUnit XML / Dairn JSON 报告，来源恒为 `unverified-import`。Analysis Run 与 Quality Observation 都是机器观察，不是 Check Run，更不是 Gate 结论。
+
+`dairn quality fitness [--json]` 读取可选的 `.dairn/governance/quality-goals.json`（`dairn.quality-goals.v1`），对每个目标的 producer 现场执行或导入并输出 PASS/FAIL/UNKNOWN/ADVISORY；缺数据输出 UNKNOWN 而非猜 PASS。`dairn capability plan [--base <ref>]` 输出 advisory 的 `dairn.participation-plan.v1`（needs/gaps），必需能力缺失时退出码 3；计划不含 gate_override/approved 之类可提升信任的字段，也不启动任何模型。
 
 ## 受保护 CI
 
@@ -79,15 +89,15 @@ dairn guide impact --root ./service --base origin/main --precision surface
 
 签名任务挂载密钥时不得执行项目测试或分析器。密钥应由独立 runner 挂载或 HSM/KMS 按任务授权；不要放入所有受保护分支任务都可读取的 GitLab 变量。GitHub 环境与 runner 组、GitLab 标签与隔离策略、分支保护及 artifact 来源须由管理员配置。模板用于合并后的受保护分支证据，合并前检查仍由分支保护负责。
 
-受保护构建在受保护分支的检出目录上运行 `dairn check --task`，因此要求合并进受保护分支的账本里，目标任务仍处于 **active implement** 阶段（`work.mjs` 的 `prepareCheckTask` 会拒绝其他状态）。该命令同时会重新校验已有证据：review/synchronize 证据绑定了记录时的 HEAD，合并产生新提交后这些证据会因 `head` 过期而被拒绝。因此本地流程与受保护链必须显式对齐：推荐让账本在合并时停在 implement active，且不把本地 review/sync 证据带进受保护构建的检出；由受保护构建生成当前提交的机器证据并签名，签名完成后再补记本地流程状态。若合并后需要保留 review/sync 证据，应改为在受保护构建之后基于合并提交重新记录，而不是复用合并前的账本字段。项目应把这一时序写成自己的 CI 运行手册，并用 `dairn hook pre-push` 在推送前检查活跃任务证据是否仍对应当前 HEAD。
+受保护构建在洁净的受保护分支检出上运行独立的 `dairn check --base <可信基线>`，不依赖 Work 任务或账本阶段。它生成绑定当前合并提交的 Run 与 bundle，独立签名任务校验同一流水线的来源和摘要后签名，发布任务再次验签并归档到证据分支。Work 只能引用已有 Run；本地 review/synchronize 证据绑定各自记录时的 HEAD，不能复用为合并提交的证明。项目应将 PR 检查、合并后证据、版本发布和观察验收的顺序写入运行手册。
 
 外部可信配置须固定：
 
 - `DAIRN_EXPECTED_APE_SHA256`：APE 文件摘要。
 - `DAIRN_EXPECTED_RUNTIME_SHA256`：经审查初始化得到的嵌入式 manifest 指纹。
 - `DAIRN_EXPECTED_POLICY_SHA256`：获准的 `.dairn/governance/project.json` 摘要。
-- `DAIRN_EXPECTED_STUBS_SHA256`：需要执行获准项目分析器时的 manifest 摘要。
-- `DAIRN_TASK_ID`、`DAIRN_TRUSTED_BASE_REF`：任务与可信差异基线。
+- `DAIRN_EXPECTED_ANALYZERS_SHA256`：需要执行获准项目分析器时的 `.dairn/analyzers.json` 摘要（旧 `DAIRN_EXPECTED_STUBS_SHA256` 已随破坏性更名移除）。
+- `DAIRN_TRUSTED_BASE_REF`：可信差异基线；独立证据链不要求任务 ID。
 
 生成的 CI 模板以 `DAIRN_BIN_VALUE="${DAIRN_CI_BIN:-./.dairn/bin/dairn}"` 为入口并调用 `sh "$DAIRN_BIN_VALUE" …`。受保护构建/签名任务应由管理员提供外部 `DAIRN_CI_BIN`，并用外部 `DAIRN_EXPECTED_APE_SHA256` / `DAIRN_EXPECTED_RUNTIME_SHA256` pin 覆盖项目内 vendored 运行时；PR 中提交或替换的 `.dairn/runtime/` 二进制不可信，不能作为受保护任务的执行来源。
 
@@ -95,11 +105,11 @@ dairn guide impact --root ./service --base origin/main --precision surface
 
 ```sh
 # 无私钥的构建任务
-/opt/dairn/ci/protected/build-protected.sh "$DAIRN_TASK_ID" "$DAIRN_TRUSTED_BASE_REF"
+/opt/dairn/ci/protected/build-protected.sh "$DAIRN_TRUSTED_BASE_REF"
 # 同一流水线的独立签名任务
-/opt/dairn/ci/protected/sign-protected.sh "$DAIRN_TASK_ID" "$DAIRN_TRUSTED_BASE_REF"
+/opt/dairn/ci/protected/sign-protected.sh
 ```
 
-签名器先验证机器门禁，准备声明并签名，再执行 `work verify --require-ci-attestation`。启用 `DAIRN_REQUIRE_CI_CONTEXT=true` 时，还要提供来自可信配置的仓库、ref、workflow、pipeline、build-job 预期值。声明绑定任务、检查集、源码提交、基线、策略、运行时与机器证据指纹。
+签名器校验 bundle、受保护提交及同一流水线来源，调用 `attest prepare` 生成声明，签名后再用外部受信公钥执行 `attest verify`。声明绑定 Run、源码提交、基线、策略、运行时及 CI 上下文；归档任务在推送证据分支前再次验签并读回比对，不依赖 Work 账本。
 
 签名使用自定义 detached Ed25519 格式，不属于 DSSE/in-toto/SLSA；它证明密钥签署了声明，不能独立证明构建节点正确执行了测试。来源保证仍依赖 CI 平台、隔离与 artifact 传输；本地环境变量模拟成功不代表生产签名部署已验证。

@@ -47,7 +47,7 @@ function run(args=[], options={}) {
 test('运行时 SHA256 与包内 APE 一致', () => {
   const meta = JSON.parse(fs.readFileSync(path.join(source,'runtime','runtime-integrity.json')));
   assert.equal(hash(ape),meta.sha256);
-  assert.match(meta.engine_version,/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/);
+  assert.match(meta.engine_version,/^\d+\.\d+\.\d+(?:-(?:(?:alpha|beta|rc)\.\d+|nightly\.[1-9]\d{13}))?$/);
   // 发布 tarball 的 package.json 版本由构建入口按标签统一改写；只有真实安装包
   // 才断言 package.json 与内嵌运行时版本一致（fixture 用的是仓库兜底版本）。
   if (process.env.DAIRN_NPM_PACKAGE) assert.equal(meta.engine_version,packageVersion);
@@ -165,7 +165,9 @@ test('空格路径完整传递且项目检查通过', () => {
     assert.ok(fs.existsSync(path.join(target,'AGENTS.md')));
     const check=run(['validate','--root',target],{cwd:tmp});
     assert.equal(check.status,0,check.stderr+'\n'+check.stdout);
-    assert.match(check.stdout,/stubs: PASS/);
+    for (const section of ['skills', 'docs', 'relations', 'analyzers']) {
+      assert.ok(check.stdout.split(/\r?\n/).includes(section + ': PASS'), check.stdout);
+    }
   } finally { fs.rmSync(tmp,{recursive:true,force:true}); }
 });
 

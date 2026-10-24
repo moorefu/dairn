@@ -20,7 +20,9 @@ CACHE_ENTRIES = ['dairn-native', 'dairn-native.sha256']
 @unittest.skipUnless((ROOT / 'runtime/dairn-embedded.com').is_file(), '请先构建运行时')
 class PythonLauncherTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix='dairn Python 启动 ')
+        temp_parent = ROOT / '.dairn/tmp'
+        temp_parent.mkdir(parents=True, exist_ok=True)
+        temporary = tempfile.TemporaryDirectory(prefix='dairn Python 启动 ', dir=str(temp_parent))
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.package = self.root / 'package'

@@ -17,7 +17,7 @@ const LEGACY_PY = new Set(['governance.py', 'docs.py', 'ci_base.py', 'ci_postche
 const REPO_SEGMENTS = /^(?:docs|\.dairn|\.agents|\.github|quickjs|tools|tests|runtime|src|examples|licenses|bin|dist|build)\//;
 const REPO_FILES = /^(?:AGENTS|README|CLAUDE|BUILDING|CHANGELOG|CONTRIBUTING|LICENSE|GOVERNANCE|pyproject|package|Makefile)\b/;
 const TOP_COMMANDS = ['version', '--version', 'init', 'adopt', 'detect', 'upgrade', 'doctor', 'validate',
-  'validate-core', 'scope', 'check', 'help', 'docs', 'skills', 'guide', 'workflow', 'work', 'stubs', 'tasks', 'hooks', 'hook', 'notes',
+  'validate-core', 'scope', 'check', 'help', 'docs', 'skills', 'guide', 'workflow', 'work', 'analyzers', 'analyze', 'quality', 'capability', 'tasks', 'hooks', 'hook', 'notes',
   'evidence', 'gate', 'attest', 'approval', 'handoff', 'governance', 'refactor'];
 const SUBCOMMANDS = {
   docs: ['find', 'show', 'context', 'check'],
@@ -26,7 +26,10 @@ const SUBCOMMANDS = {
   workflow: ['stages', 'recommend'],
   work: ['start', 'list', 'status', 'next', 'record', 'advance', 'skip', 'verify', 'finish', 'cancel', 'reopen',
     'link-check'],
-  stubs: ['list', 'templates', 'doctor', 'init'],
+  analyzers: ['list', 'templates', 'doctor', 'init'],
+  analyze: ['run'],
+  quality: ['fitness'],
+  capability: ['plan'],
   tasks: ['check', 'ready'],
   hooks: ['install'],
   notes: ['seal'],
@@ -158,7 +161,7 @@ const isPlaceholder = token => {
 function legacyReference(token) {
   const value = cleanToken(token);
   if (!value) return null;
-  // 只把明确的旧体系脚本路径当错误：项目自有分析器（如 tools/dairn/stubs/python/main.py）
+  // 只把明确的旧体系脚本路径当错误：项目自有分析器（如 tools/dairn/analyzers/python/main.py）
   // 仍是合法资产，不能因为以 .py 结尾就判 legacy。
   const base = value.split('/').pop();
   if (LEGACY_PY.has(base) || value.startsWith('scripts/') || value.includes('/scripts/')) {

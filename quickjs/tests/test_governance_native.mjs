@@ -141,6 +141,56 @@ test('SNAP-05 undeclared ignored inputs make coverage incomplete and list them',
   assert(snap.input_coverage === 'incomplete', 'coverage claimed complete with ignored inputs');
   assert(snap.uncovered_inputs.includes('vendor.bin'), 'uncovered_inputs missing entry');
 });
+
+test('SNAP-09 Dairn 内部证据和缓存不改变输入覆盖率或快照身份', () => {
+  const dir = workdir('snap9'); realHost.write(dir + '/README.md', 'r\n');
+  const before = captureWorktree(gitMockHost(snapState(dir)), dir, 30);
+  const after = captureWorktree(gitMockHost(snapState(dir, {
+    ignoredAll: ['.dairn/governance/evidence/run.json', '.dairn/tmp/capture.txt', '.dairn/cache/index.json']
+  })), dir, 30);
+  assert(after.input_coverage === 'declared-complete', '内部运行数据被误判为输入');
+  assert(sameWorktree(before, after), '生成内部证据使快照失效');
+});
+test('SNAP-10 策略 snapshot_exclusions 把声明生成物排除出输入闭包', () => {
+  const dir = workdir('snap10'); realHost.write(dir + '/README.md', 'r\n');
+  const options = {snapshot_exclusions: ['build-out/', '__pycache__/', '*.pyc']};
+  const before = captureWorktree(gitMockHost(snapState(dir, {
+    ignoredAll: ['build-out/app.bin', '__pycache__/mod.pyc']
+  })), dir, 30, [], options);
+  assert(before.input_coverage === 'declared-complete',
+    'coverage not complete: ' + JSON.stringify(before.uncovered_inputs));
+  assert(before.file_count === 1 && before.manifest[0].path === 'README.md', 'excluded output leaked into manifest');
+  assert(JSON.stringify(before.snapshot_exclusions) === JSON.stringify(options.snapshot_exclusions),
+    'declared exclusions not recorded for audit');
+  const after = captureWorktree(gitMockHost(snapState(dir, {
+    ignoredAll: ['build-out/app.bin', 'build-out/later.tmp', '__pycache__/mod.pyc', 'nested/dir/x.pyc']
+  })), dir, 30, [], options);
+  assert(sameWorktree(before, after), '生成物出现或变化改变了输入闭包身份');
+});
+test('SNAP-11 snapshot_exclusions 不能隐藏已跟踪或未忽略的未跟踪输入', () => {
+  const dir = workdir('snap11');
+  throws(() => captureWorktree(gitMockHost(snapState(dir, {tracked: ['src/app.js']})), dir, 30, [],
+    {snapshot_exclusions: ['src/']}), /tracked input/);
+  throws(() => captureWorktree(gitMockHost(snapState(dir, {untracked: ['notes.txt']})), dir, 30, [],
+    {snapshot_exclusions: ['*.txt']}), /untracked input/);
+});
+test('SNAP-12 snapshot_exclusions 拒绝不安全或过宽的模式', () => {
+  const dir = workdir('snap12');
+  for (const pattern of ['C:/abs/', '../up/', 'a\\b', '!keep/', '*', '**', 'a/../b/', '/', '//'])
+    throws(() => captureWorktree(gitMockHost(snapState(dir)), dir, 30, [], {snapshot_exclusions: [pattern]}));
+});
+test('SNAP-13 前导 / 锚定仓库根，未锚定模式匹配任意层级', () => {
+  const dir = workdir('snap13'); realHost.write(dir + '/README.md', 'r\n');
+  const ignored = ['build/app.bin', 'pkg/build/dep.bin'];
+  const anchored = captureWorktree(gitMockHost(snapState(dir, {ignoredAll: ignored})), dir, 30, [],
+    {snapshot_exclusions: ['/build/']});
+  assert(anchored.input_coverage === 'incomplete', 'anchored pattern covered nested same-name dir');
+  assert(JSON.stringify(anchored.uncovered_inputs) === JSON.stringify(['pkg/build/dep.bin']),
+    'anchored uncovered inputs wrong: ' + JSON.stringify(anchored.uncovered_inputs));
+  const free = captureWorktree(gitMockHost(snapState(dir, {ignoredAll: ignored})), dir, 30, [],
+    {snapshot_exclusions: ['build/']});
+  assert(free.input_coverage === 'declared-complete', 'unanchored pattern did not cover nested dirs');
+});
 test('SNAP-06 symlinked input is refused (fail closed)', () => {
   const dir = workdir('snap6'); realHost.write(dir + '/README.md', 'r\n'); realHost.write(dir + '/real.txt', 'data\n');
   try { os.symlink(dir + '/real.txt', dir + '/link.txt'); }
@@ -257,6 +307,15 @@ test('RUN-10/T41 undeclared ignored inputs invalidate instead of passing', () =>
   const run = runChecks(h, dir, {policy: POLICY, risk: 'L1', base: 'origin/main'});
   assert(run.execution.input_coverage === 'incomplete', 'coverage not reported');
   assert(run.status === 'invalidated', 'incomplete coverage still passed: ' + run.status);
+});
+
+test('RUN-11/T41 策略声明 snapshot_exclusions 后忽略生成物不再使证据失效', () => {
+  const dir = workdir('runT41b'); realHost.write(dir + '/README.md', 'x\n');
+  const policy = {...POLICY, snapshot_exclusions: ['vendor/']};
+  const h = gitMockHost(snapState(dir, {ignoredAll: ['vendor/dep.js']}));
+  const run = runChecks(h, dir, {policy, risk: 'L1', base: 'origin/main'});
+  assert(run.execution.input_coverage === 'declared-complete', 'coverage not complete');
+  assert(run.status === 'passed', 'declared build outputs still invalidate evidence: ' + run.status);
 });
 
 /* ---------- Attestation 声明（ATST-02/04 + Q9 清理） ---------- */

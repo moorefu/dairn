@@ -1,0 +1,544 @@
+{
+  "schema": 1,
+  "project": "dairn",
+  "modules": [
+    {
+      "name": "app",
+      "path": ".",
+      "profiles": [
+        "python"
+      ],
+      "commands": {
+        "build": {
+          "argv": [
+            "python",
+            "-m",
+            "build",
+            "--no-isolation"
+          ],
+          "cwd": "."
+        },
+        "integration": {
+          "argv": [
+            "python",
+            "-m",
+            "pytest",
+            "-m",
+            "integration"
+          ],
+          "cwd": "."
+        },
+        "lint": {
+          "argv": [
+            "dairn",
+            "stack-check",
+            "python",
+            "lint"
+          ],
+          "cwd": "."
+        },
+        "unit": {
+          "argv": [
+            "python",
+            "-m",
+            "pytest",
+            "-m",
+            "not integration"
+          ],
+          "cwd": "."
+        }
+      }
+    }
+  ],
+  "observed_modules": [
+    {
+      "path": ".",
+      "stack": "node",
+      "source": "package.json"
+    },
+    {
+      "path": ".",
+      "stack": "python",
+      "source": "pyproject.toml"
+    },
+    {
+      "path": "quickjs/assets/analyzer-templates/rust-surface",
+      "stack": "rust",
+      "source": "quickjs/assets/analyzer-templates/rust-surface/Cargo.toml"
+    }
+  ],
+  "manifests": [
+    {
+      "path": "package.json",
+      "stack": "node",
+      "sha256": "30d25387c6aa15bf07a2126da6c47bc797474bc5608c185af15d54ba7ba748fa",
+      "declared_name": "@moorefu/dairn",
+      "dependencies": []
+    },
+    {
+      "path": "pyproject.toml",
+      "stack": "python",
+      "sha256": "18b92972bb5390d749e6635d266e04664c5c36aa12315c36d3bc1e2cb2dd03bc",
+      "declared_name": null,
+      "dependencies": []
+    },
+    {
+      "path": "quickjs/assets/analyzer-templates/rust-surface/Cargo.toml",
+      "stack": "rust",
+      "sha256": "ddf461ae8d2722dabd57e31e6b343fd15f7ab0eb92015e6c6fac68f8c7597239",
+      "declared_name": null,
+      "dependencies": [
+        "serde",
+        "serde_json"
+      ]
+    }
+  ],
+  "build": [
+    {
+      "path": ".github/workflows/registry-publish.yml",
+      "sha256": "327cacc56c1fb5bd20f8881bbe7821f99ea4255dff60c5fa60670cdc0aa53f66"
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "sha256": "019ff6509eb4dc6fc63319e0d1d1ecb55982e10436de71d60897be9c4bda08dd"
+    }
+  ],
+  "entrypoints": [
+    "examples/analyzers/go-surface/main.go",
+    "quickjs/assets/analyzer-templates/go-surface/main.go",
+    "quickjs/assets/analyzer-templates/lua-surface/main.lua",
+    "quickjs/assets/analyzer-templates/python-surface/main.py",
+    "quickjs/assets/analyzer-templates/rust-surface/main.rs",
+    "tools/dairn/analyzers/python/main.py"
+  ],
+  "specs": [],
+  "code_surfaces": [
+    {
+      "path": "examples/analyzers/go-surface/main.go",
+      "language": "go",
+      "module": "app",
+      "sha256": "7887ef64777a8c7f732af950649375f198635f96e8c6e81072198c4ce3d02d84",
+      "imports": [
+        "bytes",
+        "encoding/json",
+        "errors",
+        "fmt",
+        "go/ast",
+        "go/format",
+        "go/parser",
+        "go/token",
+        "os",
+        "os/exec",
+        "path/filepath",
+        "sort",
+        "strings"
+      ],
+      "symbols": [
+        "Change:9d59ad5136bf79560f7ec25cd61589dad55720f0a5e8a8668069ee70a7166753",
+        "Request:4cca62874b2dd7231e824232440b9e4a1c282891ab3a2876583bd5fad46b0cd0",
+        "Response:8cd1671d3341d331a86fe1fea10d20e8e1cc98533d1351906dd552eee221a90b",
+        "Subject:a2c852635de24be48bae58551b45c032b8c627fed927ef07c1f926e19cb403b1"
+      ],
+      "surface_sha256": "8a3c482ab3391221b6a7ffc6c8733d489cbf431e2cddc2198f4159efbdcd4bd7"
+    },
+    {
+      "path": "quickjs/assets/analyzer-templates/go-surface/main.go",
+      "language": "go",
+      "module": "app",
+      "sha256": "7887ef64777a8c7f732af950649375f198635f96e8c6e81072198c4ce3d02d84",
+      "imports": [
+        "bytes",
+        "encoding/json",
+        "errors",
+        "fmt",
+        "go/ast",
+        "go/format",
+        "go/parser",
+        "go/token",
+        "os",
+        "os/exec",
+        "path/filepath",
+        "sort",
+        "strings"
+      ],
+      "symbols": [
+        "Change:9d59ad5136bf79560f7ec25cd61589dad55720f0a5e8a8668069ee70a7166753",
+        "Request:4cca62874b2dd7231e824232440b9e4a1c282891ab3a2876583bd5fad46b0cd0",
+        "Response:8cd1671d3341d331a86fe1fea10d20e8e1cc98533d1351906dd552eee221a90b",
+        "Subject:a2c852635de24be48bae58551b45c032b8c627fed927ef07c1f926e19cb403b1"
+      ],
+      "surface_sha256": "8a3c482ab3391221b6a7ffc6c8733d489cbf431e2cddc2198f4159efbdcd4bd7"
+    },
+    {
+      "path": "quickjs/assets/analyzer-templates/java-surface/Main.java",
+      "language": "java",
+      "module": "app",
+      "sha256": "38a7ff179ad3d73da97efc6664f07335e8758d11c114fc9d39c3575ea520ca30",
+      "imports": [],
+      "symbols": [
+        "Main:fce628a8a50f784d9599f27b00c0d87117c53a289cda047ddb1cd90403a10d4e",
+        "main:4a8e8a66fa49e69701c9a5ec78bddabd6f3019fe8217a514c35b5d5248bf3d9a"
+      ],
+      "surface_sha256": "9a79d04e70ee0b155279eb184b6826be3fd45d90a6e8cf7480f5d219e2b16233"
+    },
+    {
+      "path": "quickjs/assets/analyzer-templates/python-surface/main.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "5c998d4751ad9c9fa7200c2115835cdc9df82c75053fca683688ddcf9e033249",
+      "imports": [
+        "ast",
+        "json",
+        "pathlib",
+        "subprocess",
+        "sys"
+      ],
+      "symbols": [
+        "run:e16d6e99a353e8473545f939d594708aab1759e495c50b890028fc39f32fe4e6",
+        "signatures:005f440e677ec4273e6df1e331d326a7e520714eebb01fc8f810528cb68cdc53"
+      ],
+      "surface_sha256": "9fe6f0c6738d91b3dd56bdd642ff80cb5385140f47d9ca05a5bb60c3f94a0a7b"
+    },
+    {
+      "path": "quickjs/assets/analyzer-templates/rust-surface/main.rs",
+      "language": "rs",
+      "module": "app",
+      "sha256": "2a9fe0c303f3ac5ceef7c1f5c64b5763bf27b05cff39ff4a63216924c641a3c3",
+      "imports": [
+        "serde::{Deserialize,Serialize}",
+        "std::{collections::{BTreeMap,BTreeSet},fs,path::Path,process::Command}"
+      ],
+      "symbols": [],
+      "surface_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "src/dairn/__init__.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "05ebf1c864f571661632b9f7d477314a1c611dc17b3f66a92f91e4d07bf65ed0",
+      "imports": [
+        "importlib.metadata"
+      ],
+      "symbols": [],
+      "surface_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "src/dairn/cli.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "0cb03c897940efb12d0d3329033feb75dceddc965cc05d5116faca5f50def0ba",
+      "imports": [
+        "errno",
+        "hashlib",
+        "json",
+        "os",
+        "pathlib",
+        "stat",
+        "subprocess",
+        "sys"
+      ],
+      "symbols": [
+        "main:2c4c5b0ebed3de9b574a3757903571ebf0dcaec6764f9f8d245ce0740a619321"
+      ],
+      "surface_sha256": "718ac42653ec9ff93379c7b6b6f6cba8589aa7cb13aafd731b5a5aa2eeb0ac50"
+    },
+    {
+      "path": "tools/build.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "ad29dffeaeeda04ddb64adef5492c40c1b941ead066829945713ad669b5a925f",
+      "imports": [
+        "argparse",
+        "dairn_build_backend",
+        "pathlib",
+        "tempfile"
+      ],
+      "symbols": [],
+      "surface_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "tools/checksums.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "15ed383dff04c9fd162349020402e4817ed64712d4f21e6055d2b2cd450715bf",
+      "imports": [
+        "argparse",
+        "hashlib",
+        "json",
+        "pathlib",
+        "release_config",
+        "zipfile"
+      ],
+      "symbols": [],
+      "surface_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "tools/dairn/analyzers/python/main.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "5c998d4751ad9c9fa7200c2115835cdc9df82c75053fca683688ddcf9e033249",
+      "imports": [
+        "ast",
+        "json",
+        "pathlib",
+        "subprocess",
+        "sys"
+      ],
+      "symbols": [
+        "run:e16d6e99a353e8473545f939d594708aab1759e495c50b890028fc39f32fe4e6",
+        "signatures:005f440e677ec4273e6df1e331d326a7e520714eebb01fc8f810528cb68cdc53"
+      ],
+      "surface_sha256": "9fe6f0c6738d91b3dd56bdd642ff80cb5385140f47d9ca05a5bb60c3f94a0a7b"
+    },
+    {
+      "path": "tools/dairn_build_backend.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "07d03a24b63bfd631366fab9ce337d994fbe37e9e16f3694106f2853e5bcd608",
+      "imports": [
+        "base64",
+        "gzip",
+        "hashlib",
+        "io",
+        "pathlib",
+        "release_config",
+        "subprocess",
+        "sys",
+        "tarfile",
+        "tempfile",
+        "zipfile"
+      ],
+      "symbols": [
+        "build_sdist:be181b735985ee283f58050da08aa3d88db382cd4e93aea26b60a1e1686a0d0c",
+        "build_wheel:783e176b1397ed3d3fef417b4af197012783062cde5bbfe99c460a27309659e9",
+        "get_requires_for_build_sdist:f8b7b024fa24419abfc8850fc8e58984e5f052ad41e2831f969dfd11120a7b0b",
+        "get_requires_for_build_wheel:065f383ce7ae12e4af2d5621e943d7e2286817e24533c96485dce199ec4231a7",
+        "metadata:0193e9d1110eb85505297254492f5822e8610dcd2894667875bec13aae796160",
+        "native_zip:83543c026590559a6c5fe64368d45fa38a86b3cb25fd68629cedddb6ac33ae8e",
+        "sdist_from_files:f24fd047506997f0dba58b2d362b98eb9c2e22cbc6aee42011d54368b24236de",
+        "source_files:f51c86b5d28e6e6a1194a1e501494c6860d1901197bdfe1bf19047bad513e45f",
+        "wheel_from_files:ae4af5343bc600bee5636eeca14061c664bc13486c0e00f2f786368de17f0635"
+      ],
+      "surface_sha256": "116b6af0b55ef6c03d2a9b6f17e5e928b5afde11e0e0cc486bc5da4bb2c1b9d5"
+    },
+    {
+      "path": "tools/prepare-regression.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "ddde6929c10921568711a8cec0246a47efebddfaf213f7cd0772648b573cd952",
+      "imports": [
+        "argparse",
+        "pathlib",
+        "source_workspace"
+      ],
+      "symbols": [],
+      "surface_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "tools/publish-release.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "765f343317ff2365bc21aeda5477cd147b2ad1f41e77004c2178a3fdb96fd945",
+      "imports": [
+        "argparse",
+        "hashlib",
+        "html",
+        "json",
+        "os",
+        "pathlib",
+        "re",
+        "release_config",
+        "shutil",
+        "subprocess",
+        "tempfile",
+        "urllib.parse"
+      ],
+      "symbols": [
+        "api:b37c2ff27ac9dcb4668c5b87a074d6ef69f6c14e1460235dd80c09a6ad44e8a5",
+        "find_release:262a2b8f00fa86393c5b089eaff22975fe272f098ce61cb7d4de632032e7360d",
+        "gh:82b4795f9e616044ccea2ea64f6670a38de97b2b34eb5695aa0a8c4af29ef663",
+        "main:2c4c5b0ebed3de9b574a3757903571ebf0dcaec6764f9f8d245ce0740a619321",
+        "plan_release:79d434d6abd8d30fea2fa63322cf7b841b5514477bd44dd4b0a080b7ff66a4b0",
+        "prepare_latest:051ed9e47399baa762b91868eb9da7a2b4fca8ad97c855d1b0f50f72f6ced6d3",
+        "publish:c268eaf63327a4b1f32a61c8481bc640ce21d9edda444a2282fa8a8dd432e6ca",
+        "publish_latest:00e6c471fa6b3c599f7a41de84c475efb65baf782bdafa63845efbd0ba3c5285",
+        "ref_commit:cb196b247d90b1a30e88793656ee4c5592b72639b08bf67e782f58f5eaa7fafc",
+        "sha:d30124edb54fb48aca2ce3a3c7e9a23669c8e40b1bea110c43261cf7f7ed14d5"
+      ],
+      "surface_sha256": "1ab7981a18a3055b0e71576745df823b7e9bda929872545415ed5de69c0d1395"
+    },
+    {
+      "path": "tools/release_config.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "d056f30aa734bfec184c5f4f814d7e283c6bf0eda73cd24c1e15590b698dd64b",
+      "imports": [
+        "json",
+        "os",
+        "pathlib",
+        "re"
+      ],
+      "symbols": [
+        "artifact_names:f932adcd69dfe8c4ff50c6f4421ec1ada8e4adb338b57675cef1d81305330270",
+        "load_release:4cb25af60e374cc0e229efc7c48ac0ebae3d9e34c5bb4a5d1227f11157784469",
+        "npm_filename:bfce369a052589ff76875084333e38f461616b758ef1a693d9d110cf527e9905",
+        "resolve_version:0fc8f69acbed32e9d1c13b00ee9aea59975964ba325fb1b7b03af3677804ad66",
+        "tag_version:6e097930da35bcb471cff1a4cdb3987d2d8bab66632965d6b1d32b6896e77baf",
+        "version_info:23e940c14470afa0ef945980e89f76bf302ddad85d2416c0b3a21f181d1cb04b"
+      ],
+      "surface_sha256": "2371a54cb3edcf6096bdf74325f7a6b01d171cfdee8fe16f9d894cbcb4aef6cc"
+    },
+    {
+      "path": "tools/source_workspace.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "b33c90480c0229d3431fb9b94db792ec36fbd78917b36636ae9859fb2b95479e",
+      "imports": [
+        "hashlib",
+        "json",
+        "os",
+        "pathlib",
+        "release_config",
+        "shutil",
+        "zipfile"
+      ],
+      "symbols": [
+        "checked_runtime_zip:2c22025cc1084ed4e63cf9ba1c5a890f16891e5c7ae947451e50bf756b4f6bb8",
+        "prepare_workspace:c1ddd2a80155bfa9fb217f0eb38ba971cb54e059d6317602981dfdeec7aacaea",
+        "runtime_payload:f08961cd0bc4974b2eee84ac63fd25d39967cdbe3e92d1b4a822f5fc223ea263",
+        "zip_paths:f3d435c1446805280a221b5be4ed47a7b37d685e615d406a249c8b1af736b6a6"
+      ],
+      "surface_sha256": "a372ec8ded9dde8e619bdf560b83a532a21e6f337b715ee921b31b955ab7416c"
+    },
+    {
+      "path": "tools/verify-linux.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "2c98b1035a626bd98b325be34e220570ed299ea524f636b2401d208282ce12d6",
+      "imports": [
+        "hashlib",
+        "json",
+        "os",
+        "pathlib",
+        "shutil",
+        "subprocess",
+        "sys",
+        "tempfile",
+        "unittest"
+      ],
+      "symbols": [],
+      "surface_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "tools/verify-packages.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "8a71dd92402bdc8a1a9bd453fb2851cdd0b80f002d34fb09881ad9157f273e05",
+      "imports": [
+        "argparse",
+        "base64",
+        "csv",
+        "dairn_build_backend",
+        "hashlib",
+        "io",
+        "json",
+        "os",
+        "pathlib",
+        "platform",
+        "release_config",
+        "shutil",
+        "source_workspace",
+        "subprocess",
+        "sys",
+        "tarfile",
+        "tempfile",
+        "venv",
+        "zipfile"
+      ],
+      "symbols": [
+        "extract_zip:d9bd099dcdd79bf920ab804c33b235eba166f698f5a27be4c481bf46f2e08dd8",
+        "verify:fe85e077d96a6382492446a77e09a61b020c8e1d50d92f210fc3ae4b19f50793"
+      ],
+      "surface_sha256": "bc2028d6933b9a2f01fe3780710dd7d5fcd870c5b6f5ce5f316be398f6def9c7"
+    },
+    {
+      "path": "tools/verify-podman.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "9d9f9491f42b954b77ef8c4bb1ff26c921738619199f6cc7671b4005b761e38c",
+      "imports": [
+        "argparse",
+        "json",
+        "pathlib",
+        "source_workspace",
+        "subprocess",
+        "sys",
+        "tempfile"
+      ],
+      "symbols": [],
+      "surface_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "tools/verify-windows.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "00d0f4c8cfa0a7e3236aa4b5c18920db7200ac213cd9f22859e14122a1da973a",
+      "imports": [
+        "argparse",
+        "hashlib",
+        "json",
+        "os",
+        "pathlib",
+        "platform",
+        "release_config",
+        "shutil",
+        "subprocess",
+        "sys",
+        "tempfile"
+      ],
+      "symbols": [
+        "run:fd65bf48b7fe2c12e03e2631e70004826505d7d5a66768534a5bb7780c5ebce9"
+      ],
+      "surface_sha256": "d7defd640e9fed3ebafea45d0c823e830789abd76e1b05853979497492a02e78"
+    },
+    {
+      "path": "validation/upstream-quickjs/verify-linux-bootstrap.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "1fbb9ee592ad13898ec11deec0d63e44cc361805bbb24f7061dca920a2a57965",
+      "imports": [
+        "hashlib",
+        "json",
+        "pathlib",
+        "shutil",
+        "source_workspace",
+        "subprocess",
+        "sys",
+        "tempfile"
+      ],
+      "symbols": [],
+      "surface_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "validation/version-consolidation/check-single-version.py",
+      "language": "py",
+      "module": "app",
+      "sha256": "b5376102fbcadcf328cc08bacd999bc4c18adf90d90e461fb0dbbe491f3c1307",
+      "imports": [
+        "hashlib",
+        "json",
+        "os",
+        "pathlib",
+        "release_config",
+        "source_workspace",
+        "subprocess",
+        "sys",
+        "tempfile"
+      ],
+      "symbols": [
+        "run:7efc0426dbe95b452afd90990c1a5fb032107698242684a6dfbb465053ca0a73"
+      ],
+      "surface_sha256": "d02c0d506713e9b9d2b940813519317ed0de0860a543e04ba8541ea85a867872"
+    }
+  ]
+}

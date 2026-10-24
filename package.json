@@ -1,6 +1,6 @@
 {
   "name": "@moorefu/dairn",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0-nightly.20261024123943",
   "description": "基于原生 QuickJS 的开发治理内核",
   "license": "MIT",
   "author": "moorefu <chengmu.fu@gmail.com>",

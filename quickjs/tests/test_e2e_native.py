@@ -141,7 +141,7 @@ class PreviewCases(unittest.TestCase):
                   'package.json','pyproject.toml','src/dairn/cli.py','src/dairn/__init__.py','quickjs.lock.json',
                   'AGENTS.md','Makefile','.gitlab-ci.yml','.github/rulesets/main-branch.json')
         ordinary=('tools/verify-linux.py','tools/verify-packages.py','tools/checksums.py',
-                  'tools/prepare-regression.py','tools/source_workspace.py','examples/stubs/go-surface/main.go')
+                  'tools/prepare-regression.py','tools/source_workspace.py','examples/analyzers/go-surface/main.go')
         data=('.dairn/governance/evidence/run-qjs-checks.json','.dairn/work/task-1.json')
         probe=HOME/'quickjs'/'_critical_allowlist_probe_temp.mjs'
         program=("import * as std from 'std'; import {classify,moduleSelection} from './core/policy.mjs';"

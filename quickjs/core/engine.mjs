@@ -10,7 +10,7 @@ import {runTurnEnd} from './hooks.mjs';
 import {prChangeMeta,isCiPullRequest} from './ci-context.mjs';
 import {captureFacts} from './facts.mjs';
 import {readRelations} from './relations.mjs';
-import {configuredStubs} from './stubs.mjs';
+import {configuredAnalyzers} from './analyzers.mjs';
 import {captureWorktree,taskExclusions} from './worktree.mjs';
 import {createCheckRun,writeRunEvidence} from './evidence.mjs';
 const slash = x => x.replace(/\\/g, '/');
@@ -97,8 +97,8 @@ function staticChecks(h,root) {
 }
 function governanceValidators(h,root,base) {
   const result=validateAll(h,root);
-  const full={...result.detail,docs:[],lifecycle:[],relations:[],stubs:[]};
-  try{configuredStubs(h,root);}catch(e){full.stubs=[e.message];}
+  const full={...result.detail,docs:[],lifecycle:[],relations:[],analyzers:[]};
+  try{configuredAnalyzers(h,root);}catch(e){full.analyzers=[e.message];}
   try{const p=JSON.parse(h.read(join(root,'.dairn/governance/project.json')));readRelations(h,root,captureFacts(h,root,p));}
   catch(e){full.relations=[e.message];}
   try {full.docs=docsValidate(h,root);}catch(e){full.docs=['validator crashed: '+e.message];}
@@ -278,8 +278,11 @@ function checks(h,root,opts,st,raw,validation,stats) {
   // 捕获失败（例如 tracked symlink 输入）fail closed：记录为整体失败但仍写
   // 证据文件，让门禁 reason 可审计，而不是让整个 check 无证据崩溃。
   let worktree=null,worktreeError=null;
+  const captureExclusions=opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[];
+  // 生成物边界来自受信项目策略；同一 Run 的 before/after 必须使用同一闭包。
+  const captureOptions={snapshot_exclusions:Array.isArray(st.policy?.snapshot_exclusions)?st.policy.snapshot_exclusions:[]};
   if(opts.task||opts.hook||opts.all){
-    try{worktree=captureWorktree(h,root,opts.timeout,opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[]);}
+    try{worktree=captureWorktree(h,root,opts.timeout,captureExclusions,captureOptions);}
     catch(e){worktreeError=String(e&&e.message||e);}
   }
   const records=[];
@@ -342,7 +345,7 @@ function checks(h,root,opts,st,raw,validation,stats) {
     if(!opts.all && headCommit!==st.head) throw Error('Git HEAD changed during check; evidence cannot be written');
     let snapAfter=null,snapAfterFailed=false;
     if(opts.task&&worktree&&!worktreeError){
-      try{snapAfter=captureWorktree(h,root,opts.timeout,opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[]);}
+      try{snapAfter=captureWorktree(h,root,opts.timeout,captureExclusions,captureOptions);}
       catch(e){snapAfterFailed=true;}
     }
     if(opts.task){
@@ -420,7 +423,7 @@ function prePush(h,root,st,opts) {
 export function main(h,args) {
   try {
     const opts=parseArgs(args);
-    if(opts.cmd==='help') {h.log('Dairn '+runtimeVersion(h)+' — AI-Native Software Engineering Toolkit\n  dairn init|adopt [--root PATH] [--stack go|python|rust|vue|java|spring-boot|openresty] [--ci none|github|gitlab|both] [--sample] [--plan]\n  dairn detect|doctor|validate [--root PATH]\n  dairn scope|check --base SHA [--root PATH]\n  dairn check --all (baseline L2 checks)\n  dairn handoff [--json] [--base origin/main] [--task ID] [--note TEXT] [--max-chars 12000] [--out .dairn/tmp/handoff.md]   (read-only agent handoff; no .dairn required)\n  dairn governance plan|explain --base <ref> [--json]   (deterministic minimum-sufficient assurance plan; advisory, never a gate verdict)\n  dairn governance assess [--json]   (capability discovery: declared vs detected; never self-certifies CI)\n  dairn governance recommend [--window 90d] [--json]   (evidence-backed tuning suggestions; never auto-applied)\n  dairn refactor plan|compare|verify|status --id <id>   (optional cross-PR refactor contracts and debt baselines)\n  dairn evidence verify --bundle <path>|--run <run-id> [--json]   (independent evidence verification)\n  dairn evidence inspect --run <run-id> [--json]\n  dairn gate evaluate --subject <s.json> --policy <p.json> [--check <run.json>] [--approval <v.json>] [--attestation <st.json> --signature <sig> --key <pub>] [--modules m1,m2] [--risk L0|L1|L2] [--stage pre-merge|post-merge|release] [--json]\n  dairn attest prepare --bundle <path> --context <c.json> [--out <statement.json>]\n  dairn attest verify --statement <s.json> --signature <s.sig> --key <absolute-trusted-pubkey> [--context <c.json>]\n  dairn hook pre-push|turn-end [--task ID] [--no-check] [--provider P --session S] [--allow-unattributed]\n  dairn hooks install [--apply] [--git] [--force] [--launcher PATH]\n  dairn tasks check|ready [--strict]\n  dairn notes seal [--apply]\n  dairn docs check [--json]\n  dairn upgrade --plan|--apply [--root PATH]\n  dairn work start|list|status|next|record|advance|skip|verify|finish|cancel|reopen [--require-machine-gates|--require-session-anchor|--require-review-actor]\n  dairn work link-check <task-id> --run <run-id> (advisory reference to an existing run)\n  dairn guide impact --base SHA [--precision PROJECT-STUB-ID]\n  dairn stubs [list|templates|doctor|init --template LANGUAGE --id NAME [--apply]] [--root PATH]\n  dairn skills catalog|list|add NAME [--apply]\n  dairn docs find QUERY|show|context SPEC-ID|check [--json]');return 0;}
+    if(opts.cmd==='help') {h.log('Dairn '+runtimeVersion(h)+' — AI-Native Software Engineering Toolkit\n  dairn init|adopt [--root PATH] [--stack go|python|rust|vue|java|spring-boot|openresty] [--ci none|github|gitlab|both] [--sample] [--plan]\n  dairn detect|doctor|validate [--root PATH]\n  dairn scope|check --base SHA [--root PATH]\n  dairn check --all (baseline L2 checks)\n  dairn handoff [--json] [--base origin/main] [--task ID] [--note TEXT] [--max-chars 12000] [--out .dairn/tmp/handoff.md]   (read-only agent handoff; no .dairn required)\n  dairn governance plan|explain --base <ref> [--json]   (deterministic minimum-sufficient assurance plan; advisory, never a gate verdict)\n  dairn governance assess [--json]   (capability discovery: declared vs detected; never self-certifies CI)\n  dairn governance recommend [--window 90d] [--json]   (evidence-backed tuning suggestions; never auto-applied)\n  dairn refactor plan|compare|verify|status --id <id>   (optional cross-PR refactor contracts and debt baselines)\n  dairn evidence verify --bundle <path>|--run <run-id> [--json]   (independent evidence verification)\n  dairn evidence inspect --run <run-id> [--json]\n  dairn gate evaluate --subject <s.json> --policy <p.json> [--check <run.json>] [--approval <v.json>] [--attestation <st.json> --signature <sig> --key <pub>] [--modules m1,m2] [--risk L0|L1|L2] [--stage pre-merge|post-merge|release] [--json]\n  dairn attest prepare --bundle <path> --context <c.json> [--out <statement.json>]\n  dairn attest verify --statement <s.json> --signature <s.sig> --key <absolute-trusted-pubkey> [--context <c.json>]\n  dairn hook pre-push|turn-end [--task ID] [--no-check] [--provider P --session S] [--allow-unattributed]\n  dairn hooks install [--apply] [--git] [--force] [--launcher PATH]\n  dairn tasks check|ready [--strict]\n  dairn notes seal [--apply]\n  dairn docs check [--json]\n  dairn upgrade --plan|--apply [--root PATH]\n  dairn work start|list|status|next|record|advance|skip|verify|finish|cancel|reopen [--require-machine-gates|--require-session-anchor|--require-review-actor]\n  dairn work link-check <task-id> --run <run-id> (advisory reference to an existing run)\n  dairn guide impact --base SHA [--analyzer PROJECT-ANALYZER-ID]\n  dairn analyzers [list|templates|doctor|init --template LANGUAGE --id NAME [--apply]] [--root PATH]   (legacy "stubs" command is rejected: breaking rename, no alias)\n  dairn analyze run <analyzer-id> | --suite <suite-id> [--base <ref>] [--refresh] [--json] [--out PATH]   (advisory analysis runs; never a gate verdict)\n  dairn analyze import <analyzer-id> [--artifact PATH] [--json] [--out PATH]   (read-only report import; unverified-import, never ci-verified)\n  dairn quality fitness [--json]   (compare quality goals with local observations; PASS never approves)\n  dairn capability plan [--base <ref>] [--json]   (advisory agent/skill participation; never starts models)\n  dairn skills catalog|list|add NAME [--apply]\n  dairn docs find QUERY|show|context SPEC-ID|check [--json]');return 0;}
     const root=h.realpath(opts.root??h.cwd());
     verifyRuntimeLock(h,root,false);
     const st=staticChecks(h,root);

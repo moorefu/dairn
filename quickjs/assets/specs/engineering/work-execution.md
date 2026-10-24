@@ -58,7 +58,7 @@ review 证据可带可选 `actor`（不超过 200 字符）：优先级为 `revi
 - 多个 Agent 会话可以并行工作，但各自只记录自己的证据文件；覆盖、重置或删除他人账本属于违规。
 - 证据以 SHA256 绑定内容；同一路径文件被修改后旧记录失效，需要重新记录。
 - HEAD 变化后，review、synchronize 与机器门禁证据视为过期，重新执行后才能推进。
-- 受保护构建在受保护分支上执行 `dairn check --task`，要求账本中的任务仍处于 active implement 阶段，且 review/synchronize 证据的 `head` 等于当前提交。因此合并产生新提交后，不要把本地 review/sync 证据带进受保护构建的检出；推荐让账本在合并时停在 implement active，签名完成后再补记本地流程状态（详见仓库治理指南的受保护 CI 一节）。
+- 受保护构建独立执行 `dairn check --base <可信基线>`，不依赖账本或任务阶段。合并产生新提交后，需为合并提交重新生成机器证据；Work 可用 `dairn work link-check` 引用已有 Run，本地 review/synchronize 记录不构成合并后或受保护 CI 的证明。
 - 显式跳过的规划阶段记录在 `skips[]`，不会伪造证据；跳过理由随账本保留。
 
 ## 会话锚点

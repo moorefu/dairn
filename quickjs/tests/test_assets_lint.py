@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 ROOT=Path(__file__).resolve().parents[2]
-CLI=[str(ROOT/'dairn.sh')] if sys.platform=='win32' else ['/bin/sh',str(ROOT/'dairn.sh')]
+CLI=[str(ROOT/'dairn.cmd')] if sys.platform=='win32' else ['/bin/sh',str(ROOT/'dairn.sh')]
 
 class AssetsLint(unittest.TestCase):
     def setUp(self):

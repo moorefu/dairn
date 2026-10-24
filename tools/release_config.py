@@ -1,22 +1,32 @@
 """发布版本以标签为准，没有标签时回退 package.json；派生 Python 版本及制品名称。"""
 import json
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSION_PATTERN = (r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
-                   r'(?:-(?:alpha|beta|rc)\.(?:0|[1-9][0-9]*))?')
+                   r'(?:-(?:(?:alpha|beta|rc)\.(?:0|[1-9][0-9]*)|nightly\.[1-9][0-9]{13}))?')
 
 
 def version_info(version):
     number = r'(?:0|[1-9][0-9]*)'
-    parsed = re.fullmatch(rf'({number}\.{number}\.{number})(?:-(alpha|beta|rc)\.({number}))?', version)
+    if not re.fullmatch(VERSION_PATTERN, version):
+        raise ValueError('发布版本必须为三段数字，可附加 -alpha.N、-beta.N、-rc.N 或 -nightly.YYYYMMDDHHMMSS')
+    parsed = re.fullmatch(rf'({number}\.{number}\.{number})(?:-(alpha|beta|rc|nightly)\.({number}))?', version)
     if not parsed:
-        raise ValueError('发布版本必须为三段数字，可附加 -alpha.N、-beta.N 或 -rc.N')
-    suffix = {'alpha': 'a', 'beta': 'b', 'rc': 'rc'}
+        raise ValueError('发布版本格式无效')
+    suffix = {'alpha': 'a', 'beta': 'b', 'rc': 'rc', 'nightly': '.dev'}
     python_version = parsed[1] + (suffix[parsed[2]] + parsed[3] if parsed[2] else '')
     return {'version': version, 'python_version': python_version, 'prerelease': parsed[2] is not None}
+
+
+def nightly_version(version, instant=None):
+    version_info(version)
+    beijing = timezone(timedelta(hours=8))
+    instant = datetime.now(beijing) if instant is None else instant.astimezone(beijing)
+    return version.split('-')[0] + '-nightly.' + instant.strftime('%Y%m%d%H%M%S')
 
 
 def tag_version(name):

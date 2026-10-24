@@ -31,10 +31,12 @@ export function runChecks(h, root, {policy, modules = null, risk = 'L1', base = 
   const selected = modules || policy.modules || [];
   const plan = checkPlan(policy, selected, risk);
   const subject = subjectFromGit(h, root, {base, repository, change, timeout});
-  const before = captureWorktree(h, root, timeout, [], {input_globs});
+  const snapshotExclusions = Array.isArray(policy.snapshot_exclusions) ? policy.snapshot_exclusions : [];
+  const captureOptions = {input_globs, snapshot_exclusions: snapshotExclusions};
+  const before = captureWorktree(h, root, timeout, [], captureOptions);
   const checks = [];
   for (const module of selected) for (const id of plan.required_checks) checks.push(runOne(h, root, module, id, timeout));
-  const after = captureWorktree(h, root, timeout, [], {input_globs});
+  const after = captureWorktree(h, root, timeout, [], captureOptions);
   const stable = sameWorktree(before, after) && before.source_commit === after.source_commit;
   // The executor cannot grant itself trust (T40): declared_assurance is always
   // local-observed here, whatever the caller claims about its environment —
