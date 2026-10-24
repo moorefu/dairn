@@ -49,14 +49,14 @@ class TrustedCIAndPortableAnalyzer(unittest.TestCase):
     def test_analyzer_plan_is_readonly_and_duplicates_fail(self):
         manifest = self.project/'.dairn/analyzers.json'
         original=manifest.read_bytes()
-        plan=self.obj('analyzers','init','--template','go','--id','surface')
+        plan=self.obj('analyzers','init','--template','python','--id','surface')
         self.assertFalse(plan['applied'])
-        self.assertFalse((self.project/'tools/dairn/analyzers/go/main.go').exists())
+        self.assertFalse((self.project/'tools/dairn/analyzers/python/main.py').exists())
         self.assertEqual(original,manifest.read_bytes())
-        self.obj('analyzers','init','--template','go','--id','surface','--apply')
-        self.assertTrue((self.project/'tools/dairn/analyzers/go/main.go').exists())
+        self.obj('analyzers','init','--template','python','--id','surface','--apply')
+        self.assertTrue((self.project/'tools/dairn/analyzers/python/main.py').exists())
         self.assertEqual(self.obj('analyzers','doctor')['tools'][0]['status'],'available')
-        self.assertNotEqual(self.dairn('analyzers','init','--template','go','--id','surface','--apply',pass_required=False).returncode,0)
+        self.assertNotEqual(self.dairn('analyzers','init','--template','python','--id','surface','--apply',pass_required=False).returncode,0)
 
     def test_python_template_surface_and_dirty_cache(self):
         self.obj('analyzers','init','--template','python','--id','py','--apply')
@@ -75,7 +75,7 @@ class TrustedCIAndPortableAnalyzer(unittest.TestCase):
     def test_symlinked_template_target_is_refused(self):
         outside=self.work/'external';outside.mkdir()
         (self.project/'tools').symlink_to(outside,target_is_directory=True)
-        result=self.dairn('analyzers','init','--template','go','--apply',pass_required=False)
+        result=self.dairn('analyzers','init','--template','python','--apply',pass_required=False)
         self.assertNotEqual(result.returncode,0)
         self.assertFalse((outside/'dairn').exists())
 

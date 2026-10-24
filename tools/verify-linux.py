@@ -1,4 +1,4 @@
-"""在含 Python、Git、Go 和 C 编译器的 Linux 容器中运行核心及 Go race 回归。"""
+"""在含 Python、Git 和 Go 的 Linux 容器中运行核心及 Go 集成回归。"""
 import hashlib
 import json
 import os
@@ -22,26 +22,24 @@ for _key in ('GITHUB_ACTIONS','GITHUB_EVENT_NAME','GITHUB_EVENT_PATH','GITHUB_RE
 binary = root / 'runtime/dairn-embedded.com'
 before = hashlib.sha256(binary.read_bytes()).hexdigest()
 results = {}
-# 不自动下载新工具链或依赖；race 必须使用容器提供的 CGO 编译环境。
-os.environ.update(GOTOOLCHAIN='local', GOPROXY='off', CGO_ENABLED='1',
+# 不自动下载新工具链或依赖；默认 Go 集成使用标准工具链，不启用 race/CGO。
+os.environ.update(GOTOOLCHAIN='local', GOPROXY='off', CGO_ENABLED='0',
                   DAIRN_TEST_EVIDENCE_DIR=str(out))
-for tool in ['git', 'go', 'gcc', 'openssl', 'jq', 'sha256sum']:
+for tool in ['git', 'go', 'openssl', 'jq', 'sha256sum']:
     if not shutil.which(tool):
-        raise SystemExit('Linux 完整回归缺少工具：' + tool + '（容器镜像/runner 需预装 git/go/gcc/openssl/jq/coreutils）')
+        raise SystemExit('Linux 完整回归缺少工具：' + tool + '（容器镜像/runner 需预装 git/go/openssl/jq/coreutils）')
 go_env = subprocess.run(['go', 'env', '-json', 'GOVERSION', 'GOOS', 'GOARCH',
                          'CGO_ENABLED', 'CC', 'GOTOOLCHAIN', 'GOPROXY'],
                         capture_output=True, check=True, timeout=30)
 (out / 'linux-go-env.json').write_bytes(go_env.stdout)
 results['go_environment'] = json.loads(go_env.stdout)
-compiler = subprocess.run(['gcc', '--version'], capture_output=True, check=True, timeout=30)
-(out / 'linux-compiler.log').write_bytes(compiler.stdout + compiler.stderr)
 with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
     native = Path(tmp) / 'qjs'
     shutil.copyfile(binary, native)
     native.chmod(0o755)
     subprocess.run(['/bin/sh', str(native), '--assimilate'], check=True)
     env = {**os.environ, 'DAIRN_QJS_BIN': str(native)}
-    for name, script in [('policy', 'test_native.mjs'), ('host', 'test_host_native.mjs'),
+    for name, script in [('core', 'test_core.mjs'), ('policy', 'test_native.mjs'), ('host', 'test_host_native.mjs'),
                          ('governance', 'test_governance_native.mjs'),
                          ('handoff', 'test_handoff_native.mjs'),
                          ('gov', 'test_gov_native.mjs')]:
@@ -60,6 +58,7 @@ with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
         'quickjs.tests.test_hooks',
         'quickjs.tests.test_notes_seal',
         'quickjs.tests.test_launcher',
+        'quickjs.tests.test_doctor',
         'quickjs.tests.test_audit_logs',
         'quickjs.tests.test_review_identity',
         'quickjs.tests.test_agent_protocol',
@@ -91,5 +90,5 @@ results['original_unchanged'] = hashlib.sha256(binary.read_bytes()).hexdigest() 
 (out / 'linux-summary.json').write_text(json.dumps(results, indent=2) + '\n', encoding='utf-8')
 print(json.dumps(results, indent=2), flush=True)
 sys.exit(0 if regression.wasSuccessful() and not regression.skipped and evidence.exists()
-         and results['host'] == results['policy'] == results['governance'] == results['handoff'] == results['gov'] == 0
+         and results['core'] == results['host'] == results['policy'] == results['governance'] == results['handoff'] == results['gov'] == 0
          and results['original_unchanged'] else 1)

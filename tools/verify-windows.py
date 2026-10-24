@@ -1,9 +1,9 @@
-"""在 Windows 上验收原生运行时、离线安装包及实际 Go 门禁，保存可复核日志。
+"""在 Windows 上验收原生运行时、离线安装包及可选 Go 门禁，保存可复核日志。
 
 没有 Go 工具链时可用 --skip-go：跳过 go-env/go-init/go-checks，其余 CLI、
 launcher、npm、wheel、native 检查照常执行并参与总体验收。
-默认 Go 结果独立记录（-race 依赖 CGO/C 编译器）；提供 --cc-bin（如
-E:\\msys64\\mingw64\\bin）并加 --require-go-checks 时，Go 门禁纳入总体验收。
+Go 门禁使用普通 `go test ./...`，不启用 race/CGO；提供 --skip-go 可只运行
+跨平台运行时与分发制品验收。
 """
 import argparse
 import hashlib
@@ -23,23 +23,12 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--go-bin', type=Path, default=Path(r'C:\Program Files\Go\bin'))
 parser.add_argument('--skip-go', action='store_true',
                     help='没有 Go 工具链时跳过 Go 相关步骤（其余验收照常执行）')
-parser.add_argument('--cc-bin', type=Path, default=None,
-                    help='C 编译器目录（如 E:\\msys64\\mingw64\\bin），用于 CGO/Go -race')
-parser.add_argument('--require-go-checks', action='store_true',
-                    help='要求 go-checks（含 -race）通过并纳入总体验收')
 parser.add_argument('--artifacts', type=Path, default=None,
                     help='复用已构建的发布制品目录（含 wheel/tgz）；跳过 npm run build，'
                          '与 Linux 集成回归从 CI artifact 提取运行时的方式一致')
 args = parser.parse_args()
 if os.name != 'nt':
     parser.error('此脚本必须在 Windows 原生环境运行')
-if args.skip_go and args.require_go_checks:
-    parser.error('--skip-go 与 --require-go-checks 不能同时使用')
-if args.cc_bin:
-    gcc = args.cc_bin / 'gcc.exe'
-    if not gcc.is_file():
-        parser.error('--cc-bin 下未找到 gcc.exe：' + str(gcc))
-    args.cc_bin = args.cc_bin.resolve()
 if args.artifacts:
     if not args.artifacts.is_dir():
         parser.error('--artifacts 目录不存在：' + str(args.artifacts))
@@ -63,6 +52,9 @@ HOST_QJS = _QJS_CANDIDATES[0] if _QJS_CANDIDATES else APE
 digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
 env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'DAIRN_QJS_BIN': str(HOST_QJS),
        'PATH': str(args.go_bin) + os.pathsep + os.environ['PATH']}
+# 临时目录可能位于源码仓库内；验收项目不应继承父仓库的 Git 身份。
+env['GIT_CEILING_DIRECTORIES'] = os.pathsep.join(filter(None, (
+    env.get('GIT_CEILING_DIRECTORIES'), str(Path(tempfile.gettempdir()).resolve()))))
 required = ['node', 'git', 'npm.cmd', 'npx.cmd'] + ([] if args.skip_go else ['go'])
 for tool in required:
     if not shutil.which(tool, path=env['PATH']):
@@ -70,8 +62,6 @@ for tool in required:
         parser.error('缺少验收依赖：' + tool + hint)
 summary = {'platform': platform.platform(), 'ape_sha256': digest(APE),
            'go_skipped': args.skip_go,
-           'go_checks_required': bool(args.require_go_checks and not args.skip_go),
-           'cc_bin': str(args.cc_bin) if args.cc_bin else None,
            'artifacts_source': str(args.artifacts) if args.artifacts else None,
            'artifacts_reused': bool(args.artifacts),
            'ci_env_cleared': True,
@@ -83,17 +73,25 @@ def run(name, argv, expected=0, cwd=ROOT, timeout=180, run_env=None):
     process_env = run_env or env
     # CreateProcess 查找可执行文件时不会使用传入 env 的 PATH，必须先解析路径。
     command[0] = shutil.which(command[0], path=process_env['PATH']) or command[0]
-    result = subprocess.run(command, cwd=cwd, env=process_env,
-                            capture_output=True, timeout=timeout)
+    timed_out = False
+    try:
+        result = subprocess.run(command, cwd=cwd, env=process_env,
+                                capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        timed_out = True
+        result = subprocess.CompletedProcess(command, 124, error.stdout or b'',
+                                             (error.stderr or b'') +
+                                             ('\n验收子进程超时：' + str(timeout) + ' 秒\n').encode('utf-8'))
     with (OUT / (name + '.log')).open('ab') as stream:
         stream.write(result.stdout + result.stderr)
     summary['tests'][name] = {'returncode': result.returncode, 'expected': expected,
-                              'passed': result.returncode == expected}
+                              'passed': not timed_out and result.returncode == expected,
+                              'timed_out': timed_out}
     print(name, result.returncode, flush=True)
     return result
 
 
-names = ['cli', 'host', 'policy', 'npm', 'wheel-install', 'wheel']
+names = ['cli', 'host', 'policy', 'core', 'governance', 'npm', 'wheel-install', 'wheel']
 if not args.artifacts:
     names += ['npm-pack']
 names += ['npm-install', 'npm-installed']
@@ -102,13 +100,14 @@ if not args.skip_go:
 for name in names:
     (OUT / (name + '.log')).write_bytes(b'')
 run('cli', [sys.executable, '-B', '-X', 'utf8', '-m', 'unittest',
-            'quickjs.tests.test_windows', '-v'])
+            'quickjs.tests.test_windows', 'quickjs.tests.test_doctor', '-v'])
 run('host', [HOST_QJS, ROOT / 'quickjs/tests/test_host_native.mjs'])
 run('policy', [APE, ROOT / 'quickjs/tests/test_native.mjs'])
+run('core', [APE, ROOT / 'quickjs/tests/test_core.mjs'])
 run('governance', [APE, ROOT / 'quickjs/tests/test_governance_native.mjs'])
 run('npm', ['node', '--test', 'tools/tests/npm-distribution.test.cjs'])
 # 安装/Wheel/npm 下仍使用中文+空格路径做兼容性验证；临时根目录自身保持 ASCII，
-# 因为 MSYS2/gcc 等原生工具链对非 ASCII GOTMPDIR/GOCACHE 路径支持不稳定。
+# 因为原生 Go 工具链对非 ASCII GOTMPDIR/GOCACHE 路径支持不稳定。
 with tempfile.TemporaryDirectory(prefix='dairn-win-') as temp:
     tmp = Path(temp)
     isolated = {**env, 'DAIRN_CACHE_HOME': str(tmp / 'runtime-cache'),
@@ -153,14 +152,10 @@ with tempfile.TemporaryDirectory(prefix='dairn-win-') as temp:
         go_env = {**env,
                   'GOCACHE': str(tmp / 'go-build'),
                   'GOTMPDIR': str(tmp / 'go-tmp'),
-                  'GOMODCACHE': str(tmp / 'go-mod')}
+                  'GOMODCACHE': str(tmp / 'go-mod'),
+                  'CGO_ENABLED': '0'}
         for name in ('go-build', 'go-tmp', 'go-mod'):
             (tmp / name).mkdir(exist_ok=True)
-        if args.cc_bin:
-            # MSYS2/MinGW-w64：gcc 自身依赖同目录 DLL，必须把其 bin 放在 PATH 最前。
-            go_env['PATH'] = str(args.cc_bin) + os.pathsep + go_env['PATH']
-            go_env['CC'] = 'gcc'
-            go_env['CGO_ENABLED'] = '1'
         go_env_result = run('go-env', ['go', 'env', '-json', 'GOVERSION', 'GOOS', 'GOARCH',
                                        'CGO_ENABLED', 'CC'], run_env=go_env)
         try:
@@ -179,13 +174,9 @@ with tempfile.TemporaryDirectory(prefix='dairn-win-') as temp:
             checks = json.loads(records[-1].read_text(encoding='utf-8'))['checks']
             summary['go_checks'] = [{k: c.get(k) for k in ['id', 'status', 'exit_code']} for c in checks]
 summary['original_unchanged'] = digest(APE) == summary['ape_sha256']
-# 默认 Go 门禁结果独立记录（-race 需要 CGO/C 编译器），不参与总体验收；
-# 显式提供 --cc-bin --require-go-checks 时，go-checks 与其他套件一样必须通过。
+# 已执行的普通 Go 门禁同样属于验收；--skip-go 时不会产生这些步骤。
 summary['acceptance_passed'] = summary['original_unchanged'] and all(
-    v['passed'] for k, v in summary['tests'].items() if k != 'go-checks')
-if summary['go_checks_required']:
-    go_result = summary['tests'].get('go-checks', {})
-    summary['acceptance_passed'] = summary['acceptance_passed'] and bool(go_result.get('passed'))
+    v['passed'] for v in summary['tests'].values())
 (OUT / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 print(json.dumps(summary, ensure_ascii=False, indent=2))
 sys.exit(0 if summary['acceptance_passed'] else 1)

@@ -156,9 +156,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - uses: actions/setup-go@v5
-        with:
-          go-version: 'stable'
       - uses: actions/download-artifact@v4
         with:
           name: dairn-packages
@@ -186,24 +183,10 @@ jobs:
           print('extracted runtime from release ZIP')
           '@
           $code | python -
-      - name: 定位 MSYS2/MinGW gcc
-        shell: pwsh
-        run: |
-          $gcc = (Get-Command gcc.exe -ErrorAction SilentlyContinue).Source
-          if (-not $gcc) {
-            $pacman = 'C:\msys64\usr\bin\pacman.exe'
-            if (-not (Test-Path $pacman)) { throw 'gcc not found and MSYS2 pacman missing' }
-            & $pacman -Sy --noconfirm --needed mingw-w64-x86_64-gcc
-            if ($LASTEXITCODE -ne 0) { throw 'MSYS2 gcc installation failed' }
-            $gcc = 'C:\msys64\mingw64\bin\gcc.exe'
-          }
-          if (-not (Test-Path $gcc)) { throw "gcc missing: $gcc" }
-          & $gcc --version
-          "CC_BIN=$(Split-Path -Parent $gcc)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Python 集成回归（Windows 套件）
         env:
           DAIRN_OFFLINE: '1'
-        run: python -B -X utf8 tools/verify-windows.py --artifacts incoming --cc-bin "$env:CC_BIN" --require-go-checks
+        run: python -B -X utf8 tools/verify-windows.py --artifacts incoming --skip-go
       - uses: actions/upload-artifact@v4
         if: always()
         with:

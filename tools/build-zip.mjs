@@ -17,7 +17,7 @@ try {
   if(!declared&&host.env('GITHUB_REF_TYPE')==='tag')declared=(host.env('GITHUB_REF_NAME')||'').trim();
   const pkg=JSON.parse(host.read(root+'/package.json'));
   const version=(declared||pkg.version).replace(/^v/,'');
-  if(!/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(alpha|beta|rc)\.(?:0|[1-9][0-9]*))?$/.test(version))throw Error('发布版本格式无效：'+version);
+  if(!/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:alpha|beta|rc)\.(?:0|[1-9][0-9]*)|nightly\.[1-9][0-9]{13}))?$/.test(version))throw Error('发布版本格式无效：'+version);
   const absolute=p=>/^(?:[A-Za-z]:[\\/]|\/)/.test(p)?p:host.cwd()+'/'+p;
   const out=absolute(options.out||root+'/dist');host.mkdirs(out);
   if(!options.qjs)throw Error('缺少 --qjs，请通过 build.cmd、build.sh、Python 或 npm 入口获取 QuickJS');

@@ -37,7 +37,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
+          if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((alpha|beta|rc)\.(0|[1-9][0-9]*)|nightly\.[1-9][0-9]{13}))?$'; then
             echo "::error::tag 输入必须是版本标签（如 v0.1.0-rc.4），不能使用 latest 等别名"
             exit 1
           fi
@@ -217,7 +217,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         run: |
-          if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
+          if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((alpha|beta|rc)\.(0|[1-9][0-9]*)|nightly\.[1-9][0-9]{13}))?$'; then
             echo "::error::tag 输入必须是版本标签（如 v0.1.0-rc.4），不能使用 latest 等别名"
             exit 1
           fi
@@ -312,7 +312,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         run: |
-          if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$'; then
+          if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((alpha|beta|rc)\.(0|[1-9][0-9]*)|nightly\.[1-9][0-9]{13}))?$'; then
             echo "::error::tag 输入必须是版本标签（如 v0.1.0-rc.4），不能使用 latest 等别名"
             exit 1
           fi

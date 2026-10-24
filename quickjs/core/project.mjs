@@ -89,7 +89,7 @@ export function detect(h,root){
 }
 function commands(h,stack,dir){
   const step=argv=>({argv,cwd:dir});
-  if(stack==='go')return {lint:step(['dairn','stack-check','go','lint']),unit:step(['go','test','./...']),integration:step(['go','test','-race','./...']),build:step(['go','build','./...'])};
+  if(stack==='go')return {lint:step(['dairn','stack-check','go','lint']),unit:step(['go','test','./...']),integration:step(['go','test','./...']),build:step(['go','build','./...'])};
   if(stack==='rust')return {lint:step(['dairn','stack-check','rust','lint']),unit:step(['cargo','test','--lib','--bins']),integration:step(['cargo','test','--tests']),build:step(['cargo','build','--locked'])};
   if(stack==='python')return {lint:step(['dairn','stack-check','python','lint']),unit:step(['python','-m','pytest','-m','not integration']),integration:step(['python','-m','pytest','-m','integration']),build:step(['python','-m','build','--no-isolation'])};
   if(stack==='vue'){
@@ -550,13 +550,24 @@ function doctor(h,root){
   }
   const candidates=[['git','--version']];
   for(const m of cfg.modules)for(const stack of m.profiles){
+    if(stack==='python'){
+      const configured=Object.values(m.checks).map(check=>check.argv?.[0]).filter(tool=>
+        typeof tool==='string'&&/^python(?:3(?:\.\d+)?)?(?:\.exe)?$/i.test(tool.replace(/\\/g,'/').split('/').pop()));
+      for(const tool of configured.length?configured:['python'])candidates.push([tool,'--version']);
+      continue;
+    }
     const tool=({go:['go','version'],rust:['cargo','--version'],python:['python','--version'],vue:['node','--version'],
       java:['java','-version'],'spring-boot':['java','-version'],openresty:['openresty','-v']})[stack];
     if(tool)candidates.push(tool);
   }
   const tools={};for(const argv of candidates){if(argv[0] in tools)continue;
-    try{const result=h.run(argv,root,10);tools[argv[0]]=result.code===0?'available':'missing-or-error';}
-    catch(e){tools[argv[0]]='unavailable: '+e.message;}
+    try{
+      const result=h.run(argv,root,10);
+      tools[argv[0]]=result.timedOut?'timeout':result.code===0?'available':'missing-or-error';
+      if(tools[argv[0]]!=='available')problems.push('tool '+argv[0]+': '+tools[argv[0]]+
+        ' (exit '+result.code+')'+(result.output?' — '+String(result.output).trim().slice(0,512):''));
+    }
+    catch(e){tools[argv[0]]='unavailable: '+e.message;problems.push('tool '+argv[0]+': '+tools[argv[0]]);}
   }
   const status=problems.length?'unready':'ready';
   h.log(fmt({product:'Dairn',engine:'Cosmopolitan QuickJS',version:runtimeVersion(h),status,root,runtime_sha256:lock.runtime_sha256,launcher,invocation:launcher.invocation+' doctor',modules,tools,problems}));

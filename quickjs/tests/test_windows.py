@@ -1,4 +1,4 @@
-"""Windows 原生入口和门禁回归；需要 Node，Go 工具链测试另行记录。"""
+"""Windows 原生入口和门禁回归；Go 工具链测试另行记录。"""
 import json
 import os
 from pathlib import Path
@@ -9,7 +9,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI = ROOT / 'dairn.cmd'
-NODE = shutil.which('node')
+QJS = os.environ.get('DAIRN_QJS_BIN') or str(ROOT / 'runtime/dairn-embedded.com')
 
 
 @unittest.skipUnless(os.name == 'nt', '仅适用于 Windows')
@@ -26,6 +26,7 @@ class WindowsAcceptance(unittest.TestCase):
 
     def run_cli(self, *args):
         return subprocess.run([str(CLI), *map(str, args)], capture_output=True,
+                              env={**os.environ, 'GIT_CEILING_DIRECTORIES': self.temp.name},
                               encoding='utf-8', errors='replace', timeout=45)
 
     def init(self):
@@ -37,7 +38,7 @@ class WindowsAcceptance(unittest.TestCase):
         config = self.root / '.dairn/governance/project.json'
         data = json.loads(config.read_text(encoding='utf-8'))
         for check in data['modules'][0]['checks'].values():
-            check['argv'] = [NODE, '-e', script]
+            check['argv'] = [QJS, '-m', '-e', script]
         config.write_text(json.dumps(data), encoding='utf-8')
 
     def evidence(self):
@@ -60,13 +61,13 @@ class WindowsAcceptance(unittest.TestCase):
             self.assertTrue((self.root / file).exists())
 
     def test_real_subprocess_gates(self):
-        self.configure("require('node:assert/strict').ok(require('node:fs').existsSync('go.mod')); console.log('实际子进程执行成功')")
+        self.configure("import * as os from 'os'; import * as std from 'std'; if(os.stat('go.mod')[1]!==0)throw Error('go.mod 不存在'); print('实际子进程执行成功'); std.exit(0)")
         result = self.run_cli('check', '--all', '--root', self.root, '--timeout', '5')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual([x['status'] for x in self.evidence()['checks']], ['passed'] * 4)
 
     def test_nonzero_gate_is_recorded(self):
-        self.configure('process.exit(13)')
+        self.configure("import * as std from 'std'; std.exit(13)")
         result = self.run_cli('check', '--all', '--root', self.root, '--timeout', '5')
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual([x['exit_code'] for x in self.evidence()['checks']], [13] * 4)
@@ -83,7 +84,7 @@ class WindowsAcceptance(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)['paths'], [])
 
     def test_timeout_is_recorded(self):
-        self.configure('setTimeout(()=>{}, 10000)')
+        self.configure("import * as os from 'os'; os.sleep(10000)")
         result = self.run_cli('check', '--all', '--root', self.root, '--timeout', '1')
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertTrue(all(x['timed_out'] and x['exit_code'] is None for x in self.evidence()['checks']))
@@ -100,7 +101,7 @@ class WindowsAcceptance(unittest.TestCase):
             config = self.root / '.dairn/governance/project.json'
             data = json.loads(config.read_text(encoding='utf-8'))
             for check in data['modules'][0]['checks'].values():
-                check.update(argv=[NODE, '-e', 'process.exit(0)'], cwd='linked/child')
+                check.update(argv=[QJS, '-m', '-e', "import * as std from 'std'; std.exit(0)"], cwd='linked/child')
             config.write_text(json.dumps(data), encoding='utf-8')
             result = self.run_cli('check', '--all', '--root', self.root, '--timeout', '5')
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -168,6 +169,17 @@ class WindowsAcceptance(unittest.TestCase):
         self.assertEqual(result.returncode, 127, result.stdout + result.stderr)
         self.assertIn('dairn not found', result.stderr.lower())
         self.assertIn('DAIRN_NOT_AVAILABLE', result.stderr)
+
+    def test_vendored_launcher_preserves_nonzero_exit(self):
+        self.init()
+        target = self.root / '.dairn/runtime'
+        target.mkdir(parents=True, exist_ok=True)
+        for name in ('dairn-embedded.com', 'runtime-integrity.json'):
+            shutil.copyfile(ROOT / 'runtime' / name, target / name)
+        result = self.run_cli('upgrade', '--vendor-runtime', '.dairn/runtime', '--apply', '--root', self.root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = self.run_launcher('invalid-command', env=self.system_path_env())
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
 
     def test_launcher_managed_hashes_survive_autocrlf_clone(self):
         self.init()
