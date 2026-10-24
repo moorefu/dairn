@@ -69,6 +69,21 @@ class Doctor(unittest.TestCase):
         self.assertTrue((self.root / '.dairn/tmp').is_dir())
         self.assertNotIn('Cannot open command output', json.dumps(report))
 
+    def test_doctor_reports_runtime_source_and_freshness(self):
+        result = self.call('doctor')
+        report = json.loads(result.stdout)
+        runtime = report['runtime']
+        self.assertEqual(runtime['version'], report['version'])
+        self.assertIn(runtime['source'],
+                      ('vendored', 'external', 'path', 'packaged', 'unknown'))
+        freshness = runtime['freshness']
+        self.assertIn(freshness['status'],
+                      ('current', 'outdated', 'unknown', 'not-source-repo'))
+        self.assertIsInstance(freshness['stale_count'], int)
+        # 临时项目不是 Dairn 源码 checkout：新鲜度只能报告 not-source-repo，
+        # 不能对安装后的项目假装 current。
+        self.assertEqual(freshness['status'], 'not-source-repo')
+
     def test_doctor_probes_configured_python_interpreter(self):
         policy_path = self.root / '.dairn/governance/project.json'
         policy = json.loads(policy_path.read_text(encoding='utf-8'))

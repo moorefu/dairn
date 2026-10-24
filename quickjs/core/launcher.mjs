@@ -12,7 +12,8 @@
  * 通过 h.read（APE 是二进制，QuickJS 的 loadFile 会按文本处理），因此
  * sha256File 调用系统工具。
  */
-import {sha256Bytes} from './sha256.mjs';
+import {sha256Bytes, sha256} from './sha256.mjs';
+import {POSIX_LAUNCHER_LINES, WINDOWS_LAUNCHER_LINES, RUNTIME_SOURCE_ENV} from './launcher-scripts.mjs';
 const join = (a, b) => a.replace(/\/$/, '') + '/' + b;
 const file = (h, p) => h.exists(p) && !h.isDirectory(p);
 const isObj = x => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -30,45 +31,6 @@ export const LAUNCHER_CONFIG = '.dairn/launcher.json';
 export const RUNTIME_DIR = '.dairn/runtime';
 export const RUNTIME_BINARY = '.dairn/runtime/dairn-embedded.com';
 export const RUNTIME_INTEGRITY = '.dairn/runtime/runtime-integrity.json';
-
-const POSIX_LAUNCHER_LINES = [
-  '#!/bin/sh',
-  '# Dairn project launcher (managed by dairn; do not edit).',
-  'set -eu',
-  '# The APE sh loader needs base system tools (dd/gzip) even when a harness clears PATH.',
-  'if [ -z "${PATH:-}" ]; then PATH=/usr/local/bin:/usr/bin:/bin; export PATH; fi',
-  '# Resolve the project root with shell builtins only: the launcher must also work',
-  '# with a minimal PATH so it can print the clear "dairn not found" error.',
-  'case "$0" in */*) LAUNCHER_DIR=${0%/*} ;; *) LAUNCHER_DIR=. ;; esac',
-  'ROOT=$(CDPATH= cd -- "$LAUNCHER_DIR/../.." && pwd)',
-  'if [ -n "${DAIRN_BIN:-}" ]; then exec "$DAIRN_BIN" "$@"; fi',
-  'if [ -f "$ROOT/.dairn/runtime/dairn-embedded.com" ]; then',
-  '  exec /bin/sh "$ROOT/.dairn/runtime/dairn-embedded.com" /zip/quickjs/main.mjs "$@"',
-  'fi',
-  'if command -v dairn >/dev/null 2>&1; then exec dairn "$@"; fi',
-  'echo "dairn not found (DAIRN_NOT_AVAILABLE): vendor the runtime into .dairn/runtime/ or set DAIRN_BIN" >&2',
-  'exit 127',
-];
-const WINDOWS_LAUNCHER_LINES = [
-  '@echo off',
-  'setlocal',
-  'set "ROOT=%~dp0..\\.."',
-  'if defined DAIRN_BIN goto dairn_external',
-  'if exist "%ROOT%\\.dairn\\runtime\\dairn-embedded.com" goto dairn_vendored',
-  'where dairn >nul 2>nul',
-  'if errorlevel 1 goto dairn_missing',
-  'dairn %*',
-  'exit /b %ERRORLEVEL%',
-  ':dairn_external',
-  '"%DAIRN_BIN%" %*',
-  'exit /b %ERRORLEVEL%',
-  ':dairn_vendored',
-  '"%ROOT%\\.dairn\\runtime\\dairn-embedded.com" /zip/quickjs/main.mjs %*',
-  'exit /b %ERRORLEVEL%',
-  ':dairn_missing',
-  'echo dairn not found (DAIRN_NOT_AVAILABLE): vendor the runtime into .dairn\\runtime\\ or set DAIRN_BIN 1>&2',
-  'exit /b 127',
-];
 
 /* 返回 launcher 脚本文本。POSIX 用 LF；.cmd 用 CRLF，与 .dairn/.gitattributes
  * 的 eol 声明一致，保证跨平台 checkout 后受管哈希稳定。 */
@@ -177,6 +139,49 @@ export function sha256File(h, root, relPath) {
     return digest;
   }
   throw Error('no SHA256 tool available for ' + rel + ' (tried sha256sum, shasum -a 256, certutil -hashfile; ' + failures.join('; ') + ')');
+}
+
+/* 运行时的实际来源（由启动器通过 DAIRN_RUNTIME_SOURCE 传入）。
+ * 只作为 doctor 的观察字段，不参与信任判断：unknown 不表示错误。 */
+export function runtimeSource(h) {
+  let value = null;
+  try { value = h.env(RUNTIME_SOURCE_ENV); } catch (_) { value = null; }
+  const text = typeof value === 'string' ? value.trim() : '';
+  return ['vendored', 'external', 'path', 'packaged'].includes(text) ? text : 'unknown';
+}
+
+/* 将运行中 runtime 内嵌的 engine_sources 与当前工作树比较，回答
+ * “这个运行时是否由当前源码构建”。这是陈旧度提示，不是门禁：
+ * - 非源码 checkout 返回 not-source-repo（安装后的项目无从比较）；
+ * - 运行时未携带 engine_sources 时返回 unknown，不猜测；
+ * - 差异只列前 20 项，完整数量见 stale_count。
+ * 运行时身份仍由 doctor 的 runtime_sha256 / lock 校验负责，二者不要混用。 */
+export function runtimeFreshness(h, root, engineSources) {
+  const sources = Array.isArray(engineSources) ? engineSources.filter(isObj) : [];
+  if (!sources.length) {
+    return {status: 'unknown', checked: 0, stale_sources: [], stale_count: 0,
+      note: 'runtime carries no engine source digests; rebuild the runtime to enable freshness checks'};
+  }
+  if (!file(h, join(root, 'quickjs/main.mjs'))) {
+    return {status: 'not-source-repo', checked: 0, stale_sources: [], stale_count: 0,
+      note: 'current directory is not a Dairn source checkout; freshness is only measurable there'};
+  }
+  const stale = [];
+  for (const source of sources) {
+    const rel = typeof source.path === 'string' ? posix(source.path).trim() : '';
+    const expected = typeof source.sha256 === 'string' ? source.sha256 : '';
+    if (!safeRelPath(rel) || !HEX64.test(expected) || !rel.startsWith('quickjs/')) { stale.push(rel || '<invalid>'); continue; }
+    const target = join(root, rel);
+    if (!file(h, target)) { stale.push(rel); continue; }
+    let actual = null;
+    try { actual = sha256(h.read(target)); } catch (_) { stale.push(rel); continue; }
+    if (actual !== expected) stale.push(rel);
+  }
+  const status = stale.length ? 'outdated' : 'current';
+  return {status, checked: sources.length, stale_sources: stale.slice(0, 20), stale_count: stale.length,
+    note: status === 'current'
+      ? 'working tree matches the embedded engine sources'
+      : 'working tree differs from the embedded engine sources; rebuild and vendor the runtime before verifying source changes'};
 }
 
 /* 注册已放入 .dairn/runtime/ 的官方运行时；只读校验，写盘由调用方负责。 */

@@ -913,7 +913,7 @@ npm run build
 ./dairn.sh docs check
 ```
 
-Windows 使用 `dairn.cmd`。更改 `quickjs/core/`、`quickjs/host/` 或 `quickjs/main.mjs` 后，需要重新构建运行时才能验证新源码；否则可能误测旧产物。
+Windows 使用 `dairn.cmd`。日常命令由根启动器直接执行 `.dairn/runtime/` 的治理运行时快照，不需要先构建。更改 `quickjs/core/`、`quickjs/host/` 或 `quickjs/main.mjs` 后，运行 `python tools/build.py` 并用 `DAIRN_RUNTIME` 指向本次构建验证新源码；需要让治理运行时采用新构建时，再按 `docs/PROJECT_GUIDE.md` 更新 `.dairn/runtime/` 快照并执行 `upgrade --vendor-runtime`；否则可能误测旧产物。
 
 `quickjs.lock.json` 固定 QuickJS 运行时来源。构建涉及的完整步骤、离线缓存、平台矩阵和验证命令，参见 [BUILDING.md](BUILDING.md)。
 

@@ -2,16 +2,29 @@
 
 本仓库是 **Dairn 治理内核的源码仓库**，也通过 `.dairn/` 自我接入治理。`quickjs/assets/` 是分发给目标项目的规范、技能和模板；根目录 `runtime/`、`dist/`、`validation/`、`.build/` 是被忽略的构建与验证产物。
 
-源码是本仓库的事实源。修改内核后先构建并通过根目录启动器验证，再由维护者显式更新 `.dairn/runtime/` 和运行 `upgrade --vendor-runtime`，避免项目 launcher 一直执行旧代码。本仓库允许用已验证的本地构建自测，这不构成官方发行版或受保护 CI 的信任证明。
+源码是本仓库的事实源。日常命令直接运行根目录启动器 `./dairn.sh`（Windows `dairn.cmd`）：它优先执行
+项目内 `.dairn/runtime/` 中随仓库 vendor 的治理运行时快照，因此不需要先构建；根目录 `runtime/`
+只是构建产物（`.gitignore` 忽略），只用于构建、打包和显式验证新源码。本仓库允许用已验证的本地
+构建自测，这不构成官方发行版或受保护 CI 的信任证明。
 
-## Build-first：先构建再调用
+## 运行时分主，构建按需
 
 不要全局安装 npm/pip 版 Dairn，也不要裸敲 `dairn`。在本仓库中：
 
-- POSIX：先 `python tools/build.py`（或 `npm run build`）生成 `runtime/`，再用 `./dairn.sh <args>`；
-- Windows：同样构建后使用 `dairn.cmd <args>`；
-- 构建需要 Python 3.10+；首次联网获取 `quickjs.lock.json` 锁定的 QuickJS（缓存 `.build/quickjs/`，可用 `DAIRN_OFFLINE=1` 离线但需预热）；
-- 无法构建（缺工具链/网络/权限）时，报告 blocked 及原因；**不要**安装替代运行时或改用其他 Dairn 版本。
+- 日常：直接 `./dairn.sh <args>`（Windows `dairn.cmd <args>`）；根目录 `dairn.sh`/`dairn.cmd`
+  是唯一 launcher，实际执行 `.dairn/runtime/` 的治理运行时快照；
+- 只读代码或文档：不需要构建，也不需要跑 vendor/upgrade 全套流程；
+- 修改 `quickjs/core/**`、`quickjs/host/**`、`quickjs/main.mjs` 或 `quickjs/assets/**` 后：
+  `python tools/build.py`（或 `npm run build`）生成根目录 `runtime/`，再用
+  `DAIRN_RUNTIME=<仓库>/runtime/dairn-embedded.com ./dairn.sh <args>` 验证新构建；
+  这只影响验证，不会自动替换治理运行时；
+- 需要治理运行时采用新构建（或发布前）：按 `docs/PROJECT_GUIDE.md` 更新 `.dairn/runtime/`
+  快照并运行 `upgrade --vendor-runtime`，由维护者审阅 lock 与受管资源差异；
+- 构建需要 Python 3.10+；首次联网获取 `quickjs.lock.json` 锁定的 QuickJS（缓存
+  `.build/quickjs/`，可用 `DAIRN_OFFLINE=1` 离线但需预热）；
+- 安装包（ZIP/Wheel/npm）没有项目 `.dairn/` 配置时，根启动器回退到包内 `runtime/`；
+- 无法构建（缺工具链/网络/权限）时，报告 blocked 及原因；**不要**安装替代运行时或改用其他
+  Dairn 版本。
 
 ## 常用命令
 
@@ -27,7 +40,9 @@ python tools/checksums.py
 
 本仓库的 `doctor/validate/check/work` 使用已提交的 `.dairn/lock.json` 与项目自有策略。修改内核或资产后，根目录新构建与旧 lock 的差异会导致校验失败，需审阅并执行升级计划，不能手改摘要绕过。接手时先运行 `dairn.cmd handoff --json`（POSIX 用 `./dairn.sh`）获取只读摘要，并以 `handoff_fingerprint_sha256` 检测会话间工作区变化。
 
-本仓库的四项真实门禁由 `python tools/check-source.py lint|unit|integration|build` 实现，策略入口为 `.dairn/governance/project.json`；不要使用未配置标记的 `pytest -m integration`。默认集成验证轻量临时项目全流程，不需要 Go/gcc；普通 Go 检查和三类制品完整验收保留为专项入口，不把 Go race 作为默认验收。每轮 nightly 用 `python tools/nightly-version.py --apply` 刷新北京时间版本，同轮构建和验收保持版本一致。同步 vendor 后，完整本地验收运行 `.dairn\bin\dairn.cmd check --all --timeout 3600`，避免构建门禁重写正在执行的根目录 APE。具体范围、证据和推送后流程见 `docs/PROJECT_GUIDE.md`。
+本仓库的四项真实门禁由 `python tools/check-source.py lint|unit|integration|build` 实现，策略入口为 `.dairn/governance/project.json`；不要使用未配置标记的 `pytest -m integration`。默认集成验证轻量临时项目全流程，不需要 Go/gcc；普通 Go 检查和三类制品完整验收保留为专项入口，不把 Go race 作为默认验收。每轮 nightly 用 `python tools/nightly-version.py --apply` 刷新北京时间版本，同轮构建和验收保持版本一致。完整本地验收运行 `./dairn.cmd check --all --timeout 3600`（POSIX `./dairn.sh check --all --timeout 3600`）；门禁的 build 阶段会重建根目录 `runtime/`，但根启动器执行的是 `.dairn/runtime/` 快照，不会被重建中的构建产物影响。具体范围、证据和推送后流程见 `docs/PROJECT_GUIDE.md`。
+
+根启动器通过 `DAIRN_RUNTIME_SOURCE` 把实际运行时来源传给内核；`dairn doctor` 的 `runtime.source` 与 `runtime.freshness` 只作观察（陈旧度提示），运行时身份仍以 lock 的 `runtime_sha256` 为准。
 
 ## 修改规则
 

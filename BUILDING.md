@@ -33,15 +33,15 @@ python tools/checksums.py      # 校验发布目录仅有三类制品并写入�
 
 在仓库中，Windows 执行 `build.cmd`，POSIX 执行 `sh build.sh`，先获取现成 QuickJS，再由它生成运行 ZIP。三种入口共用下载锁和缓存，重复构建字节一致；每次把当前 JS/资源嵌入新 APE，并更新 `runtime/`。ZIP 解压即可运行，不携带源码或构建脚本；源码自举需使用仓库。Python/npm 使用内部暂存区构建。
 
-根目录的 `dairn.sh`、`dairn.cmd` 是唯一启动器来源，ZIP 原样收录，安装脚本也使用同一份。npm 与 Wheel 原样收录 `dairn.sh`，各自校验包内运行时后，在 POSIX 调用它，在 Windows 直接执行包内 APE；参数、工作目录和退出码透传。发布制品在 POSIX 构建时保留运行时的执行位；若安装或复制后丢失该位，POSIX 启动器只补执行位、不改写文件内容，因为 APE 的 sh 加载器用 `command -v "$0"` 定位自身，而 bash（macOS 的 `/bin/sh`）对不可执行路径会返回失败。默认启动保持安装目录原样；设置 `DAIRN_FAST_RUNTIME=1` 后，POSIX 共用按原始 APE SHA256 命名的缓存目录，`DAIRN_CACHE_HOME` 可指定缓存位置。快速模式只作为本地可选加速：缓存目录必须是当前用户私有（`0700`，拒绝符号链接），转换后的二进制为 `0700`、SHA256 元数据为 `0600`，每次执行前重新核对摘要；摘要不符、元数据缺失或被篡改的缓存在锁内原子重建，无法安全修复时回退不可变源 APE。GitHub Actions / GitLab CI（或显式 `DAIRN_PROTECTED_CI=1`）默认禁用快速模式，不读取也不写入共享缓存；普通 `CI=true` 不影响本地快速模式。Python 不再单独复制或转换运行时。
+根目录的 `dairn.sh`、`dairn.cmd` 是唯一启动器来源，ZIP 原样收录，安装脚本也使用同一份。源码仓库中，根启动器优先执行 `.dairn/runtime/` 的治理运行时快照（日常命令不需要先构建），仓库根 `runtime/` 只是构建/打包/显式验证的产物（通过 `DAIRN_RUNTIME` 使用）。npm 与 Wheel 原样收录 `dairn.sh`，各自校验包内运行时后，在 POSIX 调用它，在 Windows 直接执行包内 APE；参数、工作目录和退出码透传。发布制品在 POSIX 构建时保留运行时的执行位；若安装或复制后丢失该位，POSIX 启动器只补执行位、不改写文件内容，因为 APE 的 sh 加载器用 `command -v "$0"` 定位自身，而 bash（macOS 的 `/bin/sh`）对不可执行路径会返回失败。默认启动保持安装目录原样；设置 `DAIRN_FAST_RUNTIME=1` 后，POSIX 共用按原始 APE SHA256 命名的缓存目录，`DAIRN_CACHE_HOME` 可指定缓存位置。快速模式只作为本地可选加速：缓存目录必须是当前用户私有（`0700`，拒绝符号链接），转换后的二进制为 `0700`、SHA256 元数据为 `0600`，每次执行前重新核对摘要；摘要不符、元数据缺失或被篡改的缓存在锁内原子重建，无法安全修复时回退不可变源 APE。GitHub Actions / GitLab CI（或显式 `DAIRN_PROTECTED_CI=1`）默认禁用快速模式，不读取也不写入共享缓存；普通 `CI=true` 不影响本地快速模式。Python 不再单独复制或转换运行时。
 
 POSIX 首次启动 APE 需要 `uname`、`mkdir`、`dd`、`gzip`、`chmod`、`mv` 初始化加载器缓存；macOS ARM64 还需要系统 `cc`。取得 QuickJS 后，嵌入和 ZIP 写入由它自身完成。
 
 ## 项目内 launcher 与 CI 测试运行时
 
-`dairn init` / `dairn adopt` 会在目标项目生成 launcher 文件（`.dairn/bin/dairn`、`.dairn/bin/dairn.cmd`、`.dairn/.gitattributes`，以及项目自有的 `.dairn/launcher.json`），模板来自嵌入运行时。它们只影响目标项目，不改变发布制品的字节；发布构建与 6 平台矩阵安装 npm/Wheel/ZIP 后仍使用包内运行时，并执行 `docs check`，不依赖目标项目的 launcher。
+`dairn init` / `dairn adopt` 会在目标项目生成 launcher 文件（`.dairn/bin/dairn`、`.dairn/bin/dairn.cmd`、`.dairn/.gitattributes`，以及项目自有的 `.dairn/launcher.json`），模板来自嵌入运行时。它们的源码位置是 `quickjs/core/launcher-scripts.mjs`，生成副本纳入 lock 受管资源；launcher 的实际执行者是项目内 `.dairn/runtime/` 的 vendored 运行时（`DAIRN_BIN`/PATH 只是回退）。这些文件只影响目标项目，不改变发布制品的字节；发布构建与 6 平台矩阵安装 npm/Wheel/ZIP 后仍使用包内运行时，并执行 `docs check`，不依赖目标项目的 launcher。
 
-本仓库的 `runtime/` 是构建产物（`.gitignore` 中 `/runtime/`）：fresh checkout 不能直接运行 `./dairn.sh`，需先 `python tools/build.py` 或 `npm run build` 生成。发布工作流的 `test-python` job 不重新下载 QuickJS，而是从已构建的发布 ZIP 中提取 `<prefix>/runtime/dairn-embedded.com` 与 `<prefix>/runtime/runtime-integrity.json` 到仓库 `runtime/`，再运行 `tools/verify-linux.py`（完整 Python 套件 + native 测试，需要 Go/git/openssl/jq）；本地等价做法是先构建，再运行同一脚本。
+本仓库的 `runtime/` 是构建产物（`.gitignore` 中 `/runtime/`）：日常运行根启动器使用已提交的 `.dairn/runtime/` 快照，因此 fresh checkout 可以直接 `./dairn.sh version`；只有修改内核/资产或需要刷新治理运行时 / 打包时才先 `python tools/build.py` 或 `npm run build`。发布工作流的 `test-python` job 不重新下载 QuickJS，而是从已构建的发布 ZIP 中提取 `<prefix>/runtime/dairn-embedded.com` 与`<prefix>/runtime/runtime-integrity.json` 到仓库 `runtime/`，再以 `DAIRN_RUNTIME` 指向它运行 `tools/verify-linux.py`（完整 Python 套件 + native 测试，需要 Go/git/openssl/jq）；本地等价做法是先构建，再运行同一脚本。
 
 ### Windows 实机验收
 

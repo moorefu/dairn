@@ -1,0 +1,61 @@
+// 原生 QuickJS 契约测试：launcher 运行时来源与源码陈旧度判定。
+// 这些函数只读工作树、不写项目；临时目录由测试自行清理。
+import * as std from 'std';
+import {host as h} from '../host/qjs.mjs';
+import {sha256} from '../core/sha256.mjs';
+import {
+  POSIX_LAUNCHER_LINES, WINDOWS_LAUNCHER_LINES, RUNTIME_SOURCE_ENV,
+} from '../core/launcher-scripts.mjs';
+import {launcherScripts, runtimeFreshness, runtimeSource} from '../core/launcher.mjs';
+
+const assert = {
+  equal(actual, expected, label) {
+    if (!Object.is(actual, expected)) throw Error('断言失败（' + label + '）：' + String(actual) + ' != ' + String(expected));
+  },
+  ok(value, label) { if (!value) throw Error('断言失败（' + label + '）：' + String(value)); },
+};
+
+const tmp = std.getenv('TMPDIR') || std.getenv('TEMP') || '.';
+const base = tmp + '/dairn-launcher-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
+const files = [base + '/quickjs/main.mjs', base + '/quickjs/core/a.mjs'];
+const dirs = [base + '/quickjs/core', base + '/quickjs', base];
+
+try {
+  h.mkdirs(base + '/quickjs/core');
+  h.write(files[0], 'main');
+  h.write(files[1], 'alpha');
+  const sources = [
+    {path: 'quickjs/main.mjs', sha256: sha256('main')},
+    {path: 'quickjs/core/a.mjs', sha256: sha256('alpha')},
+  ];
+
+  const registry = {posix: launcherScripts().posix, windows: launcherScripts().windows};
+  assert.ok(registry.posix.includes(RUNTIME_SOURCE_ENV + '=vendored'), 'POSIX launcher 传递来源');
+  assert.ok(registry.windows.includes('set "' + RUNTIME_SOURCE_ENV + '=vendored"'), 'Windows launcher 传递来源');
+
+  const source = runtimeSource(h);
+  const envSource = h.env(RUNTIME_SOURCE_ENV);
+  if (!envSource) assert.equal(source, 'unknown', '未由 launcher 启动时来源为 unknown');
+  else assert.ok(['vendored', 'external', 'path', 'packaged'].includes(source), '来源取值受控：' + source);
+
+  const current = runtimeFreshness(h, base, sources);
+  assert.equal(current.status, 'current', '工作树与内嵌源码一致');
+  assert.equal(current.checked, 2, '检查条目数');
+  assert.equal(current.stale_count, 0, '无陈旧源码');
+
+  h.write(files[1], 'alpha2');
+  const outdated = runtimeFreshness(h, base, sources);
+  assert.equal(outdated.status, 'outdated', '改动源码后报告 outdated');
+  assert.equal(outdated.stale_sources[0], 'quickjs/core/a.mjs', '指出陈旧源码路径');
+  assert.equal(outdated.stale_count, 1, '陈旧条目数');
+
+  assert.equal(runtimeFreshness(h, base, []).status, 'unknown', '缺少摘要时不猜测');
+  assert.equal(runtimeFreshness(h, base, [{path: 'docs/readme.md', sha256: sha256('x')}]).status, 'outdated', '非引擎源码视为不可信条目');
+  assert.equal(runtimeFreshness(h, base + '/absent', sources).status, 'not-source-repo', '非源码 checkout 不报告陈旧');
+} finally {
+  for (const path of files) { try { h.remove(path); } catch (_) {} }
+  for (const path of dirs) { try { h.rmdir(path); } catch (_) {} }
+}
+
+print('QuickJS 原生 launcher 运行时常量与陈旧度测试：通过');
+std.exit(0);

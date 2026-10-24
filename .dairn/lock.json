@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "version": "0.1.0-nightly.20261024123943",
-  "runtime_sha256": "62621635e24dfbccd7dd4a8384aeb8d315950a6fe6f18a0ddc4918a3f0d9a500",
+  "runtime_sha256": "fe803c4b5f7f729fab3a520a31c32799419e6f09baac0998d494f84fc510d8ce",
   "config": {
     "schema": 2,
     "name": "dairn",
@@ -87,8 +87,8 @@
     ".agents/skills/dairn-workflow-router/agents/openai.yaml": "0429fc8709831573b26b695fd8b46e1fdc5f37b53a6b47bd6941ef94ebec1561",
     ".dairn/.gitattributes": "d31d39269c338522b79747346ccd45caa99cab82887d51d9ed4290d3af3047ec",
     ".dairn/Makefile": "ca61c8d9c72c180832df19072191927c85eccbbc62774510dd67a6ce8c3590d0",
-    ".dairn/bin/dairn": "9761e6b5a7997fe39d02186d2a50f459f0fa4b2d01c9cb5634d91418907895cc",
-    ".dairn/bin/dairn.cmd": "3d521f42d80cf4da380c093b216819fd610c0113b5ada0cb0d69da63a3cdaa76",
+    ".dairn/bin/dairn": "555a6a6ea43e00d92054968f23641ef9aca31570dbbf7473f987b82d82d88b1e",
+    ".dairn/bin/dairn.cmd": "d5db7201f3c966dab8b472f6ef836e878a3eb90b1274eaa04694433333b97e63",
     "AGENTS.md": "9976e7b68f467ff6e574443966b4894f17f9331c4f627724be9e6becb6ffc1e9",
     "docs/GOVERNANCE_SPEC.md": "75b2360a9d0ad208927cce68e2a217cda2a3662609d701b4e97782348bbfd468"
   }

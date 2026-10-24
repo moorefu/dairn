@@ -1,11 +1,40 @@
 #!/bin/sh
-# 仓库、npm、Wheel 和 ZIP 共用此启动器；只补执行位，不改写分发运行时。
+# Dairn 启动器：源码仓库、npm、Wheel 与 ZIP 共用唯一入口。
+#
+# 运行时有明确分工，不要混用：
+#   - 治理运行时快照：项目内 `.dairn/runtime/`（vendor 的固定 APE），
+#     由本启动器直接执行，是日常命令的实际执行者，不需要先构建；
+#   - 构建产物：仓库根 `runtime/`（python tools/build.py 输出），只用于构建、
+#     打包和显式验证新源码（通过 DAIRN_RUNTIME 指定），不参与日常解析；
+#   - 源码：`quickjs/` 是本仓库事实源；只有需要让治理运行时采用新构建、
+#     发布或验证内核改动时才构建，不要求每轮都执行 vendor/upgrade 全套流程。
+#
+# 解析顺序：
+#   DAIRN_RUNTIME（显式覆盖，构建/验证流程用）
+#   -> 项目内 `.dairn/runtime/dairn-embedded.com`（治理运行时快照）
+#   -> 随包分发的 `runtime/`（安装后的发行包）
 set -eu
 DAIRN_DIR=${0%/*}
 [ "$DAIRN_DIR" != "$0" ] || DAIRN_DIR=.
 HERE=$(CDPATH= cd -- "$DAIRN_DIR" && pwd)
-RUNTIME="$HERE/runtime/dairn-embedded.com"
-[ -f "$RUNTIME" ] || { echo "未找到 Dairn 运行时：$RUNTIME（源码仓库请先运行 python tools/build.py；安装包请重新安装）" >&2; exit 2; }
+if [ -n "${DAIRN_RUNTIME:-}" ]; then
+  case "$DAIRN_RUNTIME" in
+    /*) RUNTIME="$DAIRN_RUNTIME" ;;
+    *) RUNTIME="$HERE/$DAIRN_RUNTIME" ;;
+  esac
+  [ -f "$RUNTIME" ] || { echo "Dairn 运行时不存在：$DAIRN_RUNTIME（DAIRN_RUNTIME 覆盖路径）" >&2; exit 2; }
+  DAIRN_RUNTIME_SOURCE=external
+  export DAIRN_RUNTIME_SOURCE
+elif [ -f "$HERE/.dairn/runtime/dairn-embedded.com" ]; then
+  RUNTIME="$HERE/.dairn/runtime/dairn-embedded.com"
+  DAIRN_RUNTIME_SOURCE=vendored
+  export DAIRN_RUNTIME_SOURCE
+else
+  RUNTIME="$HERE/runtime/dairn-embedded.com"
+  [ -f "$RUNTIME" ] || { echo "未找到 Dairn 运行时：$HERE/.dairn/runtime/dairn-embedded.com（治理运行时快照）与 $RUNTIME（随包运行时）均不存在。源码仓库请保留 .dairn/runtime，或仅在需要时运行 python tools/build.py 并更新快照；安装包请重新安装" >&2; exit 2; }
+  DAIRN_RUNTIME_SOURCE=packaged
+  export DAIRN_RUNTIME_SOURCE
+fi
 # APE 的 sh 加载器用 command -v "$0" 定位自身；bash（macOS 的 /bin/sh）对没有
 # 执行位的路径返回失败，dd 会读到空输入并让 gzip 报 EOF。这里只补元数据。
 if [ ! -x "$RUNTIME" ]; then

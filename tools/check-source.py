@@ -40,6 +40,8 @@ def main():
     if not runtime.is_file():
         parser.error('缺少 runtime/，请先运行 python tools/build.py')
     env['DAIRN_QJS_BIN'] = str(runtime)
+    # 门禁必须验证本次构建，而不是 .dairn/runtime 里可能较旧的 vendored 快照。
+    env['DAIRN_RUNTIME'] = str(runtime)
     native = [str(runtime)] if os.name == 'nt' else ['/bin/sh', str(runtime)]
     artifact_dir = None
     if args.stage == 'lint':
@@ -49,14 +51,15 @@ def main():
         commands = [native + [str(ROOT / 'quickjs/tests' / name)] for name in
                     ('test_core.mjs', 'test_native.mjs', 'test_governance_native.mjs',
                      'test_handoff_native.mjs', 'test_gov_native.mjs',
-                     'test_analysis_plan_native.mjs')]
+                     'test_analysis_plan_native.mjs', 'test_launcher_native.mjs')]
         commands += [PYTHON + ['-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_*.py', '-v']]
     elif args.stage == 'integration':
         env['DAIRN_TEST_EVIDENCE_DIR'] = str(OUT / 'integration')
         commands = [native + [str(ROOT / 'quickjs/tests/test_host_native.mjs')],
                     PYTHON + ['-m', 'unittest', 'quickjs.tests.test_integration_light',
                               'quickjs.tests.test_doctor',
-                              'quickjs.tests.test_context_command', '-v']]
+                              'quickjs.tests.test_context_command',
+                              'quickjs.tests.test_root_launcher', '-v']]
     else:
         npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
         if not npm:

@@ -6,7 +6,7 @@ Agent 读取目标项目的 `AGENTS.md` 和 `.agents/skills/dairn-*/SKILL.md`，
 
 `work next` 返回下一步；Agent 修改代码、运行检查并记录可观察证据。普通变更依次经过 Orient → Grill → Specify → Slice → Implement → Review → Synchronize；Grill 阶段必须以人类访谈消除设计树上的未决问题（`--kind grill`），未决问题未清零时不能推进到 Specify。Review 要求当前 HEAD 与 `standards`、`spec_fidelity` 两条审查结论；后者为 `pass` 时需有效 `spec_ref`。存在 Implement 阶段时，还需当前 HEAD 的机器门禁通过。Synchronize 要求 `status`、`head`、`reviewed_docs`、`reason`，记录文档已更新或无需更新的依据。任务完成记录不等于合并批准。
 
-项目初始化后使用项目内 launcher `.dairn/bin/dairn`（Windows `.dairn\bin\dairn.cmd`）作为推荐入口；AGENTS 托管块首行记录该入口，本文与资产中的 `dairn` 均为其简写。Agent 不得自行安装 Dairn；launcher 缺失或 `doctor` 失败时应报告环境问题，而不是安装或下载运行时（详见“项目内 launcher 与 vendored runtime”）。
+项目初始化后使用项目内 launcher `.dairn/bin/dairn`（Windows `.dairn\bin\dairn.cmd`）作为推荐入口；AGENTS 托管块首行记录该入口，本文与资产中的 `dairn` 均为其简写。Agent 不得自行安装 Dairn；launcher 缺失或 `doctor` 失败时应报告环境问题，而不是安装或下载运行时（详见“项目内 launcher 与 vendored runtime”）。Dairn 源码仓库的根启动器（`./dairn.sh`/`dairn.cmd`）直接执行项目内 `.dairn/runtime/` 的 vendored 快照，不经过第二层 launcher，也不要求每次构建。
 
 评审与复盘使用结构化证据：Review 记录 Standards / Spec Fidelity 两轴；Reflect 要求二选一改进项（新增确定性检查，或写入 Review 轴使用的标准文档）。`dairn validate` 只做结构校验，`dairn check` 才真实执行质量门禁；两者都不代表合并批准。
 
@@ -24,7 +24,7 @@ Agent 读取目标项目的 `AGENTS.md` 和 `.agents/skills/dairn-*/SKILL.md`，
 
 launcher 的运行时解析顺序固定为：`DAIRN_BIN` → 项目内 `.dairn/runtime/dairn-embedded.com` → `PATH` 的 `dairn` → 报错并以 127 退出；不做隐式安装或联网下载。
 
-`dairn upgrade --vendor-runtime .dairn/runtime --apply`（adopt 也可在接入时注册）把已放入 `.dairn/runtime/` 的官方 APE 与 `runtime-integrity.json` 注册为 vendored 运行时：CLI 用内建 SHA256 直接读取二进制计算实际摘要（不可读时才回退 `sha256sum`/`shasum`/`certutil`）、与 integrity 比对、要求运行时版本与执行该命令的 Dairn CLI 版本一致（`upgrade` 同时把项目 lock 更新为该版本），并把 `mode=vendored`、`runtime.path/integrity/version/sha256`、`generated_by` 写入 `.dairn/launcher.json`。`--vendor-runtime` 路径相对项目根解析；`dairn doctor` 会复查 launcher 文件、`launcher.json` 与 vendored 运行时摘要，失败时以 unready 退出（退出码 1）。
+`dairn upgrade --vendor-runtime .dairn/runtime --apply`（adopt 也可在接入时注册）把已放入 `.dairn/runtime/` 的官方 APE 与 `runtime-integrity.json` 注册为 vendored 运行时：CLI 用内建 SHA256 直接读取二进制计算实际摘要（不可读时才回退 `sha256sum`/`shasum`/`certutil`）、与 integrity 比对、要求运行时版本与执行该命令的 Dairn CLI 版本一致（`upgrade` 同时把项目 lock 更新为该版本），并把 `mode=vendored`、`runtime.path/integrity/version/sha256`、`generated_by` 写入 `.dairn/launcher.json`。`--vendor-runtime` 路径相对项目根解析；`dairn doctor` 会复查 launcher 文件、`launcher.json` 与 vendored 运行时摘要，失败时以 unready 退出（退出码 1）。 `dairn doctor` 还会报告 `runtime.source`（vendored/external/path/packaged）和 `runtime.freshness`（源码仓库中比较内嵌 engine_sources 与工作树）；它们只是观察字段，运行时身份仍以 lock 的 `runtime_sha256` 为准。
 
 Agent 与 CI 约定：
 

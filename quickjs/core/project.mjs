@@ -15,7 +15,7 @@ import {assessCapabilities, discoverRepository} from './capabilities.mjs';
 import {locateContract, locateRun, compareDebt, verifyExitConditions, writeContract} from './refactor.mjs';
 import {validateRefactorContract} from './project-context.mjs';
 import {collectRunHistory, recommendAdaptations} from './governance-feedback.mjs';
-import {LAUNCHER_POSIX,LAUNCHER_WINDOWS,LAUNCHER_CONFIG,RUNTIME_DIR,launcherScripts,defaultLauncherConfig,readLauncherConfig,launcherInfo,vendorRuntime,verifyLauncher} from './launcher.mjs';
+import {LAUNCHER_POSIX,LAUNCHER_WINDOWS,LAUNCHER_CONFIG,RUNTIME_DIR,launcherScripts,defaultLauncherConfig,readLauncherConfig,launcherInfo,vendorRuntime,verifyLauncher,runtimeSource,runtimeFreshness} from './launcher.mjs';
 import {configuredAnalyzers,analyzerInit,analyzerDoctor,analyzerTemplates,resolveAnalysisSuite} from './analyzers.mjs';
 import {executeAnalyzer,importAnalysisReport} from './analyzer-runner.mjs';
 import {loadQualityGoals} from './quality-goals.mjs';
@@ -573,7 +573,12 @@ function doctor(h,root){
     catch(e){tools[argv[0]]='unavailable: '+e.message;problems.push('tool '+argv[0]+': '+tools[argv[0]]);}
   }
   const status=problems.length?'unready':'ready';
-  h.log(fmt({product:'Dairn',engine:'Cosmopolitan QuickJS',version:runtimeVersion(h),status,root,runtime_sha256:lock.runtime_sha256,launcher,invocation:launcher.invocation+' doctor',modules,tools,problems}));
+  // 运行时来源与源码陈旧度：只报告，不改变门禁语义；运行时身份仍以 runtime_sha256 为准。
+  const runtime_source=runtimeSource(h);
+  let freshness={status:'unknown',checked:0,stale_sources:[],stale_count:0,note:'runtime manifest unavailable'};
+  try{freshness=runtimeFreshness(h,root,assetIndex(h).engine_sources);}catch(_){}
+  h.log(fmt({product:'Dairn',engine:'Cosmopolitan QuickJS',version:runtimeVersion(h),status,root,runtime_sha256:lock.runtime_sha256,
+    runtime:{version:lock.version,source:runtime_source,freshness},launcher,invocation:launcher.invocation+' doctor',modules,tools,problems}));
   for(const problem of problems)h.error('ERROR: '+problem);
   return problems.length?1:0;
 }

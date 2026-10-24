@@ -51,6 +51,7 @@ _QJS_CANDIDATES = sorted((ROOT / '.build/quickjs').glob('qjs-*.com')) if (ROOT /
 HOST_QJS = _QJS_CANDIDATES[0] if _QJS_CANDIDATES else APE
 digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
 env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'DAIRN_QJS_BIN': str(HOST_QJS),
+       'DAIRN_RUNTIME': str(APE),
        'PATH': str(args.go_bin) + os.pathsep + os.environ['PATH']}
 # 临时目录可能位于源码仓库内；验收项目不应继承父仓库的 Git 身份。
 env['GIT_CEILING_DIRECTORIES'] = os.pathsep.join(filter(None, (

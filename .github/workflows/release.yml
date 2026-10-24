@@ -37,6 +37,9 @@ jobs:
           npm run build
           python tools/checksums.py
       - name: 分发资产一致性（Skill/Spec 命令）
+        env:
+          # 构建任务刚生成 runtime/；按构建产物的语义显式指定，避免走 vendored 快照。
+          DAIRN_RUNTIME: ${{ github.workspace }}/runtime/dairn-embedded.com
         run: sh ./dairn.sh docs check
       - name: 分发资产与 docs find 回归
         run: python -B -X utf8 -m unittest quickjs.tests.test_assets_lint -v
