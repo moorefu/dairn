@@ -23,6 +23,8 @@ import {evaluateFitness} from './quality-fitness.mjs';
 import {discoverCapabilities,buildParticipationPlan} from './capability-registry.mjs';
 import {configuredAnalyzers as _cfgAnalyzers} from './analyzers.mjs';
 import {captureFacts,acceptFacts,factSnapshotPath} from './facts.mjs';
+import {buildAnalyzerPlan,renderPlan} from './analyzer-plan.mjs';
+import {buildContextPack,renderContextPack,MAX_LIMIT} from './context.mjs';
 /* Dairn QuickJS 项目生命周期与分发层；写入前规划全部项目变更。 */
 import {sha256} from './sha256.mjs';
 import {guidance} from './guidance.mjs';
@@ -54,8 +56,8 @@ export function runtimeIdentity(h){
   for(const x of m.assets||[]) invariant(sha256(read(h,ASSETS+x.type+'/'+x.path))===x.sha256,'Embedded asset checksum mismatch: '+x.path);
   return sha256(raw);
 }
-const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--analyzer','--suite','--artifact','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars','--window','--file'];
-const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--discover':'discover','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--refresh':'refresh','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
+const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--analyzer','--suite','--artifact','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars','--window','--file','--capability','--for','--limit'];
+const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--discover':'discover','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--refresh':'refresh','--change':'change','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
 function argsParse(args){
   const out={cmd:args[0]||'help',pos:[],root:'.',stack:'auto',ci:'none',timeout:120};
   for(let i=1;i<args.length;i++){
@@ -245,7 +247,8 @@ function makeDesired(h,root,config,prior){
   // .dairn/cache 与 .dairn/tmp 是临时目录（.gitignore 整目录忽略），
   // 不生成受管 marker：否则 fresh clone 缺少这些文件会让 verifyRuntimeLock 失败。
   entries['docs/GOVERNANCE_SPEC.md']='# Dairn\n\nAI-Native Software Engineering Toolkit.\n\n'+
-    'Project policy: `.dairn/governance/project.json`; authoritative reference specs: `dairn docs find <topic>`.\n';
+    'Project policy: `.dairn/governance/project.json`; authoritative reference specs: `dairn docs find <topic>`.\n\n'+
+    'Capability-driven analysis: `dairn analyze plan [--base <ref>] [--apply]` derives needs, reuses valid local results and executes only policy-allowlisted read-only analyzers; task-aware context: `dairn context [query] [--change]` returns sourced, precision-labeled evidence with explicit UNKNOWNs. Both are advisory and never a Gate verdict.\n';
   entries['.dairn/Makefile']='.PHONY: doctor validate check\nDAIRN ?= ./.dairn/bin/dairn\ndoctor:\n\t@$(DAIRN) doctor\nvalidate:\n\t@$(DAIRN) validate\ncheck:\n\t@$(DAIRN) check\n';
   // 项目内 launcher 是受管入口；launcher.json 是项目自有配置（见 planFor 排除列表）。
   const launchers=launcherScripts();
@@ -864,7 +867,7 @@ function refactorCmd(h,o,root){
   throw Error('Usage: dairn refactor plan --id <id> --file <contract.json> [--apply] | refactor compare|verify|status --id <id> [--run <run-id>] [--json]');
 }
 
-export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','analyzers','analyze','quality','capability','stubs','doctor','version','--version','tasks','hooks','notes','evidence','gate','attest','approval','handoff','governance','refactor'].includes(args[0]);}
+export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','analyzers','analyze','context','quality','capability','stubs','doctor','version','--version','tasks','hooks','notes','evidence','gate','attest','approval','handoff','governance','refactor'].includes(args[0]);}
 export function dispatch(h,args){
   try{
     if(args[0]==='stubs'){h.error('Dairn ERROR: unsupported legacy command "stubs"; it was replaced by "dairn analyzers" (breaking rename, no alias)');return 2;}
@@ -988,7 +991,20 @@ export function dispatch(h,args){
     }
     if(o.cmd==='analyze'){
       const rr=checkedRoot(h,root,false);verifyRuntimeLock(h,rr,true);
-      invariant(o.pos[0]==='run'||o.pos[0]==='import','Usage: dairn analyze run <analyzer-id> | --suite <suite-id> [--base <ref>] | analyze import <analyzer-id> [--artifact PATH] [--json] [--out PATH]');
+      if(o.pos[0]==='plan'){
+        const lock=lockRead(h,rr,true);
+        const plan=buildAnalyzerPlan(h,rr,{config:lock.config,base:o.base||null,task:o.task||null,capability:o.capability||null,apply:!!o.apply});
+        if(o.json)h.log(fmt(plan));else h.log(renderPlan(plan));
+        if(o.out){
+          const rel=String(o.out);const outPath=safeRelInside(h,rr,rel);
+          invariant(!file(h,outPath),'refuse to overwrite existing file: '+rel);
+          h.mkdirs(outPath.slice(0,outPath.lastIndexOf('/')));
+          h.writeExclusive(outPath,fmt(plan)+'\n');
+          if(!o.json)h.log('analyzer plan written: '+rel+' (advisory selection, not a gate verdict)');
+        }
+        return plan.status==='ready'?0:3;
+      }
+      invariant(o.pos[0]==='run'||o.pos[0]==='import','Usage: dairn analyze run <analyzer-id> | --suite <suite-id> [--base <ref>] | analyze plan [--base <ref>] [--task TEXT] [--capability CAP] [--apply] [--json] | analyze import <analyzer-id> [--artifact PATH] [--json] [--out PATH]');
       if(o.pos[0]==='import'){
         const id=o.pos[1];
         invariant(id&&/^[a-z][a-z0-9-]{1,48}$/.test(id),'analyze import requires an analyzer id');
@@ -1000,7 +1016,7 @@ export function dispatch(h,args){
           invariant(!file(h,outPath),'refuse to overwrite existing file: '+rel);
           h.mkdirs(outPath.slice(0,outPath.lastIndexOf('/')));
           h.writeExclusive(outPath,fmt(run)+'\n');
-          h.log('analysis import written: '+rel+' (unverified observation, not evidence)');
+          if(!o.json)h.log('analysis import written: '+rel+' (unverified observation, not evidence)');
         }
         return 0;
       }
@@ -1030,10 +1046,31 @@ export function dispatch(h,args){
         invariant(!rel.startsWith('.dairn/governance/'),'refuse to write analysis runs into the governance evidence tree: '+rel);
         h.mkdirs(outPath.slice(0,outPath.lastIndexOf('/')));
         h.writeExclusive(outPath,fmt({summary,runs})+'\n');
-        h.log('analysis runs written: '+rel+' (advisory observation, not evidence)');
+        if(!o.json)h.log('analysis runs written: '+rel+' (advisory observation, not evidence)');
       }
       const failed=runs.filter(x=>x.status!=='completed');
       return failed.length?2:0;
+    }
+    if(o.cmd==='context'){
+      const rr=checkedRoot(h,root,false);
+      const lock=lockRead(h,rr,true);
+      let limit=null;
+      if(o.limit!==undefined){
+        const parsed=Number(o.limit);
+        invariant(Number.isInteger(parsed)&&parsed>=1&&parsed<=MAX_LIMIT,'--limit must be an integer between 1 and '+MAX_LIMIT);
+        limit=parsed;
+      }
+      const pack=buildContextPack(h,rr,{config:lock.config,query:o.pos.join(' '),base:o.base||null,change:!!o.change,focus:o.for||null,limit});
+      if(o.json)h.log(fmt(pack));else h.log(renderContextPack(pack));
+      if(o.out){
+        const rel=String(o.out);const outPath=safeRelInside(h,rr,rel);
+        invariant(!file(h,outPath),'refuse to overwrite existing file: '+rel);
+        invariant(!rel.startsWith('.dairn/governance/'),'refuse to write context packs into the governance evidence tree: '+rel);
+        h.mkdirs(outPath.slice(0,outPath.lastIndexOf('/')));
+        h.writeExclusive(outPath,fmt(pack)+'\n');
+        if(!o.json)h.log('context pack written: '+rel+' (heuristic assembly, not evidence)');
+      }
+      return pack.status==='empty'?1:0;
     }
     if(o.cmd==='guide')return guidance(h,checkedRoot(h,root,false),o.pos[0]||'plan',{strict:!!o.strict,apply:!!o.apply,base:o.base||null,analyzer:o.analyzer||null,templates:{readme:projectReadme,guide:projectGuide},verify:()=>verifyRuntimeLock(h,checkedRoot(h,root,false),true)});
     if(o.cmd==='skills'){

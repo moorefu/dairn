@@ -125,7 +125,7 @@ export function analyzerInit(h,root,{template='python',id='surface',apply=false}
  const existing=configuredAnalyzers(h,root).analyzers;assert(!existing.some(s=>s.id===id),'duplicate analyzer id: '+id);
  const installed=[];
  for(const item of source.files){const target=safe(h,root,item.path);assert(!h.exists(target),'template destination already exists: '+item.path);const raw=h.read(item.asset);assert(raw.length>0,'missing or empty bundled template '+item.asset);installed.push({target,raw,path:item.path});}
- const next={schema:'dairn.analyzers.v1',analyzers:[...existing,{id,domain:'surface',mode:'execute',capabilities:['quality.surface-diff'],execution:{argv:source.argv,cwd:'.',timeout_seconds:120}}]};
+ const next={schema:'dairn.analyzers.v1',analyzers:[...existing,{id,domain:'surface',mode:'execute',capabilities:['surface.api-diff'],execution:{argv:source.argv,cwd:'.',timeout_seconds:120}}]};
  const plan={schema:1,action:'create-project-analyzer',template,id,applied:!!apply,files:[...source.files.map(x=>x.path),CONFIG_PATH],argv:source.argv,ownership:'project',requires:source.requires,analysis:source.description};
  if(!apply)return plan;
  const tmp=manifest+'.analyzer-tmp-'+Date.now(),written=[];

@@ -48,13 +48,15 @@ def main():
     elif args.stage == 'unit':
         commands = [native + [str(ROOT / 'quickjs/tests' / name)] for name in
                     ('test_core.mjs', 'test_native.mjs', 'test_governance_native.mjs',
-                     'test_handoff_native.mjs', 'test_gov_native.mjs')]
+                     'test_handoff_native.mjs', 'test_gov_native.mjs',
+                     'test_analysis_plan_native.mjs')]
         commands += [PYTHON + ['-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_*.py', '-v']]
     elif args.stage == 'integration':
         env['DAIRN_TEST_EVIDENCE_DIR'] = str(OUT / 'integration')
         commands = [native + [str(ROOT / 'quickjs/tests/test_host_native.mjs')],
                     PYTHON + ['-m', 'unittest', 'quickjs.tests.test_integration_light',
-                              'quickjs.tests.test_doctor', '-v']]
+                              'quickjs.tests.test_doctor',
+                              'quickjs.tests.test_context_command', '-v']]
     else:
         npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
         if not npm:
