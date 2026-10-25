@@ -41,7 +41,7 @@ Windows 上 Cosmopolitan 通过 `_COSMO_FDS_V2` 向子进程传递 fd 表；原�
 
 ## 更新本仓库的 .dairn
 
-每轮 nightly 先运行 `python tools/nightly-version.py --apply`，以北京时间生成 `0.1.0-nightly.YYYYMMDDHHMMSS`；正式标签版本仍优先。更新版本后，先完成本轮构建再更新 vendor，不使用旧版本 runtime。
+nightly 版本由构建入口按北京时间自动生成 `0.1.0-nightly.YYYYMMDDHHMMSS`（基础版本取 `package.json`，可用 `DAIRN_BUILD_TIME` 固定）；正式标签版本仍优先，无需再手动刷新版本。更新版本后，先完成本轮构建再更新 vendor，不使用旧版本 runtime。
 
 仅在新构建的相关回归通过后，显式将根目录 `runtime/` 中的 APE 和完整性清单复制到 `.dairn/runtime/`，再用新构建执行升级（否则 lock 记录的是旧运行时身份）；不要手改二进制或摘要：
 

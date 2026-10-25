@@ -16,13 +16,10 @@ import tempfile
 import venv
 import zipfile
 from source_workspace import prepare_workspace, runtime_payload, zip_paths
-from release_config import artifact_names, load_release
+from release_config import (artifact_names, build_instant, format_instant, load_release,
+                            version_from_artifacts)
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE = load_release(ROOT)
-VERSION = RELEASE['version']
-WHEEL_VERSION = RELEASE['python_version']
-NAMES = artifact_names(RELEASE)
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--artifacts', type=Path, help='验收已有发布制品，不重新生成被安装的包')
 parser.add_argument('--package', choices=['all', 'npm', 'wheel', 'zip'], default='all')
@@ -36,6 +33,20 @@ if args.smoke and not args.artifacts:
     parser.error('冒烟验证需要 --artifacts，不在 runner 上重建制品')
 if args.skip_npm and args.package != 'all':
     parser.error('--skip-npm 不能与独立制品验收合用')
+if args.artifacts:
+    if not args.artifacts.is_dir():
+        parser.error('--artifacts 目录不存在：' + str(args.artifacts))
+    args.artifacts = args.artifacts.resolve()
+    # 复用已构建制品时版本必须从制品文件名恢复；重新取构建时间会得到不同 nightly。
+    VERSION = version_from_artifacts(ROOT, args.artifacts)
+    RELEASE = load_release(ROOT, version=VERSION)
+else:
+    # Python 与 npm 两个构建入口必须共用一个构建时间戳，否则 ZIP 与 tarball 版本不一致。
+    os.environ.setdefault('DAIRN_BUILD_TIME', format_instant(build_instant()))
+    RELEASE = load_release(ROOT)
+VERSION = RELEASE['version']
+WHEEL_VERSION = RELEASE['python_version']
+NAMES = artifact_names(RELEASE)
 selected = set(NAMES) if args.package == 'all' else {args.package}
 if args.skip_npm:
     selected.remove('npm')
@@ -118,7 +129,7 @@ def verify():
             if not args.artifacts:
                 run('npm-build', [npm, 'run', 'build', '--', '--out', built])
                 assert sha(archive) == original_zip_hash, 'Python/npm 生成的 ZIP 不一致'
-        runtime_payload(ROOT, archive)
+        runtime_payload(ROOT, archive, VERSION)
         summary['zip_files'] = sorted(zip_paths(ROOT))
         extracted = extract_zip(archive, tmp / 'extracted')
         runtime = extracted / '.dairn/runtime/dairn-embedded.com'
@@ -140,7 +151,7 @@ def verify():
                     name = 'quickjs/assets/' + entry['type'] + '/' + entry['path']
                     assert hashlib.sha256(zipped.read(name)).hexdigest() == entry['sha256']
         if not args.smoke and selected & {'wheel', 'zip'}:
-            source = prepare_workspace(ROOT, tmp / 'source', archive)
+            source = prepare_workspace(ROOT, tmp / 'source', archive, VERSION)
 
         if 'npm' in selected:
             with tarfile.open(built / NAMES['npm']) as tar:
@@ -232,7 +243,7 @@ def verify():
             engine.write_bytes(engine.read_bytes() + '\n// 源码重建验收标记\n'.encode('utf-8'))
             changed = tmp / 'changed'
             run('source-rebuild', [*command, '--out', changed], cwd=source, override=bare)
-            runtime_payload(ROOT, changed / archive.name)
+            runtime_payload(ROOT, changed / archive.name, VERSION)
             changed_root = extract_zip(changed / archive.name, tmp / 'changed-extracted')
             assert sha(changed_root / '.dairn/runtime/dairn-embedded.com') != runtime_hash
             with zipfile.ZipFile(changed_root / '.dairn/runtime/dairn-embedded.com') as zipped:

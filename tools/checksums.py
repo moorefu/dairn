@@ -4,13 +4,14 @@ import hashlib
 import json
 from pathlib import Path
 import zipfile
-from release_config import artifact_names, load_release
+from release_config import artifact_names, load_release, version_from_artifacts
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--dist', type=Path, default=root / 'dist')
 args = parser.parse_args()
-names = artifact_names(load_release(root))
+# 版本从本轮已构建的 ZIP 文件名恢复，避免各子进程重新取构建时间导致版本不一致。
+names = artifact_names(load_release(root, version=version_from_artifacts(root, args.dist)))
 unexpected = {p.name for p in args.dist.iterdir() if p.is_file()} - set(names.values()) - {'checksums.json'}
 if unexpected:
     raise SystemExit('发布目录含有额外制品，请先清理：' + ', '.join(sorted(unexpected)))

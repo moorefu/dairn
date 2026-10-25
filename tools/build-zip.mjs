@@ -5,6 +5,27 @@ import {host} from '../quickjs/host/qjs.mjs';
 import {sha256Bytes} from '../quickjs/core/sha256.mjs';
 import {utf8,readBytes,writeBytes,zip,readZip} from './zip.mjs';
 
+// 未显式给出版本时按构建时间生成 nightly，算法与 tools/release_config.py 一致：
+// DAIRN_BUILD_TIME 可为 ISO 8601 或 epoch 秒，按北京时间（UTC+8）格式化为 YYYYMMDDHHMMSS。
+function beijingStamp(instant){
+  const iso=new Date(instant.getTime()+8*3600*1000).toISOString();
+  return iso.slice(0,4)+iso.slice(5,7)+iso.slice(8,10)+iso.slice(11,13)+iso.slice(14,16)+iso.slice(17,19);
+}
+function buildInstant(){
+  let raw=(host.env('DAIRN_BUILD_TIME')||'').trim();
+  if(!raw)return new Date();
+  if(/^[0-9]{9,}(?:\.[0-9]+)?$/.test(raw))return new Date(parseFloat(raw)*1000);
+  if(!/[Zz]$|[+-][0-9]{2}:[0-9]{2}$/.test(raw))raw+='+08:00';
+  const instant=new Date(raw);
+  if(Number.isNaN(instant.getTime()))throw Error('DAIRN_BUILD_TIME 不是有效时间：'+raw);
+  return instant;
+}
+function nightlyVersion(version){
+  const base=version.split('-')[0];
+  if(!/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/.test(base))throw Error('package.json 的 version 必须是三段数字：'+version);
+  return base+'-nightly.'+beijingStamp(buildInstant());
+}
+
 try {
   const options={root:host.cwd()};
   for(let i=1;i<scriptArgs.length;i+=2){
@@ -12,11 +33,11 @@ try {
     options[key.slice(2)]=scriptArgs[i+1];
   }
   const root=host.realpath(options.root);
-  // 版本以标签为准；没有标签（本地构建）时使用 package.json。
+  // 版本以标签为准；没有标签（本地构建）时按构建时间生成 nightly。
   let declared=(options.version||host.env('DAIRN_VERSION')||'').trim();
   if(!declared&&host.env('GITHUB_REF_TYPE')==='tag')declared=(host.env('GITHUB_REF_NAME')||'').trim();
   const pkg=JSON.parse(host.read(root+'/package.json'));
-  const version=(declared||pkg.version).replace(/^v/,'');
+  const version=(declared||nightlyVersion(pkg.version)).replace(/^v/,'');
   if(!/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:alpha|beta|rc)\.(?:0|[1-9][0-9]*)|nightly\.[1-9][0-9]{13}))?$/.test(version))throw Error('发布版本格式无效：'+version);
   const absolute=p=>/^(?:[A-Za-z]:[\\/]|\/)/.test(p)?p:host.cwd()+'/'+p;
   const out=absolute(options.out||root+'/dist');host.mkdirs(out);
@@ -25,7 +46,7 @@ try {
   const input=readBytes(absolute(options.qjs));
   if(sha256Bytes(input)!==quickjs.binary_sha256)throw Error('QuickJS SHA256 与下载锁不一致');
   const release=JSON.parse(host.read(root+'/tools/release.json'));
-  if(['version','npm_version','python_version'].some(key=>key in release))throw Error('版本只由标签或 package.json 的 version 决定，release.json 不得定义');
+  if(['version','npm_version','python_version'].some(key=>key in release))throw Error('版本只由标签或构建时间生成，release.json 不得定义');
   release.version=version;
   const excluded=new Set(['dist','node_modules','__pycache__','.git','.pytest_cache']);
   const files=new Map();

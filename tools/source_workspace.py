@@ -5,7 +5,7 @@ import os
 from pathlib import Path, PurePosixPath
 import shutil
 import zipfile
-from release_config import load_release
+from release_config import load_release, version_from_archive, version_from_artifacts
 
 
 def zip_paths(root):
@@ -14,8 +14,11 @@ def zip_paths(root):
         p.relative_to(root).as_posix() for p in (root / 'licenses').rglob('*') if p.is_file()}
 
 
-def runtime_payload(root, archive):
-    release = load_release(root)
+def runtime_payload(root, archive, version=None):
+    # 已构建制品的版本从运行 ZIP 文件名恢复；显式传入时以调用方为准。
+    if version is None:
+        version = version_from_archive(root, archive)
+    release = load_release(root, version=version)
     prefix = f'{release["name"]}-{release["version"]}/'
     with zipfile.ZipFile(archive) as zipped:
         expected = {prefix + name for name in zip_paths(root)}
@@ -41,16 +44,19 @@ def checked_runtime_zip(root, artifacts):
     archive = artifacts / name
     if hashlib.sha256(archive.read_bytes()).hexdigest() != record['artifacts'][name]:
         raise ValueError('发布 ZIP 指纹不匹配')
-    binary, _ = runtime_payload(root, archive)
+    binary, _ = runtime_payload(root, archive, version_from_artifacts(root, artifacts))
     if hashlib.sha256(binary).hexdigest() != record['ape_sha256']:
         raise ValueError('发布 APE 指纹不匹配')
     return archive
 
 
-def prepare_workspace(root, destination, archive=None):
+def prepare_workspace(root, destination, archive=None, version=None):
     """源码来自 checkout 白名单；APE 来自待测 ZIP，均不修改原件。"""
     root, destination = root.resolve(), destination.resolve()
-    release = load_release(root)
+    # 复用已构建制品时，版本必须随 ZIP 文件名走，不能重新按当前时间生成 nightly。
+    if version is None and archive is not None:
+        version = version_from_archive(root, archive)
+    release = load_release(root, version=version)
     excluded = {'dist', 'node_modules', '__pycache__', '.git', '.pytest_cache'}
     destination.mkdir(parents=True, exist_ok=False)
 
@@ -78,7 +84,7 @@ def prepare_workspace(root, destination, archive=None):
             raise ValueError('非法源码路径：' + name)
         copy(Path(name))
     if archive is not None:
-        binary, integrity = runtime_payload(root, archive)
+        binary, integrity = runtime_payload(root, archive, release['version'])
         # 仓库根 runtime/ 是 verify-linux 的 DAIRN_RUNTIME 构建槽；.dairn/runtime
         # 是根启动器实际执行的治理运行时，回归必须使用待测 ZIP 的载荷。
         for relative in ('runtime', '.dairn/runtime'):

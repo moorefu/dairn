@@ -25,7 +25,7 @@ python tools/checksums.py
 
 - 本仓库四项真实门禁：`python tools/check-source.py lint|unit|integration|build`，策略入口 `.dairn/governance/project.json`；不要使用未配置标记的 `pytest -m integration`。
 - 完整本地验收：`./dairn check --all --timeout 3600`。门禁 build 阶段会重建根目录 `runtime/`，但根启动器执行 `.dairn/runtime/` 快照，不受影响。
-- 每轮 nightly 用 `python tools/nightly-version.py --apply` 刷新北京时间版本，同轮构建与验收保持版本一致。
+- nightly 版本由构建入口按北京时间自动生成（`DAIRN_BUILD_TIME` 可固定，基础版本取 `package.json` 三段号）；同一轮构建与验收共用同一时间戳，发布版本仍以标签为准，不再手动刷新 `package.json`。
 - 验证新构建：`python tools/build.py`（或 `npm run build`）生成根目录 `runtime/`，再 `DAIRN_RUNTIME=<仓库>/runtime/dairn-embedded.com ./dairn <args>`；这只影响验证。需要治理运行时采用新构建（或发布前）时，按 [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md) 更新 `.dairn/runtime/` 并运行 `upgrade --vendor-runtime`，由维护者审阅 lock 与受管差异。
 - 首次构建需 Python 3.10+，联网获取 `quickjs.lock.json` 锁定的 QuickJS（缓存 `.build/quickjs/`；`DAIRN_OFFLINE=1` 可离线但需预热）。
 - `dairn doctor` 的 `runtime.source` 与 `runtime.freshness` 是观察字段；运行时身份以 lock 的 `runtime_sha256` 为准。

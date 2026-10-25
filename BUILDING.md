@@ -1,12 +1,12 @@
 # 构建与验证
 
-仓库提供 Python PEP 517 和 npm 入口。**发布版本以 `v<版本>` 标签为准；没有标签时使用 `package.json` 的 `version`**。CI 在标签推送时通过 `DAIRN_VERSION` 传递标签版本，本地可用同名环境变量演练。`tools/release.json` 只管理分发名称与源码范围，不得定义版本。CLI、npm、ZIP 使用该 SemVer 版本，Release 标签加 `v` 前缀；Python 元数据与 Wheel 自动转换为 PEP 440 格式（`-alpha.N` → `aN`、`-beta.N` → `bN`、`-rc.N` → `rcN`、`-nightly.时间戳` → `.dev时间戳`）。
+仓库提供 Python PEP 517 和 npm 入口。**发布版本以 `v<版本>` 标签为准；没有标签时（PR、分支、本地构建）由构建入口按构建时间自动生成 `主版本.次版本.修订号-nightly.YYYYMMDDHHMMSS`（北京时间），基础版本取 `package.json` 的 `version`**。CI 在标签推送时通过 `DAIRN_VERSION` 传递标签版本，本地可用同名环境变量演练。`tools/release.json` 只管理分发名称与源码范围，不得定义版本。CLI、npm、ZIP 使用该 SemVer 版本，Release 标签加 `v` 前缀；Python 元数据与 Wheel 自动转换为 PEP 440 格式（`-alpha.N` → `aN`、`-beta.N` → `bN`、`-rc.N` → `rcN`、`-nightly.时间戳` → `.dev时间戳`）。
 
-开发构建采用 `主版本.次版本.修订号-nightly.YYYYMMDDHHMMSS`，时间戳固定使用北京时间（UTC+8）。运行 `python tools/nightly-version.py` 预览下一版本，添加 `--apply` 才更新 `package.json`，保留三段基础版本并替换原有预发布后缀。每轮构建开始前刷新一次；Python、npm、ZIP、校验和及验收共用这个固定版本，不在每个构建子进程中重新取时间。这样同一版本仍可复现，已有发布制品也不会被新版本覆盖。
+开发构建采用 `主版本.次版本.修订号-nightly.YYYYMMDDHHMMSS`，时间戳固定使用北京时间（UTC+8），由构建入口在运行时生成，无需修改 `package.json`；`package.json` 只保留三段基础版本。构建时间可通过 `DAIRN_BUILD_TIME`（ISO 8601 或 epoch 秒）固定，Python、npm、ZIP、校验和及验收因此共用同一版本；`python tools/nightly-version.py` 可预览本轮会生成的版本，`--instant` 输出可直接写入 `DAIRN_BUILD_TIME` 的构建时间。这样同一版本仍可复现，已有发布制品也不会被新版本覆盖。
 
 Python 工程采用 `pyproject.toml` + `src/dairn/` 布局；npm 入口为 `package.json` + `bin/dairn.cjs`。构建工具集中在 `tools/`，分发测试位于 `tools/tests/`，共享的 QuickJS 下载锁为根目录 `quickjs.lock.json`。
 
-发版只需推送 `v<版本>` 标签；标签版本会写入内嵌 manifest、运行时校验元数据和三类制品文件名，`package.json` 不再需要跟着升版（没有标签的本地构建仍以它为准）。构建自动生成这些版本信息，无需手动同步。CLI 从内嵌 manifest 读取版本，Python 模块从安装元数据读取版本。仓库不提交 `.com`，构建后用 `DAIRN_RUNTIME` 显式指向 `runtime/` 中的产物验证；启动器不会从 `runtime/` 隐式回退。
+发版只需推送 `v<版本>` 标签；标签版本会写入内嵌 manifest、运行时校验元数据和三类制品文件名，`package.json` 不再需要跟着升版（没有标签的本地构建以它的三段基础版本加构建时间生成 nightly）。构建自动生成这些版本信息，无需手动同步。CLI 从内嵌 manifest 读取版本，Python 模块从安装元数据读取版本。仓库不提交 `.com`，构建后用 `DAIRN_RUNTIME` 显式指向 `runtime/` 中的产物验证；启动器不会从 `runtime/` 隐式回退。
 
 ## 三类发布制品
 
@@ -25,15 +25,15 @@ ZIP 解压到目标项目根即可运行：根启动器从同目录 `.dairn/runt
 ## 打包与自举
 
 ```sh
-python tools/nightly-version.py --apply  # 新的一轮 nightly；之后各入口保持该版本
+python tools/nightly-version.py  # 预览本轮构建会生成的 nightly 版本
 python tools/build.py          # Python 3.10+，生成 Wheel 和 ZIP
 npm run build                 # Node.js 18+，生成 npm tarball 和同一 ZIP
 python tools/checksums.py      # 校验发布目录仅有三类制品并写入清单
 ```
 
-两种入口支持 `--out`。PEP 517 可用 `python -m build --wheel` 或 `python -m pip wheel --no-deps .`。根目录直接 `npm pack` 会通过 `prepack` 生成 `runtime/`（这条本地路径按 `package.json` 的版本构建）；正式 npm 包没有安装脚本。
+两种入口支持 `--out`。PEP 517 可用 `python -m build --wheel` 或 `python -m pip wheel --no-deps .`。根目录直接 `npm pack` 会通过 `prepack` 生成 `runtime/`（这条本地路径按 `package.json` 的三段基础版本构建，不带构建时间戳）；正式 npm 包没有安装脚本。
 
-在仓库中，`python tools/build.py`（Python 3.10+）与 `npm run build`（Node 18+）都会先获取现成 QuickJS，再由它把当前 JS/资源嵌入新 APE 并更新 `runtime/`。各入口共用下载锁和缓存，重复构建字节一致；ZIP 解压即可运行，不携带源码或构建脚本；源码自举需使用仓库。Python/npm 使用内部暂存区构建。
+在仓库中，`python tools/build.py`（Python 3.10+）与 `npm run build`（Node 18+）都会先获取现成 QuickJS，再由它把当前 JS/资源嵌入新 APE 并更新 `runtime/`。各入口共用下载锁和缓存；固定 `DAIRN_BUILD_TIME` 时重复构建字节一致，未固定时 nightly 时间戳变化会带来新的版本和产物名。ZIP 解压即可运行，不携带源码或构建脚本；源码自举需使用仓库。Python/npm 使用内部暂存区构建。
 
 根目录的 `dairn`、`dairn.cmd` 是唯一启动器来源，由 `tools/render-launchers.mjs` 从 `quickjs/core/launcher-scripts.mjs` 生成；ZIP、npm/Wheel 与 `dairn init`/`dairn adopt` 生成的项目启动器都与它们同源。源码仓库中，根启动器执行 `.dairn/runtime/` 的治理运行时快照（日常命令不需要先构建）；仓库根 `runtime/` 只是构建/打包/显式验证的产物，使用时必须用 `DAIRN_RUNTIME` 显式指定。启动器按“显式 `DAIRN_RUNTIME` → 同目录 `.dairn/runtime/dairn-embedded.com` → 报错并以 2 退出”的顺序解析运行时，不隐式回退到 `runtime/`、不联网下载。npm 与 Wheel 原样收录启动器与包内运行时，安装适配层把 `DAIRN_RUNTIME_DIR` 指向包内运行时；在 POSIX 调用启动器，在 Windows 直接执行包内 APE，参数、工作目录和退出码透传。发布制品在 POSIX 构建时保留运行时的执行位；若安装或复制后丢失该位，POSIX 启动器只补执行位、不改写文件内容，因为 APE 的 sh 加载器用 `command -v "$0"` 定位自身，而 bash（macOS 的 `/bin/sh`）对不可执行路径会返回失败。旧根启动器的 `DAIRN_FAST_RUNTIME` / `DAIRN_CACHE_HOME` 快速缓存已随之移除，当前启动器没有缓存或转换开关。Python 不再单独复制或转换运行时。
 
@@ -88,7 +88,7 @@ Linux 可在 `python:3.12-bookworm` 容器中执行该脚本。Windows Podman �
 | macOS | x64 | `macos-15-intel` |
 | macOS | ARM64 | `macos-15` |
 
-构建任务先获取并校验 QuickJS，自举嵌入后生成同一套三类制品，并在打包后执行 `./dairn docs check` 与 `python -m unittest quickjs.tests.test_assets_lint` 作为分发资产一致性门禁；标签推送时制品版本取自标签，没有标签时取 `package.json`。矩阵统一使用 `--smoke` 最小验证：校验制品指纹，安装 npm/Wheel 或解压 ZIP，再执行 `version`、初始化、`validate` 与 `docs check`。初始化使用 Python 模板，仅验证内嵌资源和项目结构，不执行项目工具链。测试 runner 不下载 QuickJS、不安装 Go，不跑 Go race、npm 深度测试或自举回归。
+构建任务先获取并校验 QuickJS，自举嵌入后生成同一套三类制品，并在打包后执行 `./dairn docs check` 与 `python -m unittest quickjs.tests.test_assets_lint` 作为分发资产一致性门禁；标签推送时制品版本取自标签，没有标签时按构建时间生成 nightly（基础版本取 `package.json`）。矩阵统一使用 `--smoke` 最小验证：校验制品指纹，安装 npm/Wheel 或解压 ZIP，再执行 `version`、初始化、`validate` 与 `docs check`。初始化使用 Python 模板，仅验证内嵌资源和项目结构，不执行项目工具链。测试 runner 不下载 QuickJS、不安装 Go，不跑 Go race、npm 深度测试或自举回归。
 
 除矩阵外还有两个集成回归 job，均被 `accepted` 汇总门禁：
 
@@ -97,7 +97,7 @@ Linux 可在 `python:3.12-bookworm` 容器中执行该脚本。Windows Podman �
 
 各任务独立保存结果，不跳过失败；矩阵、test-python 与 test-python-windows 全部成功后汇总才通过。Windows ARM64 由系统兼容层执行 APE 的 Windows x64 入口。流程支持 push、PR 和手动运行，上游版本统一从锁文件读取；发布只由标签触发。
 
-推送 `v<版本>` 标签且矩阵全部通过后，发布任务才下载本次已验证的同一套制品，校验 SHA256，再上传 npm `.tgz`、Wheel `.whl`、运行 `.zip` 和 `checksums.json` 至 GitHub Release。发布版本即标签版本（`package.json` 只在该次运行没有标签时兜底）；alpha/beta/rc 标为预发布。普通分支推送和 PR 只构建验证、不发布，只有发布任务获得 `contents: write`。GitHub Release 只是附件；npm 与 PyPI 通过下面的注册表发布工作流单独推送。
+推送 `v<版本>` 标签且矩阵全部通过后，发布任务才下载本次已验证的同一套制品，校验 SHA256，再上传 npm `.tgz`、Wheel `.whl`、运行 `.zip` 和 `checksums.json` 至 GitHub Release。发布版本即标签版本（没有标签的运行只构建验证、不发布）；alpha/beta/rc 标为预发布。普通分支推送和 PR 只构建验证、不发布，只有发布任务获得 `contents: write`。GitHub Release 只是附件；npm 与 PyPI 通过下面的注册表发布工作流单独推送。
 
 先发布不可变的版本 Release，再创建或更新标签为 `latest` 的滚动 Release；预发布也更新该入口并保留预发布标记。文档使用 `/releases/tag/latest` 和 `/releases/download/latest/…`，不依赖 GitHub 仅指向正式版的 `/releases/latest` 路径。
 

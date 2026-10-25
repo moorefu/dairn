@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  # 标签推送时版本以标签为准；没有标签的 CI 运行回退 package.json。
+  # 标签推送时版本以标签为准；没有标签的 CI 运行按构建时间生成 nightly（基础版本取 package.json）。
   DAIRN_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
 
 jobs:
@@ -19,6 +19,8 @@ jobs:
     name: 获取现成 QuickJS 并自举三类制品
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      build_time: ${{ steps.stamp.outputs.build_time }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,7 +33,16 @@ jobs:
         with:
           path: .build/quickjs
           key: quickjs-${{ runner.os }}-${{ hashFiles('quickjs.lock.json') }}
+      - name: 固定本轮构建时间
+        id: stamp
+        run: |
+          # 无标签构建时 nightly 版本取构建时间；同一 job 的 Python、npm 与校验清单共用该时间戳。
+          build_time="$(python tools/nightly-version.py --instant)"
+          echo "build_time=$build_time" >> "$GITHUB_OUTPUT"
+          echo "本轮构建时间：$build_time"
       - name: 下载校验 QuickJS、自举嵌入并打包
+        env:
+          DAIRN_BUILD_TIME: ${{ steps.stamp.outputs.build_time }}
         run: |
           python tools/build.py
           npm run build

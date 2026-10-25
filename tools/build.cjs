@@ -7,15 +7,34 @@ const path = require('node:path');
 const {spawnSync} = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:alpha|beta|rc)\.(?:0|[1-9][0-9]*)|nightly\.[1-9][0-9]{13}))?$/;
+const BASE = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/;
 function packageVersion() {
   return JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 }
+function buildInstant() {
+  let raw = (process.env.DAIRN_BUILD_TIME || '').trim();
+  if (!raw) return new Date();
+  // 允许 epoch 秒或 ISO 8601；裸时间按北京时间解释，与 tools/release_config.py 一致。
+  if (/^[0-9]{9,}(?:\.[0-9]+)?$/.test(raw)) return new Date(parseFloat(raw) * 1000);
+  if (!/[Zz]$|[+-][0-9]{2}:[0-9]{2}$/.test(raw)) raw += '+08:00';
+  const instant = new Date(raw);
+  if (Number.isNaN(instant.getTime())) throw Error('DAIRN_BUILD_TIME 不是有效时间：' + raw);
+  return instant;
+}
+// 没有标签时按构建时间生成 nightly；基础版本取 package.json 的三段数字。
+function nightlyVersion(version) {
+  const base = version.split('-')[0];
+  if (!BASE.test(base)) throw Error('package.json 的 version 必须是三段数字：' + version);
+  const iso = new Date(buildInstant().getTime() + 8 * 3600 * 1000).toISOString();
+  return base + '-nightly.' + iso.slice(0, 4) + iso.slice(5, 7) + iso.slice(8, 10) +
+    iso.slice(11, 13) + iso.slice(14, 16) + iso.slice(17, 19);
+}
 // 标签推送时版本以标签为准（CI 通过 DAIRN_VERSION 或 GitHub 标签上下文传递）；
-// 没有标签时回退 package.json。
+// 没有标签时回退到构建时间 nightly，不再读取 package.json 的完整版本。
 function effectiveVersion() {
   let declared = (process.env.DAIRN_VERSION || '').trim();
   if (!declared && process.env.GITHUB_REF_TYPE === 'tag') declared = (process.env.GITHUB_REF_NAME || '').trim();
-  if (!declared) return packageVersion();
+  if (!declared) return nightlyVersion(packageVersion());
   const version = declared.replace(/^v/, '');
   if (!SEMVER.test(version)) throw Error('发布版本格式无效：' + declared);
   return version;
@@ -41,7 +60,7 @@ try {
   if (fetched.error) throw fetched.error;
   if (fetched.status !== 0) throw Error('获取 QuickJS 失败');
   const binary = fetched.stdout.trim();
-  // 根目录 npm pack 的 tarball 版本来自 package.json，prepack 也按它构建；
+  // 根目录 npm pack 的 tarball 版本来自 package.json（不含构建时间戳），prepack 按它暂存；
   // 正式产物写到 --out，暂存包里的 package.json 会被改写为有效版本。
   const version = stageOnly ? packageVersion() : effectiveVersion();
   const args = [path.join(root, 'tools/build-zip.mjs'), '--root', root, '--qjs', binary,

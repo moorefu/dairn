@@ -9,6 +9,8 @@ import subprocess
 import sys
 import tempfile
 
+from release_config import build_instant, format_instant
+
 # Windows 上 Cosmopolitan 用 _COSMO_FDS_V2 向子进程传递 fd 表；原生工具
 # （Python/Node 等）再启动 APE 孙进程时，该变量指向未经继承的句柄，表现为
 # stdout 丢失或 0xC0000005。源码门禁的全部子进程必须运行在干净环境里。
@@ -56,12 +58,14 @@ def main():
         commands += [PYTHON + ['-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_*.py', '-v']]
     elif args.stage == 'integration':
         # 各模块互不依赖、各自在独立临时目录里启动 CLI 子进程，可以并行执行；
-        # 串行时这一阶段约 340s，耗时集中在三个 Python 模块上，拆分后由最慢者决定。
+        # 串行时这一阶段约 340s，耗时集中在 Python 模块上，拆分后由最慢者决定。
         commands = [native + [str(ROOT / 'quickjs/tests/test_host_native.mjs')]]
         commands += [PYTHON + ['-m', 'unittest', module, '-v'] for module in
                      ('quickjs.tests.test_integration_light',
                       'quickjs.tests.test_doctor',
                       'quickjs.tests.test_context_command',
+                      'quickjs.tests.test_runtime_lock_diagnostic',
+                      'quickjs.tests.test_docs_retrieval',
                       'quickjs.tests.test_root_launcher')]
     else:
         npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
@@ -75,6 +79,10 @@ def main():
                     PYTHON + ['tools/build.py', '--out', str(artifact_dir)],
                     [npm, 'run', 'build', '--', '--out', str(artifact_dir)],
                     PYTHON + ['tools/checksums.py', '--dist', str(artifact_dir)]]
+        # ZIP、npm tarball、Wheel 与校验清单必须共用同一构建时间戳，
+        # 否则各子进程分别取当前时间会得到不同 nightly 版本。
+        if not env.get('DAIRN_BUILD_TIME', '').strip():
+            env['DAIRN_BUILD_TIME'] = format_instant(build_instant())
     def run_one(index, command):
         log = OUT / (args.stage + '-' + str(index) + '.log')
         command_env = dict(env)
