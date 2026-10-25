@@ -63,7 +63,8 @@ class RootLauncher(unittest.TestCase):
                 "#!/bin/sh\necho \"VENDORED $DAIRN_RUNTIME_SOURCE $*\"\n", encoding='utf-8', newline='\n')
             result = run(['/bin/sh', str(launcher), 'version', '--json'])
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual(result.stdout.strip(), 'VENDORED vendored version --json')
+            # 根启动器把 /zip/quickjs/main.mjs 作为首个参数交给内嵌运行时。
+            self.assertEqual(result.stdout.strip(), 'VENDORED vendored /zip/quickjs/main.mjs version --json')
 
     def test_launcher_exports_runtime_dir_for_payload_copy(self):
         launcher = self._copy_launcher()
@@ -96,7 +97,7 @@ class RootLauncher(unittest.TestCase):
             result = run(['/bin/sh', str(launcher), 'doctor'],
                          env={'DAIRN_RUNTIME': str(runtime)})
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual(result.stdout.strip(), 'EXTERNAL external doctor')
+            self.assertEqual(result.stdout.strip(), 'EXTERNAL external /zip/quickjs/main.mjs doctor')
 
     def test_relative_dairn_runtime_resolves_from_launcher_directory(self):
         launcher = self._copy_launcher()

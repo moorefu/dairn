@@ -114,13 +114,16 @@ class ProjectLauncher(unittest.TestCase):
         shutil.copyfile(payload / 'dairn-embedded.com', binary)
         shutil.copyfile(payload / 'runtime-integrity.json', integrity)
         os.chmod(binary, 0o755)
-        self.ok('upgrade', '--vendor-runtime', '.dairn/runtime', '--apply', '--root', self.root)
+        # 构建时间版本：CI 构建的载荷版本与 .dairn 快照不同；vendored 流程要求
+        # 以同一运行时执行 upgrade/doctor（等价于真实用户用发行包内的启动器操作）。
+        env = {'DAIRN_RUNTIME': str(binary)}
+        self.ok('upgrade', '--vendor-runtime', '.dairn/runtime', '--apply', '--root', self.root, env=env)
         config = self.launcher_config()
         self.assertEqual(config['mode'], 'vendored')
         declared = json.loads(integrity.read_text(encoding='utf-8'))['sha256']
         self.assertEqual(config['runtime']['sha256'], declared)
         self.assertEqual(config['runtime']['path'], '.dairn/runtime/dairn-embedded.com')
-        doctor = self.obj('doctor', '--json', '--root', self.root)
+        doctor = self.obj('doctor', '--json', '--root', self.root, env=env)
         self.assertEqual(doctor['status'], 'ready', doctor.get('problems'))
         self.assertEqual(doctor['launcher']['mode'], 'vendored')
         result = self.project_launcher_version('')
@@ -130,7 +133,9 @@ class ProjectLauncher(unittest.TestCase):
         data = bytearray(binary.read_bytes())
         data[len(data) // 2] ^= 0xff
         binary.write_bytes(bytes(data))
-        broken = self.call('doctor', '--json', '--root', self.root)
+        # 用未篡改的载荷副本执行 doctor，检测 launcher 配置与 vendored 文件摘要不符。
+        broken = self.call('doctor', '--json', '--root', self.root,
+                           env={'DAIRN_RUNTIME': str(payload / 'dairn-embedded.com')})
         self.assertNotEqual(broken.returncode, 0, broken.stdout + '\n' + broken.stderr)
         combined = (broken.stdout + broken.stderr).lower()
         self.assertTrue('sha256' in combined or 'mismatch' in combined, broken.stdout + '\n' + broken.stderr)
@@ -145,6 +150,7 @@ class ProjectLauncher(unittest.TestCase):
         shutil.copyfile(payload / 'runtime-integrity.json', runtime_dir / 'runtime-integrity.json')
         os.chmod(runtime_dir / 'dairn-embedded.com', 0o755)
         shutil.copyfile(ROOT / 'dairn', release / 'dairn')
+        os.chmod(release / 'dairn', 0o755)
         shutil.copyfile(ROOT / 'dairn.cmd', release / 'dairn.cmd')
         shutil.copyfile(ROOT / 'LICENSE', release / 'LICENSE')
         binary_before = (runtime_dir / 'dairn-embedded.com').read_bytes()

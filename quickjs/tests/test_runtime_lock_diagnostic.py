@@ -45,6 +45,15 @@ class RuntimeLockDiagnostic(unittest.TestCase):
         result = self.call('doctor')
         return result, json.loads(result.stdout)
 
+    def git_init(self):
+        for command in (['git', 'init', '-q'],
+                        ['git', 'config', 'user.email', 'tester@example.test'],
+                        ['git', 'config', 'user.name', 'tester'],
+                        ['git', 'add', '-A'],
+                        ['git', 'commit', '-qm', 'baseline']):
+            subprocess.run(command, cwd=self.root, capture_output=True,
+                           text=True, timeout=120, check=True)
+
     def tamper(self, **updates):
         data = dict(self.lock)
         data.update(updates)
@@ -127,6 +136,8 @@ class RuntimeLockDiagnostic(unittest.TestCase):
         self.assertNotEqual(self.call('validate').returncode, 0)
 
     def test_advisory_commands_remain_read_only_available(self):
+        # handoff 依赖 git 仓库；CI 的临时目录不是仓库，先建立最小基线。
+        self.git_init()
         self.tamper(runtime_sha256='2' * 64)
         for advisory in (('version',), ('help',), ('docs', 'find', 'launcher'), ('handoff', '--json')):
             result = self.call(*advisory)

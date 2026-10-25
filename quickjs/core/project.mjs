@@ -1207,7 +1207,7 @@ export function dispatch(h,args){
       }
       return pack.status==='empty'?1:0;
     }
-    if(o.cmd==='guide')return guidance(h,checkedRoot(h,root,false),o.pos[0]||'plan',{strict:!!o.strict,apply:!!o.apply,base:o.base||null,analyzer:o.analyzer||null,templates:{readme:projectReadme,guide:projectGuide},verify:()=>verifyRuntimeLock(h,checkedRoot(h,root,false),true)});
+    if(o.cmd==='guide')return guidance(h,checkedRoot(h,root,false),o.pos[0]||'plan',{strict:!!o.strict,apply:!!o.apply,base:o.base||null,analyzer:o.analyzer||null,templates:{readme:c=>projectReadme(templateReader(h),c),guide:c=>projectGuide(templateReader(h),c)},verify:()=>verifyRuntimeLock(h,checkedRoot(h,root,false),true)});
     if(o.cmd==='skills'){
       if(o.pos[0]==='catalog'){
         const m=assetIndex(h);for(const s of m.assets.filter(x=>x.type==='skills'&&x.path.endsWith('/SKILL.md')))h.log(s.path.split('/')[0]);return 0;
