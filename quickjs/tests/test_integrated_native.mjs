@@ -128,8 +128,10 @@ test('RT09 准备中断只能由已退出的所有者恢复，不读取半份备
   const root=dir+'/interrupted',transaction='test-prepare',path=root+'/.dairn/runtime-transactions/'+transaction;
   host.mkdirs(path);host.write(root+'/.dairn/runtime-promotion.lock',JSON.stringify({transaction,owner_pid:123,operation:'promote'}));
   host.write(path+'/journal.json',JSON.stringify({schema:'dairn.runtime-transaction.v1',id:transaction,status:'preparing',owner_pid:123,plan:{plan_sha256:'a'.repeat(64),inputs:[{path:'.dairn/lock.json',sha256:'b'.repeat(64)}]}}));
-  let rejected=false;try{recoverRuntime({...host,processAlive:()=>true},root,{transaction,apply:true});}catch(_){rejected=true;}
-  assert(rejected&&host.exists(root+'/.dairn/runtime-promotion.lock'),'活跃所有者被恢复');
+  for(const state of [true,null]){
+    let rejected=false;try{recoverRuntime({...host,processAlive:()=>state},root,{transaction,apply:true});}catch(_){rejected=true;}
+    assert(rejected&&host.exists(root+'/.dairn/runtime-promotion.lock'),'活跃或状态未知的所有者被恢复');
+  }
   assert(recoverRuntime({...host,processAlive:()=>false},root,{transaction,apply:true}).status==='rolled-back','准备中断无法恢复');
   assert(!host.exists(root+'/.dairn/runtime-promotion.lock'),'恢复后互斥锁未释放');
 });

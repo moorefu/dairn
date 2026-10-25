@@ -111,3 +111,13 @@ Linux 完整套件发现 `test_policy_change_invalidates_machine_evidence` 的�
 最终补验结果：`validation/linux-final-followup/tests.log` 记录 7 项通过、0 失败、0 跳过，耗时 122.768 秒；驱动退出 0，候选摘要记录 cleanup=completed。`summary.json` 保存同一镜像、network=none、普通用户和 APE 摘要。完整套件专项耗时 1656.675 秒，原始退出 1 保留；全部诊断均已复制，任务容器已清理。最终源码修正仅涉及两份测试与本记录，运行时核心和制品字节不变。
 
 `./dairn tasks check` 退出 0（8 个任务、0 错误、0 告警）；任务未批量标记 Done，因为跨平台和 PCC 部署证据尚缺。`guide impact --base origin/main` 退出 0、结果为 heuristic 的 contract-impact，仅用于文档审查，不作为语义正确或批准证明。远端 main 复核仍为 `3ba5568d46f34bdb3aec46c34a65df976f19d087`。
+
+## 2026-10-26：PR #4 集成回归修复
+
+原始 Linux 失败来自 Launcher 夹具混用了旧 Pin 与新候选，以及三份受保护脚本在 Git 中缺少执行位。Windows 还暴露了离线测试未预置锁定 QuickJS、Python 子进程编码、生成模块路径的反斜杠问题。提交 `15258fc` 修正这些入口后，云端 Linux 完整回归通过；Windows 剩余 10 项失败的原始日志与制品保留在 `validation/ci-failures-15258fc/`。
+
+剩余失败中，9 项事务恢复因固定 Cosmopolitan 4.0.2 的 Windows 零信号接口无法可靠确认所有者退出而被安全拒绝；不能把权限错误解释为已退出。Windows 改用系统 PowerShell 的只读 .NET 进程查询，查询失败仍返回未知并拒绝恢复。另 1 项是测试恢复 Run 时的文本换行转换，已改为原始字节恢复，保留摘要篡改拒绝断言。新增真实 Python 子进程的存活、退出、探测不终止目标及查询工具不可用回归，并明确验证未知状态不能夺锁。平台行为仍须由修复提交的 Windows CI 实跑确认。
+
+本地定向 16 项通过；隔离 ZIP 上单元与集成阶段均退出 0，工具单测 109 项通过。日志为 `focused-green.log`、`candidate-recheck.log`。最终构建再通过原生宿主、集成组件、存活查询回归与资产检查，日志 `candidate-v2-probes.log`。一次错误验证入口直接使用无执行位的构建输出，产生的失败保留在 `incorrect-entry/` 与 `candidate-verify.log`，不计为通过。
+
+项目 Pin 已显式提升到 `0.1.0-nightly.20261026010634`，APE SHA256 为 `1175ae0154497cbd8ae3925030a15c593b17e198e96eb3e7577471b0e6db57e1`，设计身份为 `34faccc970254701fb08e457dabb00c723c3cdc27a67719da4acd385030ea63a`。事务 `mvo2zzdv-atn3zun7` 已应用、可回滚、无受管资产迁移；Launcher 配置与 Lock 同步更新。提升后根启动器的 `version`、`doctor`、`validate`、`docs check` 均退出 0，证据 `pin-checks.log`。本节相对日志路径均位于 `validation/ci-failures-15258fc/`，不代表平台批准或签名。

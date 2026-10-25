@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "binary": "dairn-embedded.com",
-  "sha256": "0b503ce3fd7246fc135ad13ddefde865cdce0fb221893e7ac557a93ff9a3784a",
-  "engine_version": "0.1.0-nightly.20261025232338",
+  "sha256": "1175ae0154497cbd8ae3925030a15c593b17e198e96eb3e7577471b0e6db57e1",
+  "engine_version": "0.1.0-nightly.20261026010634",
   "quickjs": {
     "version": "2026-06-04",
     "url": "https://github.com/moorefu/quickjs-cosmo/releases/download/v2026-06-04/quickjs-cosmo-2026-06-04.zip",

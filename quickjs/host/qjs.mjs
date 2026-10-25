@@ -254,6 +254,29 @@ function realpath(path) {
   }
   return result;
 }
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0 || pid > 2147483647) return null;
+  if (pid === os.getpid()) return true;
+  try {
+    if (os.platform === 'win32') {
+      // 固定的 Cosmo 4.0.2 在 Windows 上可能把 kill(pid, 0) 当作终止操作，
+      // 或把不存在的 PID 报为 EPERM；不得把权限错误降级成“已退出”。
+      const systemRoot = std.getenv('SYSTEMROOT') || std.getenv('SystemRoot');
+      if (!systemRoot || !/^[A-Za-z]:[\\/]/.test(systemRoot)) return null;
+      const powershell = normalize(systemRoot) + '/System32/WindowsPowerShell/v1.0/powershell.exe';
+      const script = 'try {$p = [System.Diagnostics.Process]::GetProcessById(' + pid + ')} ' +
+        'catch [System.ArgumentException] {[Console]::Out.Write("exited"); exit 0} catch {exit 3}; ' +
+        'try {if ($p.HasExited) {[Console]::Out.Write("exited")} else {[Console]::Out.Write("alive")}} ' +
+        'catch {exit 3} finally {$p.Dispose()}';
+      const result = run([powershell, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], host.cwd(), 10);
+      if (result.timedOut || result.code !== 0) return null;
+      const state = result.output.trim();
+      return state === 'alive' ? true : state === 'exited' ? false : null;
+    }
+    const code = os.kill(pid, 0);
+    return code === 0 ? true : code === -3 ? false : null;
+  } catch (_) { return null; }
+}
 export const host = {
   read, readBytes, write, writeBytes, exists, mkdirs, realpath, run,
   writeExclusive(path,content){
@@ -295,7 +318,7 @@ export const host = {
     if (result.timedOut || result.code !== 0) throw new Error('chmod failed: ' + path);
   },
   pid(){return os.getpid();},
-  processAlive(pid){if(!Number.isInteger(pid)||pid<=0)return null;try{const code=os.kill(pid,0);return code===0?true:code===-3?false:null;}catch(_){return null;}},
+  processAlive,
   fileMode(path){const [entry,error]=os.stat(path);if(error!==0)throw Error('stat failed');return entry.mode&0o777;},
   now() { return new Date().toISOString(); },
   log(s) { print(s); },

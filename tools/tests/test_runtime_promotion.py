@@ -13,6 +13,40 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class RuntimePromotion(unittest.TestCase):
+    def test_process_liveness_preserves_live_processes_and_detects_exited_owners(self):
+        with tempfile.TemporaryDirectory(prefix='dairn-process-state-') as directory:
+            script = Path(directory) / 'probe.mjs'
+            script.write_text('import {host} from '
+                + json.dumps((ROOT / 'quickjs/host/qjs.mjs').as_posix()) + ';\n'
+                + 'print(JSON.stringify({self:host.processAlive(host.pid()),'
+                  'target:host.processAlive(Number(scriptArgs[1])),'
+                  'invalid:[0,-1,1.5].map(pid=>host.processAlive(pid))}));\n', encoding='utf-8')
+            runtime = os.environ['DAIRN_TEST_RUNTIME']
+            invocation = [runtime] if os.name == 'nt' else ['/bin/sh', runtime]
+
+            def probe(pid, env=None):
+                result = subprocess.run(invocation + [str(script), str(pid)], cwd=ROOT, env=env,
+                    capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                return json.loads(result.stdout)
+
+            process = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+            try:
+                state = probe(process.pid)
+                self.assertIs(state['self'], True)
+                self.assertIsNone(process.poll(), '只读存活探测不得终止目标进程')
+                self.assertIs(state['target'], True)
+                self.assertEqual(state['invalid'], [None, None, None])
+                if os.name == 'nt':
+                    unavailable = probe(process.pid, {**os.environ, 'SYSTEMROOT': directory})
+                    self.assertIsNone(unavailable['target'], '探测工具不可用必须返回未知')
+                    self.assertIsNone(process.poll())
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                process.wait(timeout=10)
+            self.assertIs(probe(process.pid)['target'], False)
+
     def test_interrupted_rollback_restores_the_pre_rollback_snapshot(self):
         self.rollback_recovery_case('interrupt')
 

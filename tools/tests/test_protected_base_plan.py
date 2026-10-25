@@ -139,12 +139,13 @@ class ProtectedBasePlan(unittest.TestCase):
             self.assertIn('Worktree changed since machine run', changed.stdout)
             source.write_text('value = 1\n', encoding='utf-8')
             passed('work', 'verify', 'base-policy', '--require-machine-gates')
-            old_run = run_path.read_text()
-            run_path.write_text(old_run + '\n', encoding='utf-8')
+            # 证据摘要绑定原始字节；Windows 文本读写会把 LF 转成 CRLF。
+            old_run = run_path.read_bytes()
+            run_path.write_bytes(old_run + b'\n')
             changed = call('work', 'verify', 'base-policy', '--require-machine-gates')
             self.assertEqual(changed.returncode, 2, changed.stdout + changed.stderr)
             self.assertIn('Machine evidence digest mismatch', changed.stdout)
-            run_path.write_text(old_run, encoding='utf-8')
+            run_path.write_bytes(old_run)
             passed('work', 'verify', 'base-policy', '--require-machine-gates')
 
             # 无 Base 的完整检查继续绑定当前策略；与 Base Run 可共同引用。
