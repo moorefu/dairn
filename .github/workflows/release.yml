@@ -59,6 +59,14 @@ jobs:
             dist/checksums.json
           if-no-files-found: error
           retention-days: 14
+      - name: 保存锁定的 QuickJS 测试引导工具
+        uses: actions/upload-artifact@v4
+        with:
+          name: dairn-quickjs-bootstrap
+          path: .build/quickjs/qjs-*.com
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
 
   test:
     name: 冒烟验证 ${{ matrix.runner }}（npm、Wheel、ZIP）
@@ -148,6 +156,11 @@ jobs:
         with:
           name: dairn-packages
           path: incoming
+      - name: 预置离线源码测试需要的锁定 QuickJS
+        uses: actions/download-artifact@v4
+        with:
+          name: dairn-quickjs-bootstrap
+          path: .build/quickjs
       - name: Python 集成回归（Windows 隔离候选）
         env:
           DAIRN_OFFLINE: '1'

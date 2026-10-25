@@ -5,9 +5,14 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import sys
 
 
 def main():
+    # 重定向输出时 Windows 可能默认 cp1252；提示编码不能改变已经完成的迁移结果。
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('input', type=Path)
     parser.add_argument('--out', type=Path, required=True)

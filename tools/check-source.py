@@ -40,6 +40,7 @@ def main():
     temp = OUT / 'tmp'
     temp.mkdir(exist_ok=True)
     env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1',
+           'PYTHONUTF8': '1', 'PYTHONIOENCODING': 'utf-8',
            'TMPDIR': str(temp), 'TEMP': str(temp), 'TMP': str(temp)}
     if not os.environ.get('DAIRN_TEST_RUNTIME'):
         return subprocess.call([sys.executable, '-B', str(ROOT / 'tools/with-built-runtime.py'),

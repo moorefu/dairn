@@ -60,9 +60,9 @@ class RuntimePromotion(unittest.TestCase):
                 'plan': {'from': {'runtime_sha256': 'a' * 64}, 'inputs': inputs}}))
             script = temp / 'rollback.mjs'
             script.write_text('''import * as std from 'std';
-import {host} from ''' + json.dumps(str(ROOT / 'quickjs/host/qjs.mjs')) + ''';
-import {rollbackRuntime,recoverRuntime} from ''' + json.dumps(str(ROOT / 'quickjs/core/runtime-promotion.mjs')) + ''';
-const root=''' + json.dumps(str(root)) + ''';
+import {host} from ''' + json.dumps((ROOT / 'quickjs/host/qjs.mjs').as_posix()) + ''';
+import {rollbackRuntime,recoverRuntime} from ''' + json.dumps((ROOT / 'quickjs/core/runtime-promotion.mjs').as_posix()) + ''';
+const root=''' + json.dumps(root.as_posix()) + ''';
 if(!scriptArgs[1].startsWith('recover')){
   const failure=scriptArgs[1];
   const plan=rollbackRuntime(host,root,{to:'a'.repeat(64)});
@@ -154,9 +154,9 @@ if(!scriptArgs[1].startsWith('recover')){
                     'sha256': hashlib.sha256(b'new').hexdigest()}))
                 script = temp / 'prepare.mjs'
                 script.write_text('''import * as std from 'std';
-import {host} from ''' + json.dumps(str(ROOT / 'quickjs/host/qjs.mjs')) + ''';
-import {promotionPlan,applyPromotion,recoverRuntime} from ''' + json.dumps(str(ROOT / 'quickjs/core/runtime-promotion.mjs')) + ''';
-const root=''' + json.dumps(str(root)) + ''',source=''' + json.dumps(str(source)) + ''';
+import {host} from ''' + json.dumps((ROOT / 'quickjs/host/qjs.mjs').as_posix()) + ''';
+import {promotionPlan,applyPromotion,recoverRuntime} from ''' + json.dumps((ROOT / 'quickjs/core/runtime-promotion.mjs').as_posix()) + ''';
+const root=''' + json.dumps(root.as_posix()) + ''',source=''' + json.dumps(source.as_posix()) + ''';
 if(scriptArgs[1]==='recover')print(JSON.stringify(recoverRuntime(host,root,{transaction:scriptArgs[2],apply:true})));
 else{
   const h={...host,env:name=>name==='DAIRN_RUNTIME_DIR'?source:host.env(name),

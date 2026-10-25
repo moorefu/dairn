@@ -2,7 +2,7 @@
 
 新契约：项目根 `dairn`/`dairn.cmd` 是唯一受管启动器，解析顺序为
 DAIRN_RUNTIME -> 启动器同目录 `.dairn/runtime/dairn-embedded.com` -> exit 2。
-init/adopt/upgrade 通过 DAIRN_RUNTIME_DIR 载荷把运行时复制到项目，旧
+init/adopt 通过 DAIRN_RUNTIME_DIR 载荷把运行时复制到项目，普通 upgrade 保持 Pin，旧
 `.dairn/bin/dairn*` 受管启动器在 upgrade --apply 时退役。
 """
 import hashlib
@@ -31,12 +31,15 @@ class ProjectLauncher(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix='dairn-launcher-')
         self.addCleanup(self.tmp.cleanup)
         self.work = Path(self.tmp.name)
+        self.cache_env = {'DAIRN_CACHE_HOME': str(self.work / 'runtime-cache')}
         self.root = self.work / 'project'
         self.ok('init', '--path', self.root, '--name', 'launcher_test', '--stack', 'python', '--ci', 'none')
 
     def call(self, *args, env=None):
+        # 仓库 Pin 与待测制品允许不同；初始化及治理调用必须使用同一候选。
+        runtime_env = {'DAIRN_RUNTIME': os.environ['DAIRN_TEST_RUNTIME'], **(env or {})}
         return subprocess.run([str(CLI), *map(str, args)], cwd=self.work,
-                              env=clean_env(env), capture_output=True, text=True,
+                              env=clean_env({**self.cache_env, **runtime_env}), capture_output=True, text=True,
                               encoding='utf-8', errors='replace', timeout=180)
 
     def ok(self, *args, env=None):
@@ -54,7 +57,7 @@ class ProjectLauncher(unittest.TestCase):
         # 项目根 `dairn` 是 /bin/sh 脚本；PATH 传空串时启动器会恢复内置最小系统 PATH，
         # 以支持 APE 的 sh 加载器（且不会依赖全局安装的 dairn）。
         return subprocess.run(['/bin/sh', 'dairn', 'version'], cwd=cwd or self.root,
-                              env=clean_env({'PATH': path, **(env or {})}),
+                              env=clean_env({**self.cache_env, 'PATH': path, **(env or {})}),
                               capture_output=True, text=True, encoding='utf-8', errors='replace',
                               timeout=120)
 
@@ -86,6 +89,7 @@ class ProjectLauncher(unittest.TestCase):
         self.assertEqual(config['windows_launcher'], 'dairn.cmd')
         declared = json.loads((self.root / '.dairn/runtime/runtime-integrity.json')
                               .read_text(encoding='utf-8'))['sha256']
+        self.assertEqual(declared, hashlib.sha256(Path(os.environ['DAIRN_TEST_RUNTIME']).read_bytes()).hexdigest())
         self.assertEqual(config['runtime']['sha256'], declared)
         doctor = self.obj('doctor', '--json', '--root', self.root)
         self.assertEqual(doctor['status'], 'ready', doctor.get('problems'))
@@ -156,7 +160,7 @@ class ProjectLauncher(unittest.TestCase):
         binary_before = (runtime_dir / 'dairn-embedded.com').read_bytes()
         result = subprocess.run([str(release / 'dairn'), 'init', '--name', 'release_demo',
                                  '--stack', 'python', '--ci', 'none'],
-                                cwd=release, env=clean_env({'PATH': ''}),
+                                cwd=release, env=clean_env({**self.cache_env, 'PATH': ''}),
                                 capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=180)
         self.assertEqual(result.returncode, 0, result.stdout + '\n' + result.stderr)
         config = json.loads((release / '.dairn/launcher.json').read_text(encoding='utf-8'))
@@ -164,7 +168,7 @@ class ProjectLauncher(unittest.TestCase):
         self.assertEqual((runtime_dir / 'dairn-embedded.com').read_bytes(), binary_before)
         self.assertTrue((release / '.dairn/runtime/runtime-integrity.json').is_file())
         self.assertTrue((release / 'AGENTS.md').is_file())
-        version = subprocess.run(['/bin/sh', 'dairn', 'version'], cwd=release, env=clean_env({'PATH': ''}),
+        version = subprocess.run(['/bin/sh', 'dairn', 'version'], cwd=release, env=clean_env({**self.cache_env, 'PATH': ''}),
                                  capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=120)
         self.assertEqual(version.returncode, 0, version.stdout + '\n' + version.stderr)
 
