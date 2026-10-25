@@ -164,7 +164,7 @@ class RootLauncher(unittest.TestCase):
                                    'echo runtime-error >&2\nexit 37\n', encoding='utf-8')
                 runtime.chmod(0o444)
                 original = runtime.read_bytes()
-                env = {'TMPDIR': str(scratch)}
+                env = {'TMPDIR': str(scratch), 'DAIRN_FAST_RUNTIME': '1'}
                 if external:
                     env['DAIRN_RUNTIME'] = str(runtime)
                 def invoke(_):
@@ -183,6 +183,7 @@ class RootLauncher(unittest.TestCase):
                 self.assertEqual(len(set(paths)), 1)
                 image = Path(paths[0])
                 before = image.stat()
+                env['DAIRN_FAST_RUNTIME'] = '0'
                 repeated = invoke(0)
                 self.assertEqual(repeated.returncode, 37, repeated.stderr)
                 after = image.stat()

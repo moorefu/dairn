@@ -93,6 +93,9 @@ with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
     selected = unittest.TestSuite(cases)
     with (out / 'linux-regression.log').open('w', encoding='utf-8') as stream:
         regression = unittest.TextTestRunner(stream=stream, verbosity=2).run(selected)
+    # 控制台同步输出失败详情，避免 CI 仅展示失败总数而必须下载制品定位。
+    for _, traceback in regression.failures + regression.errors:
+        print(traceback, flush=True)
     results.update(tests_run=regression.testsRun, failures=len(regression.failures),
                    errors=len(regression.errors), skipped=len(regression.skipped), excluded=[])
 evidence = out / 'linux-go-checks.json'

@@ -136,15 +136,28 @@ class AnalyzerCIReview(unittest.TestCase):
   res=self.obj('guide','impact','--base',base,'--analyzer','surface',env=env)
   self.assertTrue(res['analyzer_analysis']['changes'])
  def test_legacy_fast_cache_switch_is_ignored(self):
-  # 旧根启动器的快速缓存(DAIRN_FAST_RUNTIME/DAIRN_CACHE_HOME)已随启动器迁移移除；
-  # 显式设置时不得再创建缓存，行为与普通启动一致。
+  # DAIRN_FAST_RUNTIME 已退役；DAIRN_CACHE_HOME 现在选择受校验的镜像目录。
+  # 旧开关不能改变输出、镜像内容，也不能让命中路径重新复制或转换镜像。
   cache=self.dir/'legacy-cache'
   env={'GITHUB_ACTIONS':'','GITLAB_CI':'','DAIRN_PROTECTED_CI':'',
        'DAIRN_FAST_RUNTIME':'1','DAIRN_CACHE_HOME':str(cache)}
   p=self.call('version',env=env)
   self.assertEqual(p.returncode,0,p.stdout+p.stderr)
   self.assertIn('Dairn ',p.stdout)
-  self.assertFalse(cache.exists(),'旧快速缓存开关不得再创建缓存目录')
+  images=list((cache/'runtime-images-v1').glob('*.com'))
+  self.assertEqual(len(images),1)
+  image=images[0];before=image.stat()
+  import hashlib
+  payload=Path(os.environ.get('DAIRN_RUNTIME') or ROOT/'.dairn/runtime/dairn-embedded.com')
+  self.assertEqual(hashlib.sha256(image.read_bytes()).digest(),hashlib.sha256(payload.read_bytes()).digest())
+  env['DAIRN_FAST_RUNTIME']='0'
+  again=self.call('version',env=env)
+  self.assertEqual(again.returncode,0,again.stdout+again.stderr)
+  self.assertEqual(again.stdout,p.stdout)
+  self.assertEqual(list((cache/'runtime-images-v1').glob('*.com')),images)
+  after=image.stat()
+  self.assertEqual((before.st_ino,before.st_mtime_ns,before.st_ctime_ns),
+                   (after.st_ino,after.st_mtime_ns,after.st_ctime_ns))
  def test_adopt_existing_claude_instructions_preserved(self):
   other=self.dir/'existing';other.mkdir();(other/'CLAUDE.md').write_text('Custom team Claude instructions.\n')
   (other/'go.mod').write_text('module example.com/test\n\ngo 1.20\n')
