@@ -1,0 +1,2 @@
+runtime/*.com binary
+runtime/runtime-integrity.json text eol=lf

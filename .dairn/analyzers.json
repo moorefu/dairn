@@ -6,7 +6,7 @@
       "domain": "surface",
       "mode": "execute",
       "capabilities": [
-        "quality.surface-diff"
+        "surface.api-diff"
       ],
       "execution": {
         "argv": [

@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 用户显式使用的技能导航入口，不执行批准或修改产品。
 
-前置条件：先确认项目 launcher 可用（运行 launcher 的 `dairn doctor`，路径见 `AGENTS.md` 的托管块）；无法解析 launcher 时报告 `DAIRN_NOT_AVAILABLE`，不要安装 Dairn。下文示例中的 `dairn` 都是该 launcher 的简写。
+前置条件：先确认项目 launcher 可用（运行项目根 `dairn doctor`，路径见 `AGENTS.md` 的托管块）；无法解析 launcher 时报告 `DAIRN_NOT_AVAILABLE`，不要安装 Dairn。下文示例中的 `dairn` 都是该 launcher 的简写。
 
 1. 使用 `dairn skills catalog` 探索 stable 技能及其调用权，再结合 `dairn docs find <topic>` 找到相关主题规范。
 2. G0/G1 优先使用单个聚焦 Skill；G2 加入设计与双轴 Review；G3 使用 incident/反馈闭环，不能要求所有场景强制走全套。

@@ -3,7 +3,7 @@ from pathlib import Path
 import json, os, subprocess, tempfile, unittest
 
 ROOT=Path(__file__).resolve().parents[2]
-CLI=ROOT/('dairn.cmd' if os.name=='nt' else 'dairn.sh')
+CLI=ROOT/('dairn.cmd' if os.name=='nt' else 'dairn')
 class WorkIntelligence(unittest.TestCase):
     def setUp(self):
         (ROOT/'.dairn/tmp').mkdir(parents=True, exist_ok=True)

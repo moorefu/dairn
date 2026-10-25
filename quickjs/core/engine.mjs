@@ -462,5 +462,10 @@ export function main(h,args) {
         required_checks:scope.required},null,2));return 0;
     }
     return checks(h,root,opts,scope,st.policy_raw,preflight);
-  } catch(e) {h.error('ERROR: '+String(e)+(e?.stack?'\n'+e.stack:''));return 2;}
+  } catch(e) {
+    // GATE 命令的 Runtime Lock 漂移：稳定单行错误码 + exit 4，不打 JS 堆栈；
+    // 其余错误保持原有语义（含堆栈、exit 2）。
+    if(e&&e.exitCode===4){h.error(String(e.message||e));return 4;}
+    h.error('ERROR: '+String(e)+(e?.stack?'\n'+e.stack:''));return 2;
+  }
 }

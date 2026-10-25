@@ -5,7 +5,7 @@ from pathlib import Path
 import json, subprocess, tempfile, unittest
 
 RUNTIME=Path(__file__).resolve().parents[2]
-CLI=RUNTIME/'dairn.sh'
+CLI=RUNTIME/'dairn'
 
 class AgentProtocol(unittest.TestCase):
     def setUp(self):

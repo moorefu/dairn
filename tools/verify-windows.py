@@ -15,10 +15,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from release_config import artifact_names, load_release
+from release_config import (artifact_names, build_instant, format_instant, load_release,
+                            version_from_artifacts)
 
 ROOT = Path(__file__).resolve().parent.parent
-NAMES = artifact_names(load_release(ROOT))
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--go-bin', type=Path, default=Path(r'C:\Program Files\Go\bin'))
 parser.add_argument('--skip-go', action='store_true',
@@ -33,6 +33,16 @@ if args.artifacts:
     if not args.artifacts.is_dir():
         parser.error('--artifacts 目录不存在：' + str(args.artifacts))
     args.artifacts = args.artifacts.resolve()
+    # 复用已构建制品时版本必须从制品文件名恢复；重新取构建时间会得到不同 nightly。
+    VERSION = version_from_artifacts(ROOT, args.artifacts)
+    RELEASE = load_release(ROOT, version=VERSION)
+else:
+    # 本入口会在本机重新构建 npm/QRuntime，固定一次构建时间戳保证版本一致。
+    os.environ.setdefault('DAIRN_BUILD_TIME', format_instant(build_instant()))
+    RELEASE = load_release(ROOT)
+VERSION = RELEASE['version']
+NAMES = artifact_names(RELEASE)
+if args.artifacts:
     (ROOT / 'dist').mkdir(parents=True, exist_ok=True)
     for pattern in ('*.whl', '*.tgz', '*.zip', 'checksums.json'):
         for source in sorted(args.artifacts.glob(pattern)):
@@ -51,6 +61,7 @@ _QJS_CANDIDATES = sorted((ROOT / '.build/quickjs').glob('qjs-*.com')) if (ROOT /
 HOST_QJS = _QJS_CANDIDATES[0] if _QJS_CANDIDATES else APE
 digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
 env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'DAIRN_QJS_BIN': str(HOST_QJS),
+       'DAIRN_RUNTIME': str(APE),
        'PATH': str(args.go_bin) + os.pathsep + os.environ['PATH']}
 # 临时目录可能位于源码仓库内；验收项目不应继承父仓库的 Git 身份。
 env['GIT_CEILING_DIRECTORIES'] = os.pathsep.join(filter(None, (

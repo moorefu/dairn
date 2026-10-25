@@ -64,13 +64,11 @@ const criticalFiles = new Set([
   // 仓库治理入口。
   'AGENTS.md', 'Makefile', '.gitlab-ci.yml',
   // 启动器与运行时版本锁：改动会替换用户实际执行的代码或下载的二进制。
-  'bin/dairn.cjs', 'dairn.sh', 'dairn.cmd', 'src/dairn/cli.py', 'src/dairn/__init__.py', 'quickjs.lock.json',
+  'bin/dairn.cjs', 'dairn', 'dairn.cmd', 'src/dairn/cli.py', 'src/dairn/__init__.py', 'quickjs.lock.json',
   // 构建/发布入口：生成、打包并上传发布制品（tools/build* 由 criticalPatterns 覆盖）。
   'tools/zip.mjs', 'tools/dairn_build_backend.py', 'tools/release_config.py', 'tools/release.json', 'tools/publish-release.py',
   // 各语言安装元数据：决定安装入口、版本解析与发布内容。
   'package.json', 'pyproject.toml',
-  // 根构建/安装脚本：构建或安装时直接执行。
-  'build.sh', 'build.cmd', 'install.sh',
 ]);
 const criticalPatterns = [/^tools\/bootstrap\.[^/]+$/, /^tools\/build(?:[.-][^/]+)?$/];
 const dataPaths = ['.dairn/governance/changes/', '.dairn/governance/operations/', '.dairn/governance/evidence/', '.dairn/work/', '.dairn/facts/', '.dairn/cache/'];

@@ -66,6 +66,38 @@ export function runAnalyzer(h,root,id,{base=null,head=null,refresh=false}={}){
   }finally{if(h.exists(request))h.remove(request);if(h.exists(output))h.remove(output);}
 }
 
+/* peekAnalyzerResult：只读探测同一请求/清单下的有效缓存，不执行工具、不写任何文件。
+ * 选择器用它在计划阶段决定 reuse；缓存仍只是 advisory 本地结果。 */
+export function peekAnalyzerResult(h,root,id,{base=null}={}){
+  try{
+    const s=configuredAnalyzers(h,root).analyzers.find(x=>x.id===id);
+    if(!s)return {available:false,reason:'ANALYZER_NOT_CONFIGURED'};
+    if((s.mode||'execute')!=='execute')return {available:false,reason:'IMPORT_MODE'};
+    const git=h.run(['git','rev-parse','--verify','HEAD^{commit}'],root,15);
+    if(git.timedOut||git.code!==0)return {available:false,reason:'GIT_HEAD_UNAVAILABLE'};
+    const actualHead=git.output.trim();
+    let baseSha=null;if(base){const r=h.run(['git','rev-parse','--verify',base+'^{commit}'],root,15);if(r.timedOut||r.code!==0)return {available:false,reason:'BASE_UNAVAILABLE'};baseSha=r.output.trim();}
+    const req={schema:'dairn.analyzer-request.v1',analyzer_id:id,domain:s.domain,
+      subject:{source_commit:actualHead,base_commit:baseSha},root,scope:{modules:[],paths:[]},limits:{max_changes:500}};
+    const actualConfigHash=sha256(h.read(safe(h,root,'.dairn/analyzers.json')));
+    const sourceDigests=s.execution.argv.filter(a=>a.startsWith('/')&&h.exists(a)&&!h.isDirectory(a)&&!h.isSymlink(a))
+      .map(a=>[a,sha256(h.read(a))]);
+    const manifest=sha256(JSON.stringify([s,actualConfigHash,sourceDigests,h.env('DAIRN_ANALYZER_TOOLCHAIN_FINGERPRINT')||'unversioned-toolchain']));
+    const changed=h.run(['git','status','--porcelain','--untracked-files=all'],root,15);
+    if(changed.timedOut||changed.code!==0)return {available:false,reason:'WORKSPACE_STATE_UNAVAILABLE'};
+    if(changed.output.trim())return {available:false,reason:'DIRTY_WORKSPACE'};
+    const key=sha256(JSON.stringify([req,manifest]));
+    const cached=at(safe(h,root,'.dairn/cache/analyzers'),key+'.json');
+    if(!h.exists(cached)||h.isSymlink(cached))return {available:false,reason:'NOT_CACHED'};
+    const rec=JSON.parse(h.read(cached));
+    const validResponse=doc=>doc.schema==='dairn.surface-result.v1'&&doc.analyzer_id===id&&doc.domain==='surface'&&
+      doc.subject?.source_commit===actualHead&&doc.subject?.base_commit===baseSha;
+    if(rec.cache_key===key&&validResponse(rec.response)&&Array.isArray(rec.response.changes)&&rec.response.changes.every(c=>validChange(c)))
+      return {available:true,subject:{source_commit:actualHead,base_commit:baseSha},changes:rec.response.changes,source:'local-cache'};
+    return {available:false,reason:'CACHE_INVALID'};
+  }catch(error){return {available:false,reason:'CACHE_INSPECTION_FAILED',detail:String(error&&error.message||error).slice(0,200)};}
+}
+
 /* importAnalysisReport：只读导入一份本地报告并归一化为 Observation。
  * 绝不执行任何工具、不联网；来源未经验证 → unverified-import，
  * 不得因 JSON 自述 ci-verified 而提升信任。 */

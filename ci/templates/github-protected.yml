@@ -22,8 +22,8 @@ jobs:
           DAIRN_EXPECTED_POLICY_SHA256: ${{ vars.DAIRN_EXPECTED_POLICY_SHA256 }}
           TRUSTED_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          /opt/dairn/dairn.sh validate --base "$TRUSTED_BASE"
-          /opt/dairn/dairn.sh check --base "$TRUSTED_BASE"
+          /opt/dairn/dairn validate --base "$TRUSTED_BASE"
+          /opt/dairn/dairn check --base "$TRUSTED_BASE"
 
   protected-build:
     if: github.event_name == 'push' && github.ref_protected == true
@@ -35,8 +35,8 @@ jobs:
           persist-credentials: false
       - name: Build without signing key
         env:
-          DAIRN_CI_BIN: /opt/dairn/dairn.sh
-          DAIRN_CI_APE_PATH: /opt/dairn/runtime/dairn-embedded.com
+          DAIRN_CI_BIN: /opt/dairn/dairn
+          DAIRN_CI_APE_PATH: /opt/dairn/.dairn/runtime/dairn-embedded.com
           DAIRN_CI_REF_PROTECTED: ${{ github.ref_protected }}
           DAIRN_PROTECTED_BRANCH: main
           DAIRN_TRUSTED_BASE_REF: HEAD^
@@ -72,8 +72,8 @@ jobs:
           path: .dairn/governance/evidence
       - name: Sign without running source tests or Analyzers
         env:
-          DAIRN_CI_BIN: /opt/dairn/dairn.sh
-          DAIRN_CI_APE_PATH: /opt/dairn/runtime/dairn-embedded.com
+          DAIRN_CI_BIN: /opt/dairn/dairn
+          DAIRN_CI_APE_PATH: /opt/dairn/.dairn/runtime/dairn-embedded.com
           DAIRN_CI_REF_PROTECTED: ${{ github.ref_protected }}
           DAIRN_PROTECTED_BRANCH: main
           DAIRN_EXPECTED_POLICY_SHA256: ${{ vars.DAIRN_EXPECTED_POLICY_SHA256 }}
@@ -109,7 +109,7 @@ jobs:
           path: .dairn/governance/evidence
       - name: Verify, append to evidence branch, read back
         env:
-          DAIRN_CI_BIN: /opt/dairn/dairn.sh
+          DAIRN_CI_BIN: /opt/dairn/dairn
           DAIRN_TRUSTED_CI_PUBLIC_KEY: /etc/dairn/ci-ed25519-public.pem
           DAIRN_EVIDENCE_DIR: ${{ github.workspace }}/.dairn/governance/evidence
           DAIRN_EVIDENCE_REF_NAME: refs/heads/dairn-evidence

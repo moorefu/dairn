@@ -6,7 +6,7 @@ Agent 读取目标项目的 `AGENTS.md` 和 `.agents/skills/dairn-*/SKILL.md`，
 
 `work next` 返回下一步；Agent 修改代码、运行检查并记录可观察证据。普通变更依次经过 Orient → Grill → Specify → Slice → Implement → Review → Synchronize；Grill 阶段必须以人类访谈消除设计树上的未决问题（`--kind grill`），未决问题未清零时不能推进到 Specify。Review 要求当前 HEAD 与 `standards`、`spec_fidelity` 两条审查结论；后者为 `pass` 时需有效 `spec_ref`。存在 Implement 阶段时，还需当前 HEAD 的机器门禁通过。Synchronize 要求 `status`、`head`、`reviewed_docs`、`reason`，记录文档已更新或无需更新的依据。任务完成记录不等于合并批准。
 
-项目初始化后使用项目内 launcher `.dairn/bin/dairn`（Windows `.dairn\bin\dairn.cmd`）作为推荐入口；AGENTS 托管块首行记录该入口，本文与资产中的 `dairn` 均为其简写。Agent 不得自行安装 Dairn；launcher 缺失或 `doctor` 失败时应报告环境问题，而不是安装或下载运行时（详见“项目内 launcher 与 vendored runtime”）。
+项目初始化后使用项目根的 `dairn`（Windows `dairn.cmd`）作为推荐入口；AGENTS 托管块首行记录该入口，本文与资产中的 `dairn` 均为其简写。Agent 不得自行安装 Dairn；启动器缺失或 `doctor` 失败时应报告环境问题，而不是安装或下载运行时（详见“根启动器与 vendored runtime”）。Dairn 源码仓库的根启动器（`./dairn`/`dairn.cmd`）直接执行项目内 `.dairn/runtime/` 的 vendored 快照，不经过第二层 launcher，也不要求每次构建。
 
 评审与复盘使用结构化证据：Review 记录 Standards / Spec Fidelity 两轴；Reflect 要求二选一改进项（新增确定性检查，或写入 Review 轴使用的标准文档）。`dairn validate` 只做结构校验，`dairn check` 才真实执行质量门禁；两者都不代表合并批准。
 
@@ -18,18 +18,20 @@ Agent 读取目标项目的 `AGENTS.md` 和 `.agents/skills/dairn-*/SKILL.md`，
 - `dairn hook turn-end`：把当前回合锚定到活跃任务，写入 `.dairn/governance/evidence/session/*.json` 并在账本 `session_anchors` 中登记路径与 SHA256。provider/session 取自 `--provider`/`--session`、事件 JSON（`session_id`、`thread-id` 等）、`DAIRN_SESSION_ID`/`DAIRN_SESSION_PROVIDER` 或 harness 变量（`DSH_SESSION_ID`、`CLAUDE_SESSION_ID`/`CLAUDE_CODE_SESSION_ID`、`CODEX_SESSION_ID`）；无法识别时默认失败，显式 `--allow-unattributed` 才记录为未归属锚点。
 - 锚点只是 local-unattributed 的过程证据：它证明“某会话在某 HEAD 上结束”，不证明动作合理、测试通过或经过审批；与受保护 CI 的 Ed25519 声明是不同信任级别。
 
-## 项目内 launcher 与 vendored runtime
+## 根启动器与 vendored runtime
 
-`dairn init` / `dairn adopt` 生成项目内 launcher（受管文件）：POSIX `.dairn/bin/dairn`、Windows `.dairn\bin\dairn.cmd`，以及保持启动器行尾的 `.dairn/.gitattributes`。推荐入口是 launcher；文档、AGENTS 托管块和 `.dairn/Makefile`（`DAIRN ?= ./.dairn/bin/dairn`）中的 `dairn` 都是它的简写。项目自有 `.dairn/launcher.json` 不参与受管文件哈希：init/adopt 时创建，upgrade 缺失时补齐，内容由 `--vendor-runtime` 更新。
+`dairn init` / `dairn adopt` 生成项目根启动器（受管文件）：POSIX `dairn`、Windows `dairn.cmd`，以及保持启动器行尾的 `.dairn/.gitattributes`。推荐入口是根启动器；文档与 AGENTS 托管块中的 `dairn` 都是它的简写。项目自有 `.dairn/launcher.json` 不参与受管文件哈希：init/adopt 时创建，upgrade 缺失时补齐，内容由 `--vendor-runtime` 更新。
 
-launcher 的运行时解析顺序固定为：`DAIRN_BIN` → 项目内 `.dairn/runtime/dairn-embedded.com` → `PATH` 的 `dairn` → 报错并以 127 退出；不做隐式安装或联网下载。
+启动器的运行时解析顺序固定为：显式 `DAIRN_RUNTIME`（构建/验证）→ 启动器同目录的 `.dairn/runtime/dairn-embedded.com`（vendored）→ 报错 `DAIRN_NOT_AVAILABLE` 并以 2 退出；不再回退到安装包内的 `runtime/`，也不做隐式安装或联网下载。源码仓库根 `runtime/` 只是构建产物，必须用 `DAIRN_RUNTIME` 显式选择。
 
-`dairn upgrade --vendor-runtime .dairn/runtime --apply`（adopt 也可在接入时注册）把已放入 `.dairn/runtime/` 的官方 APE 与 `runtime-integrity.json` 注册为 vendored 运行时：CLI 用内建 SHA256 直接读取二进制计算实际摘要（不可读时才回退 `sha256sum`/`shasum`/`certutil`）、与 integrity 比对、要求运行时版本与执行该命令的 Dairn CLI 版本一致（`upgrade` 同时把项目 lock 更新为该版本），并把 `mode=vendored`、`runtime.path/integrity/version/sha256`、`generated_by` 写入 `.dairn/launcher.json`。`--vendor-runtime` 路径相对项目根解析；`dairn doctor` 会复查 launcher 文件、`launcher.json` 与 vendored 运行时摘要，失败时以 unready 退出（退出码 1）。
+`dairn init` / `dairn adopt` 在安装适配层设置了 `DAIRN_RUNTIME_DIR` 时，会把该目录中的运行时二进制与完整性清单复制到项目 `.dairn/runtime/` 并写入 vendored 配置；不生成 `.dairn/bin/dairn*`。
+
+`dairn upgrade --vendor-runtime .dairn/runtime --apply`（adopt 也可在接入时注册）把已放入 `.dairn/runtime/` 的官方 APE 与 `runtime-integrity.json` 注册为 vendored 运行时：CLI 用内建 SHA256 直接读取二进制计算实际摘要（不可读时才回退 `sha256sum`/`shasum`/`certutil`）、与 integrity 比对、要求运行时版本与执行该命令的 Dairn CLI 版本一致（`upgrade` 同时把项目 lock 更新为该版本），并把 `mode=vendored`、`runtime.path/integrity/version/sha256`、`generated_by` 写入 `.dairn/launcher.json`。`--vendor-runtime` 路径相对项目根解析；`dairn doctor` 会复查启动器文件、`launcher.json` 与 vendored 运行时摘要，失败时以 unready 退出（退出码 1）。旧项目运行 `dairn upgrade --apply` 时，计划会退役受管的 `.dairn/bin/dairn` / `.dairn/bin/dairn.cmd`、写入项目根启动器并迁移 `launcher.json`，维护者须先审阅计划与 diff。`dairn doctor` 还会报告 `runtime.source`（vendored/external/unknown）和 `runtime.freshness`（源码仓库中比较内嵌 engine_sources 与工作树）；它们只是观察字段，运行时身份仍以 lock 的 `runtime_sha256` 为准。
 
 Agent 与 CI 约定：
 
-- Agent 不得自行 npm/pip 安装 Dairn；先运行 `./.dairn/bin/dairn doctor`，失败时报告环境问题，而不是安装或下载运行时。
-- 生成的 CI 模板统一以 `DAIRN_BIN_VALUE="${DAIRN_CI_BIN:-./.dairn/bin/dairn}"` 为入口，并用 `sh "$DAIRN_BIN_VALUE" …` 调用；`DAIRN_CI_BIN` 由管理员提供并固定到受信 launcher。
+- Agent 不得自行 npm/pip 安装 Dairn；先运行 `./dairn doctor`，失败时报告环境问题，而不是安装或下载运行时。
+- 生成的 CI 模板统一以 `DAIRN_BIN_VALUE="${DAIRN_CI_BIN:-./dairn}"` 为入口，并用 `sh "$DAIRN_BIN_VALUE" …` 调用；`DAIRN_CI_BIN` 由管理员提供并固定到受信启动器。
 - 受保护任务必须用外部 pin 覆盖项目内 vendored 运行时（`DAIRN_EXPECTED_APE_SHA256`、`DAIRN_EXPECTED_RUNTIME_SHA256`），不能只信任 `.dairn/runtime/` 中的文件。PR 内新增或替换的二进制是未审查的可执行代码，不得在受保护/签名任务中直接运行。
 - launcher、`launcher.json` 与 vendored 运行时只是执行入口和完整性校验，不是审批或 CI 签名证据；信任仍由受保护 CI 与外部 pin 提供。
 - 完整契约（`launcher.json` 字段、`--vendor-runtime` 校验、`work next` 的 `invocation` 块、故障排查）见发行资产 `quickjs/assets/specs/engineering/launcher.md`，可用 `dairn docs show dairn.engineering.launcher` 读取。
@@ -40,7 +42,7 @@ Agent 与 CI 约定：
 
 ## 资产一致性与发布门禁
 
-`dairn docs check` 校验发行版内嵌的 `specs/` 与 `skills/` 资产：frontmatter 必填字段、稳定 ID 唯一性、`related` 与相对链接、Skill 与 `agents/openai.yaml` 的权限声明一致性，以及正文引用的 CLI 命令是否真实存在；任何 `make`/`scripts/*.py` 旧命令引用都会失败。发布构建依次执行 `python tools/build.py`、`npm run build`、`sh ./dairn.sh docs check` 与 `python -m unittest quickjs.tests.test_assets_lint`，制品矩阵的各类安装包也会执行 `docs check`，失败即阻断发布。`dairn docs find/show/context` 从 spec frontmatter 读取稳定 ID，不依赖手工清单。
+`dairn docs check` 校验发行版内嵌的 `specs/` 与 `skills/` 资产：frontmatter 必填字段、稳定 ID 唯一性、`related` 与相对链接、Skill 与 `agents/openai.yaml` 的权限声明一致性，以及正文引用的 CLI 命令是否真实存在；任何 `make`/`scripts/*.py` 旧命令引用都会失败。发布构建依次执行 `python tools/build.py`、`npm run build`、`./dairn docs check` 与 `python -m unittest quickjs.tests.test_assets_lint`，制品矩阵的各类安装包也会执行 `docs check`，失败即阻断发布。`dairn docs find/show/context` 从 spec frontmatter 读取稳定 ID，不依赖手工清单。
 
 ## 项目自有分析模板（Dairn Analyzers）
 
@@ -99,7 +101,7 @@ dairn guide impact --root ./service --base origin/main --analyzer surface
 - `DAIRN_EXPECTED_ANALYZERS_SHA256`：需要执行获准项目分析器时的 `.dairn/analyzers.json` 摘要（旧 `DAIRN_EXPECTED_STUBS_SHA256` 已随破坏性更名移除）。
 - `DAIRN_TRUSTED_BASE_REF`：可信差异基线；独立证据链不要求任务 ID。
 
-生成的 CI 模板以 `DAIRN_BIN_VALUE="${DAIRN_CI_BIN:-./.dairn/bin/dairn}"` 为入口并调用 `sh "$DAIRN_BIN_VALUE" …`。受保护构建/签名任务应由管理员提供外部 `DAIRN_CI_BIN`，并用外部 `DAIRN_EXPECTED_APE_SHA256` / `DAIRN_EXPECTED_RUNTIME_SHA256` pin 覆盖项目内 vendored 运行时；PR 中提交或替换的 `.dairn/runtime/` 二进制不可信，不能作为受保护任务的执行来源。
+生成的 CI 模板以 `DAIRN_BIN_VALUE="${DAIRN_CI_BIN:-./dairn}"` 为入口并调用 `sh "$DAIRN_BIN_VALUE" …`。受保护构建/签名任务应由管理员提供外部 `DAIRN_CI_BIN`（例如解压后的发行包根下的 `/opt/dairn/dairn`，启动器通过同目录 `.dairn/runtime/` 解析 vendored 运行时），并用外部 `DAIRN_EXPECTED_APE_SHA256` / `DAIRN_EXPECTED_RUNTIME_SHA256` pin 覆盖项目内 vendored 运行时；PR 中提交或替换的 `.dairn/runtime/` 二进制不可信，不能作为受保护任务的执行来源。
 
 公钥与私钥使用检出目录之外的绝对路径，并隔离私钥访问。受保护构建与签名脚本需要 Git、sha256sum、jq，签名另需支持 Ed25519 的 OpenSSL。GitHub 模板的 action 引用应固定到经过审查的提交 SHA。
 

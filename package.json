@@ -1,6 +1,6 @@
 {
   "name": "@moorefu/dairn",
-  "version": "0.1.0-nightly.20261024123943",
+  "version": "0.1.0",
   "description": "基于原生 QuickJS 的开发治理内核",
   "license": "MIT",
   "author": "moorefu <chengmu.fu@gmail.com>",
@@ -13,8 +13,8 @@
   },
   "files": [
     "bin/dairn.cjs",
-    "dairn.sh",
-    "runtime/",
+    "dairn",
+    ".dairn/runtime/",
     "licenses/",
     "LICENSE"
   ],

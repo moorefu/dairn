@@ -71,6 +71,21 @@ function write(path, content) {
   try { f.puts(content); f.flush(); } finally { closeResult = f.close(); }
   if (closeResult !== 0) throw new Error('File close failed: '+path+' ('+closeResult+')');
 }
+/* 二进制写入：复制 vendored 运行时（APE）必须保真，不能用 std.open(w) 文本写。 */
+function writeBytes(path, bytes) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const target = normalize(path);
+  const fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o666);
+  if (fd < 0) throw new Error('Cannot open for binary write: ' + path + ' (' + fd + ')');
+  let offset = 0;
+  try {
+    while (offset < data.length) {
+      const n = os.write(fd, data.buffer, offset, data.length - offset);
+      if (n <= 0) throw new Error('Binary write failed: ' + path + ' (' + n + ')');
+      offset += n;
+    }
+  } finally { os.close(fd); }
+}
 let seq = 0;
 function executable(name, cwd) {
   if (os.platform !== 'win32') return name;
@@ -237,7 +252,7 @@ function realpath(path) {
   return result;
 }
 export const host = {
-  read, readBytes, write, exists, mkdirs, realpath, run,
+  read, readBytes, write, writeBytes, exists, mkdirs, realpath, run,
   writeExclusive(path,content){
     const fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600);
     if(fd<0)throw Error('Refuse existing/temp path: '+path);

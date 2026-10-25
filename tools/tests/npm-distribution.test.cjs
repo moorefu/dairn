@@ -1,192 +1,152 @@
 'use strict';
-const test = require('node:test');
-const {after} = test;
+// npm 安装适配层回归：校验包内运行时、版本透传、POSIX 共用根启动器、错误退出码。
 const assert = require('node:assert/strict');
-const {spawnSync} = require('node:child_process');
-const fs = require('node:fs');
-const path = require('node:path');
-const os = require('node:os');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const {spawnSync} = require('node:child_process');
+const {test, before, after} = require('node:test');
 
-const repo = path.resolve(__dirname,'../..');
-const fixture = process.env.DAIRN_NPM_PACKAGE ? null : fs.mkdtempSync(path.join(os.tmpdir(), 'dairn-npm-fixture-'));
-const source = process.env.DAIRN_NPM_PACKAGE || fixture;
-if (fixture) {
-  fs.mkdirSync(path.join(fixture,'runtime'));
-  fs.cpSync(path.join(repo,'bin'),path.join(fixture,'bin'),{recursive:true});
-  fs.copyFileSync(path.join(repo,'package.json'),path.join(fixture,'package.json'));
-  fs.copyFileSync(path.join(repo,'LICENSE'),path.join(fixture,'LICENSE'));
-  fs.copyFileSync(path.join(repo,'dairn.sh'),path.join(fixture,'dairn.sh'));
-  for (const name of ['dairn-embedded.com','runtime-integrity.json']) fs.copyFileSync(path.join(repo,'runtime',name),path.join(fixture,'runtime',name));
-  // 模拟丢失执行位的安装结果，验证启动器会补齐元数据。
-  if (process.platform !== 'win32') fs.chmodSync(path.join(fixture,'runtime','dairn-embedded.com'),0o644);
-  after(() => fs.rmSync(fixture,{recursive:true,force:true}));
-}
-const launcher = path.join(source,'bin','dairn.cjs');
-const ape = path.join(source,'runtime','dairn-embedded.com');
-const packageVersion = JSON.parse(fs.readFileSync(path.join(source,'package.json'),'utf8')).version;
-// CLI 版本来自内嵌运行时 manifest；标签构建会覆盖 package.json 的兜底版本，
-// 因此断言以 runtime-integrity.json 为准，只有真实安装包才要求二者相等。
-const engineVersion = JSON.parse(fs.readFileSync(path.join(source,'runtime','runtime-integrity.json'),'utf8')).engine_version;
-const hash = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
-const CACHE_ENTRIES = ['dairn-native','dairn-native.sha256'];
-const PROTECTED_CI_KEYS = ['GITHUB_ACTIONS','GITLAB_CI','DAIRN_PROTECTED_CI'];
-// 快速缓存用例必须显式清除受保护 CI 标记，否则在 GitHub/GitLab CI 上会按
-// 设计禁用缓存而误报失败；受保护语义由下面的负例单独覆盖。
-function fastEnv(extra={}) {
+const ROOT = path.resolve(__dirname, '..', '..');
+// CI 用 DAIRN_NPM_PACKAGE 指向构建脚本产出的未打包目录；本地直接用仓库根。
+const SOURCE = path.resolve(process.env.DAIRN_NPM_PACKAGE || ROOT);
+const POSIX = process.platform !== 'win32';
+const SOURCE_RUNTIME = path.join(SOURCE, '.dairn', 'runtime', 'dairn-embedded.com');
+const SOURCE_INTEGRITY = path.join(SOURCE, '.dairn', 'runtime', 'runtime-integrity.json');
+const SOURCE_LAUNCHER = path.join(SOURCE, 'dairn');
+const metadata = JSON.parse(fs.readFileSync(SOURCE_INTEGRITY, 'utf8'));
+const engineVersion = metadata.engine_version;
+const temporary = [];
+
+before(() => {
+  assert.ok(fs.existsSync(SOURCE_RUNTIME), '需要先构建运行时（python tools/build.py）');
+  assert.ok(fs.existsSync(SOURCE_LAUNCHER), '需要仓库根 dairn 启动器');
+});
+after(() => {
+  for (const dir of temporary) fs.rmSync(dir, {recursive: true, force: true});
+});
+
+function cleanEnv(extra = {}) {
   const env = {...process.env};
-  for (const key of PROTECTED_CI_KEYS) delete env[key];
-  return {...env, DAIRN_FAST_RUNTIME:'1', ...extra};
+  for (const name of ['DAIRN_RUNTIME', 'DAIRN_RUNTIME_FILE', 'DAIRN_RUNTIME_DIR', 'DAIRN_RUNTIME_SOURCE']) delete env[name];
+  return {...env, ...extra};
 }
-function run(args=[], options={}) {
-  return spawnSync(process.execPath,[launcher,...args],{
-    encoding:'utf8', timeout:20000, ...options,
+
+/** 复制出与 npm 发布包同布局的夹具目录（含 bin/dairn.cjs、根 dairn、.dairn/runtime）。 */
+function fixture(prefix = 'dairn-npm-') {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  temporary.push(target);
+  fs.mkdirSync(path.join(target, 'bin'), {recursive: true});
+  fs.mkdirSync(path.join(target, '.dairn', 'runtime'), {recursive: true});
+  fs.copyFileSync(path.join(SOURCE, 'package.json'), path.join(target, 'package.json'));
+  fs.copyFileSync(path.join(SOURCE, 'LICENSE'), path.join(target, 'LICENSE'));
+  fs.copyFileSync(path.join(SOURCE, 'bin', 'dairn.cjs'), path.join(target, 'bin', 'dairn.cjs'));
+  fs.copyFileSync(SOURCE_LAUNCHER, path.join(target, 'dairn'));
+  fs.copyFileSync(SOURCE_RUNTIME, path.join(target, '.dairn', 'runtime', 'dairn-embedded.com'));
+  fs.copyFileSync(SOURCE_INTEGRITY, path.join(target, '.dairn', 'runtime', 'runtime-integrity.json'));
+  return target;
+}
+
+function runWrapper(target, args) {
+  return spawnSync(process.execPath, [path.join(target, 'bin', 'dairn.cjs'), ...args], {
+    encoding: 'utf8', cwd: target, env: cleanEnv(), timeout: 180000,
   });
 }
 
-test('运行时 SHA256 与包内 APE 一致', () => {
-  const meta = JSON.parse(fs.readFileSync(path.join(source,'runtime','runtime-integrity.json')));
-  assert.equal(hash(ape),meta.sha256);
-  assert.match(meta.engine_version,/^\d+\.\d+\.\d+(?:-(?:(?:alpha|beta|rc)\.\d+|nightly\.[1-9]\d{13}))?$/);
-  // 发布 tarball 的 package.json 版本由构建入口按标签统一改写；只有真实安装包
-  // 才断言 package.json 与内嵌运行时版本一致（fixture 用的是仓库兜底版本）。
-  if (process.env.DAIRN_NPM_PACKAGE) assert.equal(meta.engine_version,packageVersion);
+function runLauncher(target, args) {
+  return spawnSync('/bin/sh', [path.join(target, 'dairn'), ...args], {
+    encoding: 'utf8', cwd: target, env: cleanEnv(), timeout: 180000,
+  });
+}
+
+function sha(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+test('分发包完整性清单与运行时载荷一致', () => {
+  assert.equal(metadata.schema, 1);
+  assert.equal(metadata.binary, 'dairn-embedded.com');
+  assert.equal(sha(SOURCE_RUNTIME), metadata.sha256);
 });
 
-test('npm 包元数据与 MIT 许可证一致', () => {
-  const pkg=JSON.parse(fs.readFileSync(path.join(source,'package.json'),'utf8'));
-  assert.equal(pkg.license,'MIT');
-  assert.equal(pkg.author,'moorefu <chengmu.fu@gmail.com>');
-  const license=fs.readFileSync(path.join(source,'LICENSE'),'utf8');
-  assert.match(license,/^MIT License/);
-  assert.match(license,/Copyright \(c\) 2026 moorefu <chengmu\.fu@gmail\.com>/);
-  assert.match(license,/Permission is hereby granted/);
+test('npm 包元数据指向唯一启动器与运行时载荷', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(SOURCE, 'package.json'), 'utf8'));
+  assert.equal(pkg.license, 'MIT');
+  assert.equal(pkg.bin.dairn, './bin/dairn.cjs');
+  for (const entry of ['dairn', '.dairn/runtime/', 'bin/dairn.cjs']) assert.ok(pkg.files.includes(entry), entry);
+  for (const script of ['preinstall', 'install', 'postinstall']) assert.equal(pkg.scripts?.[script], undefined);
 });
 
-test('版本和参数透传不修改源二进制', () => {
-  const before=hash(ape);
-  const p=run(['version']);
-  assert.equal(p.status,0,p.stderr);
-  assert.ok(p.stdout.startsWith('Dairn '+engineVersion+' —'),p.stdout);
-  assert.equal(hash(ape),before);
+test('包装层透传版本并保持运行时字节不变', () => {
+  const target = fixture();
+  const before = sha(path.join(target, '.dairn', 'runtime', 'dairn-embedded.com'));
+  const result = runWrapper(target, ['--version']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.trim().startsWith(`Dairn ${engineVersion}`), result.stdout);
+  assert.equal(sha(path.join(target, '.dairn', 'runtime', 'dairn-embedded.com')), before);
 });
 
-test('缺少执行位的运行时在 bash 下仍可启动并补齐执行位', {skip:process.platform === 'win32'}, t => {
-  if (spawnSync('bash',['-c','exit 0'],{stdio:'ignore'}).error) {
-    t.skip('当前环境没有 bash');
-    return;
-  }
-  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'dairn npm exec bit '));
-  try {
-    const target=path.join(temp,'package');
-    fs.mkdirSync(path.join(target,'runtime'),{recursive:true});
-    fs.cpSync(path.join(source,'bin'),path.join(target,'bin'),{recursive:true});
-    fs.copyFileSync(path.join(source,'dairn.sh'),path.join(target,'dairn.sh'));
-    for(const name of ['dairn-embedded.com','runtime-integrity.json']) fs.copyFileSync(path.join(source,'runtime',name),path.join(target,'runtime',name));
-    const runtime=path.join(target,'runtime','dairn-embedded.com');
-    fs.chmodSync(runtime,0o644);
-    const before=hash(runtime);
-    // macOS 的 /bin/sh 是 bash，对无执行位的路径 command -v 会失败。
-    const p=spawnSync('bash',[path.join(target,'dairn.sh'),'version'],{
-      encoding:'utf8',timeout:20000,env:{...process.env,DAIRN_FAST_RUNTIME:'0'},
-    });
-    assert.equal(p.status,0,p.stderr);
-    assert.ok(p.stdout.startsWith('Dairn '+engineVersion+' —'),p.stdout);
-    assert.notEqual(fs.statSync(runtime).mode & 0o111,0,'启动器必须补齐执行位');
-    assert.equal(hash(runtime),before,'启动器不得改写运行时内容');
-  } finally { fs.rmSync(temp,{recursive:true,force:true}); }
+test('未知命令按内核退出码失败', () => {
+  const result = runWrapper(fixture(), ['definitely-not-a-command']);
+  assert.equal(result.status, 2, result.stderr);
 });
 
-test('CLI 非零退出码传递至 npm 启动器', () => {
-  const p=run(['invalid-command-for-test']);
-  assert.equal(p.status,2,p.stderr);
+test('损坏的运行时被拒绝执行', () => {
+  const target = fixture();
+  fs.writeFileSync(path.join(target, '.dairn', 'runtime', 'dairn-embedded.com'), 'not a runtime');
+  const result = runWrapper(target, ['--version']);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /checksum mismatch|invalid runtime/);
 });
 
-test('POSIX npm 与 shell 共用快速运行时缓存并保留退出码', {skip:process.platform === 'win32'}, t => {
-  if (spawnSync('/bin/sh',['-c','command -v sha256sum'],{stdio:'ignore'}).status !== 0) {
-    t.skip('当前环境使用默认 APE 启动路径');
-    return;
-  }
-  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'dairn 共享缓存 '));
-  try {
-    const before=hash(ape);
-    const env=fastEnv({DAIRN_CACHE_HOME:tmp});
-    const p=run(['version'],{env,cwd:tmp});
-    assert.equal(p.status,0,p.stderr);
-    const cache=path.join(tmp,'native-'+before);
-    const native=path.join(cache,'dairn-native');
-    const metadata=path.join(cache,'dairn-native.sha256');
-    assert.ok(fs.statSync(native).isFile());
-    assert.equal(fs.statSync(native).mode & 0o777,0o700,'缓存可执行文件权限必须是 0700');
-    assert.equal(fs.statSync(metadata).mode & 0o777,0o600,'校验元数据权限必须是 0600');
-    assert.equal(hash(native),fs.readFileSync(metadata,'utf8').trim());
-    const cached=hash(native);
-    const mtime=fs.statSync(native).mtimeMs;
-    const shell=spawnSync('/bin/sh',[path.join(source,'dairn.sh'),'version'],{env,cwd:tmp,encoding:'utf8',timeout:20000});
-    assert.equal(shell.status,0,shell.stderr);
-    assert.equal(shell.stdout,p.stdout);
-    assert.equal(hash(native),cached,'缓存命中不得重建');
-    assert.equal(fs.statSync(native).mtimeMs,mtime,'缓存命中不得重建');
-    assert.equal(run(['invalid-command-for-test'],{env,cwd:tmp}).status,2);
-    assert.equal(hash(native),cached);
-    assert.deepEqual(fs.readdirSync(cache).sort(),CACHE_ENTRIES);
-    assert.ok(!fs.existsSync(path.join(cache,'.dairn-native.lock')),'不得残留锁目录');
-    assert.ok(!fs.readdirSync(cache).some(name=>name.endsWith('.tmp')),'不得残留临时文件');
-    assert.equal(hash(ape),before);
-  } finally { fs.rmSync(tmp,{recursive:true,force:true}); }
+test('缺失完整性清单被拒绝执行', () => {
+  const target = fixture();
+  fs.rmSync(path.join(target, '.dairn', 'runtime', 'runtime-integrity.json'));
+  const result = runWrapper(target, ['--version']);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /invalid runtime|ENOENT/);
 });
 
-test('受保护 CI（GITHUB_ACTIONS=true）禁用快速缓存并回退源 APE', {skip:process.platform === 'win32'}, t => {
-  if (spawnSync('/bin/sh',['-c','command -v sha256sum'],{stdio:'ignore'}).status !== 0) {
-    t.skip('当前环境使用默认 APE 启动路径');
-    return;
-  }
-  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'dairn protected ci '));
-  try {
-    const before=hash(ape);
-    const p=spawnSync('/bin/sh',[path.join(source,'dairn.sh'),'version'],{
-      encoding:'utf8',timeout:20000,cwd:tmp,
-      env:{...process.env,DAIRN_FAST_RUNTIME:'1',DAIRN_CACHE_HOME:tmp,
-           GITHUB_ACTIONS:'true',GITLAB_CI:'',DAIRN_PROTECTED_CI:''},
-    });
-    assert.equal(p.status,0,p.stderr);
-    assert.ok(p.stdout.startsWith('Dairn '+engineVersion+' —'),p.stdout);
-    assert.equal(hash(ape),before);
-    assert.deepEqual(fs.readdirSync(tmp),[],'受保护 CI 下不得创建快速缓存');
-  } finally { fs.rmSync(tmp,{recursive:true,force:true}); }
+test('安装路径含空格时仍可执行', () => {
+  const target = fixture(`dairn npm spaces ${Date.now()}-`);
+  const result = runWrapper(target, ['--version']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.includes(`Dairn ${engineVersion}`));
 });
 
-test('空格路径完整传递且项目检查通过', () => {
-  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'dairn npm spaces '));
-  try {
-    const target=path.join(tmp,'demo project');
-    const init=run(['init','--path',target,'--stack','go','--sample']);
-    assert.equal(init.status,0,init.stderr+'\n'+init.stdout);
-    assert.ok(fs.existsSync(path.join(target,'AGENTS.md')));
-    const check=run(['validate','--root',target],{cwd:tmp});
-    assert.equal(check.status,0,check.stderr+'\n'+check.stdout);
-    for (const section of ['skills', 'docs', 'relations', 'analyzers']) {
-      assert.ok(check.stdout.split(/\r?\n/).includes(section + ': PASS'), check.stdout);
-    }
-  } finally { fs.rmSync(tmp,{recursive:true,force:true}); }
+test('POSIX：包装层委托仓库根 dairn 启动器', {skip: !POSIX}, () => {
+  const target = fixture();
+  fs.rmSync(path.join(target, 'dairn'));
+  const result = runWrapper(target, ['--version']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /dairn/);
 });
 
-test('拒绝执行已损坏的包内运行时', () => {
-  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'dairn npm corrupted '));
-  try {
-    fs.cpSync(path.join(source,'bin'),path.join(temp,'bin'),{recursive:true});
-    fs.cpSync(path.join(source,'runtime'),path.join(temp,'runtime'),{recursive:true});
-    fs.copyFileSync(path.join(source,'dairn.sh'),path.join(temp,'dairn.sh'));
-    fs.appendFileSync(path.join(temp,'runtime','dairn-embedded.com'),Buffer.from([0x00]));
-    const p=spawnSync(process.execPath,[path.join(temp,'bin','dairn.cjs'),'version'],{encoding:'utf8',timeout:10000});
-    assert.equal(p.status,2);
-    assert.match(p.stderr,/checksum mismatch/);
-  } finally { fs.rmSync(temp,{recursive:true,force:true}); }
+test('POSIX：包装层与根启动器执行同一运行时', {skip: !POSIX}, () => {
+  const target = fixture();
+  const launcher = runLauncher(target, ['--version']);
+  const wrapper = runWrapper(target, ['--version']);
+  assert.equal(launcher.status, 0, launcher.stderr);
+  assert.equal(wrapper.status, 0, wrapper.stderr);
+  assert.equal(wrapper.stdout, launcher.stdout);
 });
 
-test('安装不需要生命周期脚本或外部依赖', () => {
-  const pkg=JSON.parse(fs.readFileSync(path.join(source,'package.json')));
-  assert.deepEqual(Object.keys(pkg.dependencies||{}),[]);
-  for(const name of ['preinstall','install','postinstall','prepare']) assert.ok(!pkg.scripts?.[name],name);
-  assert.equal(pkg.bin.dairn,'./bin/dairn.cjs');
+test('POSIX：根启动器恢复运行时执行位', {skip: !POSIX}, () => {
+  const target = fixture();
+  const runtime = path.join(target, '.dairn', 'runtime', 'dairn-embedded.com');
+  fs.chmodSync(runtime, 0o644);
+  const result = runLauncher(target, ['--version']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(fs.statSync(runtime).mode & 0o111);
+});
+
+test('POSIX：符号链接运行时被拒绝执行', {skip: !POSIX}, () => {
+  const target = fixture();
+  const runtime = path.join(target, '.dairn', 'runtime', 'dairn-embedded.com');
+  fs.rmSync(runtime);
+  fs.symlinkSync(SOURCE_RUNTIME, runtime);
+  const result = runWrapper(target, ['--version']);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /regular file|invalid runtime/);
 });

@@ -17,7 +17,7 @@ const LEGACY_PY = new Set(['governance.py', 'docs.py', 'ci_base.py', 'ci_postche
 const REPO_SEGMENTS = /^(?:docs|\.dairn|\.agents|\.github|quickjs|tools|tests|runtime|src|examples|licenses|bin|dist|build)\//;
 const REPO_FILES = /^(?:AGENTS|README|CLAUDE|BUILDING|CHANGELOG|CONTRIBUTING|LICENSE|GOVERNANCE|pyproject|package|Makefile)\b/;
 const TOP_COMMANDS = ['version', '--version', 'init', 'adopt', 'detect', 'upgrade', 'doctor', 'validate',
-  'validate-core', 'scope', 'check', 'help', 'docs', 'skills', 'guide', 'workflow', 'work', 'analyzers', 'analyze', 'quality', 'capability', 'tasks', 'hooks', 'hook', 'notes',
+  'validate-core', 'scope', 'check', 'help', 'docs', 'skills', 'guide', 'workflow', 'work', 'analyzers', 'analyze', 'context', 'quality', 'capability', 'tasks', 'hooks', 'hook', 'notes',
   'evidence', 'gate', 'attest', 'approval', 'handoff', 'governance', 'refactor'];
 const SUBCOMMANDS = {
   docs: ['find', 'show', 'context', 'check'],
@@ -27,7 +27,7 @@ const SUBCOMMANDS = {
   work: ['start', 'list', 'status', 'next', 'record', 'advance', 'skip', 'verify', 'finish', 'cancel', 'reopen',
     'link-check'],
   analyzers: ['list', 'templates', 'doctor', 'init'],
-  analyze: ['run'],
+  analyze: ['run', 'plan', 'import'],
   quality: ['fitness'],
   capability: ['plan'],
   tasks: ['check', 'ready'],

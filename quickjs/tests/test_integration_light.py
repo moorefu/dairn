@@ -10,7 +10,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CLI = ROOT / ('dairn.cmd' if os.name == 'nt' else 'dairn.sh')
+CLI = ROOT / ('dairn.cmd' if os.name == 'nt' else 'dairn')
 CHECK = '''import ast
 import json
 from pathlib import Path
@@ -52,7 +52,8 @@ class LightIntegration(unittest.TestCase):
         self.sequence = 0
 
     def call(self, *args, expected=0, vendored=False):
-        cli = self.root / '.dairn/bin' / ('dairn.cmd' if os.name == 'nt' else 'dairn') if vendored else CLI
+        # 新布局：唯一启动器在项目根（dairn / dairn.cmd），不再有 .dairn/bin 第二层。
+        cli = self.root / ('dairn.cmd' if os.name == 'nt' else 'dairn') if vendored else CLI
         command = [str(cli), *map(str, args), '--root', str(self.root)]
         result = subprocess.run(command, cwd=self.temp.name, env=self.env,
                                 capture_output=True, encoding='utf-8', errors='replace', timeout=60)

@@ -16,7 +16,7 @@ Hook 把 Agent 会话的**过程事实**记录成可追溯证据，并在推送�
 
 ## 命令面
 
-- `dairn hooks install`：规划 Hook 文件，`--apply` 才写入 `.dairn/hooks/`；`--git` 另外安装 `.git/hooks/pre-push`，`--force` 才允许覆盖冲突文件。`--launcher <POSIX 绝对路径>` 供 npm 本地安装等 PATH 中没有 `dairn` 的场景写入可执行 launcher（Windows 反斜杠路径不可直接用于 POSIX sh hook）。重复执行不会覆盖已存在的项目 Hook 文件；git worktree（`.git` 为文件）会跳过 git hook 安装并给出警告。
+- `dairn hooks install`：规划 Hook 文件，`--apply` 才写入 `.dairn/hooks/`；`--git` 另外安装 `.git/hooks/pre-push`，`--force` 才允许覆盖冲突文件。`--launcher <POSIX 绝对路径>` 供 npm 本地安装等 PATH 中没有 `dairn` 的场景写入可执行启动器（Windows 反斜杠路径不可直接用于 POSIX sh hook）。重复执行不会覆盖已存在的项目 Hook 文件；git worktree（`.git` 为文件）会跳过 git hook 安装并给出警告。
 - `dairn hook pre-push`：推送前依次执行基线解析、结构治理、风险门禁与活跃任务证据校验。`--no-check` 只跳过风险门禁。
 - `dairn hook turn-end`：回合结束时把会话锚定到活跃任务。
 

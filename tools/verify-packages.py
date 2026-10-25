@@ -16,13 +16,10 @@ import tempfile
 import venv
 import zipfile
 from source_workspace import prepare_workspace, runtime_payload, zip_paths
-from release_config import artifact_names, load_release
+from release_config import (artifact_names, build_instant, format_instant, load_release,
+                            version_from_artifacts)
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE = load_release(ROOT)
-VERSION = RELEASE['version']
-WHEEL_VERSION = RELEASE['python_version']
-NAMES = artifact_names(RELEASE)
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--artifacts', type=Path, help='验收已有发布制品，不重新生成被安装的包')
 parser.add_argument('--package', choices=['all', 'npm', 'wheel', 'zip'], default='all')
@@ -36,6 +33,20 @@ if args.smoke and not args.artifacts:
     parser.error('冒烟验证需要 --artifacts，不在 runner 上重建制品')
 if args.skip_npm and args.package != 'all':
     parser.error('--skip-npm 不能与独立制品验收合用')
+if args.artifacts:
+    if not args.artifacts.is_dir():
+        parser.error('--artifacts 目录不存在：' + str(args.artifacts))
+    args.artifacts = args.artifacts.resolve()
+    # 复用已构建制品时版本必须从制品文件名恢复；重新取构建时间会得到不同 nightly。
+    VERSION = version_from_artifacts(ROOT, args.artifacts)
+    RELEASE = load_release(ROOT, version=VERSION)
+else:
+    # Python 与 npm 两个构建入口必须共用一个构建时间戳，否则 ZIP 与 tarball 版本不一致。
+    os.environ.setdefault('DAIRN_BUILD_TIME', format_instant(build_instant()))
+    RELEASE = load_release(ROOT)
+VERSION = RELEASE['version']
+WHEEL_VERSION = RELEASE['python_version']
+NAMES = artifact_names(RELEASE)
 selected = set(NAMES) if args.package == 'all' else {args.package}
 if args.skip_npm:
     selected.remove('npm')
@@ -118,14 +129,14 @@ def verify():
             if not args.artifacts:
                 run('npm-build', [npm, 'run', 'build', '--', '--out', built])
                 assert sha(archive) == original_zip_hash, 'Python/npm 生成的 ZIP 不一致'
-        runtime_payload(ROOT, archive)
+        runtime_payload(ROOT, archive, VERSION)
         summary['zip_files'] = sorted(zip_paths(ROOT))
         extracted = extract_zip(archive, tmp / 'extracted')
-        runtime = extracted / 'runtime/dairn-embedded.com'
+        runtime = extracted / '.dairn/runtime/dairn-embedded.com'
         runtime_hash = sha(runtime)
         if args.artifacts:
             assert runtime_hash == checksums['ape_sha256']
-        assert json.loads((extracted / 'runtime/runtime-integrity.json').read_text(encoding='utf-8'))['sha256'] == runtime_hash
+        assert json.loads((extracted / '.dairn/runtime/runtime-integrity.json').read_text(encoding='utf-8'))['sha256'] == runtime_hash
         if not args.smoke:
             with zipfile.ZipFile(runtime) as zipped:
                 assert zipped.testzip() is None
@@ -140,22 +151,22 @@ def verify():
                     name = 'quickjs/assets/' + entry['type'] + '/' + entry['path']
                     assert hashlib.sha256(zipped.read(name)).hexdigest() == entry['sha256']
         if not args.smoke and selected & {'wheel', 'zip'}:
-            source = prepare_workspace(ROOT, tmp / 'source', archive)
+            source = prepare_workspace(ROOT, tmp / 'source', archive, VERSION)
 
         if 'npm' in selected:
             with tarfile.open(built / NAMES['npm']) as tar:
                 package_meta = json.load(tar.extractfile('package/package.json'))
                 assert package_meta['version'] == VERSION
                 assert package_meta['name'] == RELEASE['npm_name'], 'npm tarball 包名必须与 package.json 一致'
-                ape_member = tar.getmember('package/runtime/dairn-embedded.com')
+                ape_member = tar.getmember('package/.dairn/runtime/dairn-embedded.com')
                 if os.name != 'nt':
                     assert ape_member.mode & 0o111, 'npm 包内运行时必须带执行位，否则 bash 无法执行 APE 加载器'
                 assert tar.extractfile(ape_member).read() == runtime.read_bytes()
-                assert tar.extractfile('package/dairn.sh').read() == (ROOT / 'dairn.sh').read_bytes()
+                assert tar.extractfile('package/dairn').read() == (ROOT / 'dairn').read_bytes()
                 assert tar.extractfile('package/LICENSE').read() == (ROOT / 'LICENSE').read_bytes()
                 assert package_meta.get('license') == 'MIT', 'npm 包许可证元数据必须是 MIT'
-                allowed = {'package/package.json', 'package/README.md', 'package/LICENSE', 'package/bin/dairn.cjs', 'package/dairn.sh',
-                           'package/runtime/dairn-embedded.com', 'package/runtime/runtime-integrity.json'}
+                allowed = {'package/package.json', 'package/README.md', 'package/LICENSE', 'package/bin/dairn.cjs', 'package/dairn',
+                           'package/.dairn/runtime/dairn-embedded.com', 'package/.dairn/runtime/runtime-integrity.json'}
                 assert all(e.name in allowed or e.name.startswith('package/licenses/') for e in tar.getmembers())
             installed = tmp / 'npm-installed'
             installed.mkdir()
@@ -173,9 +184,10 @@ def verify():
             with zipfile.ZipFile(wheel) as zipped:
                 assert all(name.startswith(('dairn/', f'dairn-{WHEEL_VERSION}.dist-info/')) for name in zipped.namelist())
                 assert {n for n in zipped.namelist() if n.startswith('dairn/')} == {
-                    'dairn/__init__.py', 'dairn/cli.py', 'dairn/dairn.sh', 'dairn/runtime/dairn-embedded.com', 'dairn/runtime/runtime-integrity.json'}
-                assert zipped.read('dairn/dairn.sh') == (ROOT / 'dairn.sh').read_bytes()
-                assert zipped.read('dairn/runtime/dairn-embedded.com') == runtime.read_bytes()
+                    'dairn/__init__.py', 'dairn/cli.py', 'dairn/dairn',
+                    'dairn/.dairn/runtime/dairn-embedded.com', 'dairn/.dairn/runtime/runtime-integrity.json'}
+                assert zipped.read('dairn/dairn') == (ROOT / 'dairn').read_bytes()
+                assert zipped.read('dairn/.dairn/runtime/dairn-embedded.com') == runtime.read_bytes()
                 assert b'Tag: py3-none-any' in zipped.read(f'dairn-{WHEEL_VERSION}.dist-info/WHEEL')
                 assert zipped.read(f'dairn-{WHEEL_VERSION}.dist-info/licenses/LICENSE') == (ROOT / 'LICENSE').read_bytes()
                 metadata = zipped.read(f'dairn-{WHEEL_VERSION}.dist-info/METADATA').decode()
@@ -205,7 +217,7 @@ def verify():
 
         if 'zip' in selected:
             assert (extracted / 'LICENSE').read_bytes() == (ROOT / 'LICENSE').read_bytes(), 'ZIP 必须携带 MIT LICENSE'
-            cli = [extracted / 'dairn.cmd'] if os.name == 'nt' else ['/bin/sh', extracted / 'dairn.sh']
+            cli = [extracted / 'dairn.cmd'] if os.name == 'nt' else ['/bin/sh', extracted / 'dairn']
             cli_cases('zip', cli)
             summary['zip_source_free'] = True
 
@@ -231,10 +243,10 @@ def verify():
             engine.write_bytes(engine.read_bytes() + '\n// 源码重建验收标记\n'.encode('utf-8'))
             changed = tmp / 'changed'
             run('source-rebuild', [*command, '--out', changed], cwd=source, override=bare)
-            runtime_payload(ROOT, changed / archive.name)
+            runtime_payload(ROOT, changed / archive.name, VERSION)
             changed_root = extract_zip(changed / archive.name, tmp / 'changed-extracted')
-            assert sha(changed_root / 'runtime/dairn-embedded.com') != runtime_hash
-            with zipfile.ZipFile(changed_root / 'runtime/dairn-embedded.com') as zipped:
+            assert sha(changed_root / '.dairn/runtime/dairn-embedded.com') != runtime_hash
+            with zipfile.ZipFile(changed_root / '.dairn/runtime/dairn-embedded.com') as zipped:
                 assert zipped.read('quickjs/core/engine.mjs') == engine.read_bytes()
             summary.update(identical_zip=True, source_rebuilt=True)
 

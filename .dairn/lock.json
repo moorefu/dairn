@@ -1,7 +1,7 @@
 {
   "schema": 2,
-  "version": "0.1.0-nightly.20261024123943",
-  "runtime_sha256": "448d22ae181b8f49a54f8ec31104f5c049578cbd33c3ea88cad881d63c05cbff",
+  "version": "0.1.0-nightly.20261025120235",
+  "runtime_sha256": "ad6ac836ee68db69aa80b2470e68bf175e95064dca44849aacb9952712565614",
   "config": {
     "schema": 2,
     "name": "dairn",
@@ -59,7 +59,7 @@
     "extra_skills": []
   },
   "managed": {
-    ".agents/skills/dairn-agent-workflow/SKILL.md": "3a981a9b6917852d9ab347b973f10e4d01cef70f00ae94004b3af499f0331b3f",
+    ".agents/skills/dairn-agent-workflow/SKILL.md": "9f67d97e7d9e82d613cb442bc4d4180f9945992bdd44a2e765a451caf38007de",
     ".agents/skills/dairn-agent-workflow/agents/openai.yaml": "69170b7de0bc1e5cd540eb701a80ef1d60ad65fded0fa5d9998fc257fc39150d",
     ".agents/skills/dairn-bugfix/SKILL.md": "92f9a194b7b86f1314f5dc408a51cdf3c6d812776856432175c7918ce9913bfc",
     ".agents/skills/dairn-bugfix/agents/openai.yaml": "4da45d1ca712ffa55a612fa30faaab3033516c516efadaa70c1eaa933485a20f",
@@ -67,7 +67,7 @@
     ".agents/skills/dairn-change-plan/agents/openai.yaml": "99c57c6800993482d9b40a92979da0ae1e372ad4ae986b3ef0929714ee6d0ae9",
     ".agents/skills/dairn-code-review/SKILL.md": "1e09db96e28d1b9bfd347040902931f3563b6bcc7a4b9405ba619ecb2c94b67f",
     ".agents/skills/dairn-code-review/agents/openai.yaml": "ed224d7d7b13b82b2d5754667791e8b4d87f66ceb155fb6cc19216ea790d9786",
-    ".agents/skills/dairn-governance/SKILL.md": "6abda548dfffe80b9aa14209460ef2bd3a72ecdd3e4f7964d6f0b69d457e67d1",
+    ".agents/skills/dairn-governance/SKILL.md": "62cd32c731e8825d2924933377bbed9d4d0c33a9be36864a2d02d3007d6aef41",
     ".agents/skills/dairn-governance/agents/openai.yaml": "5073805e40ed17a1ec582021845db7c6dbb9f9b98a2b945bb244e880cd344a44",
     ".agents/skills/dairn-grill/SKILL.md": "3f842d8abd1a27a83b1d239ea8f2a36b63690aae27ff96ce851e58c935bec5f8",
     ".agents/skills/dairn-grill/agents/openai.yaml": "6cec83f8a6917d15797820976e51c4b5285c0375fb38ceb693df16b90cdf18af",
@@ -83,13 +83,12 @@
     ".agents/skills/dairn-tdd/agents/openai.yaml": "559037ad8fbc3d3ec42d08126313c297036e7142ef5d85c29431751d06c69ad1",
     ".agents/skills/dairn-tracer-tasks/SKILL.md": "2daab31041bdc3b7c11105faa2ed7210af645d7ab5fe9666be4ee489853d768c",
     ".agents/skills/dairn-tracer-tasks/agents/openai.yaml": "56113f6802417a3a3ae9ddeab286c8f0eff46ab0b5115aca845cb1d53c83f44d",
-    ".agents/skills/dairn-workflow-router/SKILL.md": "57dace118a75d7efb07fcb9d635e14ed93547a956de0946545bb08c923d5dca8",
+    ".agents/skills/dairn-workflow-router/SKILL.md": "8d028bc7e93500484fccd001e6f6cc187f04a59d473482a9c370f632a9895cf2",
     ".agents/skills/dairn-workflow-router/agents/openai.yaml": "0429fc8709831573b26b695fd8b46e1fdc5f37b53a6b47bd6941ef94ebec1561",
-    ".dairn/.gitattributes": "d31d39269c338522b79747346ccd45caa99cab82887d51d9ed4290d3af3047ec",
-    ".dairn/Makefile": "ca61c8d9c72c180832df19072191927c85eccbbc62774510dd67a6ce8c3590d0",
-    ".dairn/bin/dairn": "9761e6b5a7997fe39d02186d2a50f459f0fa4b2d01c9cb5634d91418907895cc",
-    ".dairn/bin/dairn.cmd": "3d521f42d80cf4da380c093b216819fd610c0113b5ada0cb0d69da63a3cdaa76",
-    "AGENTS.md": "9976e7b68f467ff6e574443966b4894f17f9331c4f627724be9e6becb6ffc1e9",
-    "docs/GOVERNANCE_SPEC.md": "e62d48174e03279cce928c1430545c81311bd5af38b6628f6c7943f16cca54e9"
+    ".dairn/.gitattributes": "f414e9951ccce8606c6d92cf9220e3a5a38af0c5d461f4ebd271704db15b0fa4",
+    "AGENTS.md": "39089727e8527e269fe7aabc36eb70dd5c8a2b652280b58aa2964d5014adb3ef",
+    "dairn": "52bcd4db3c6bf0a697412ad34fd9bd892487260cb799340832a9bb3f327e2f7c",
+    "dairn.cmd": "23eba37f99b09dd6661a85b469780acebe8af8eaaae73481c1b4d4cea4e20ee9",
+    "docs/GOVERNANCE_SPEC.md": "75b2360a9d0ad208927cce68e2a217cda2a3662609d701b4e97782348bbfd468"
   }
 }

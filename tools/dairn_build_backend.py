@@ -58,9 +58,9 @@ def wheel_from_files(files, destination):
     entries = {
         f'{DIST}/__init__.py': files['src/dairn/__init__.py'],
         f'{DIST}/cli.py': files['src/dairn/cli.py'],
-        f'{DIST}/dairn.sh': files['dairn.sh'],
-        f'{DIST}/runtime/dairn-embedded.com': files['dairn-embedded.com'],
-        f'{DIST}/runtime/runtime-integrity.json': files['runtime-integrity.json'],
+        f'{DIST}/dairn': files['dairn'],
+        f'{DIST}/.dairn/runtime/dairn-embedded.com': files['dairn-embedded.com'],
+        f'{DIST}/.dairn/runtime/runtime-integrity.json': files['runtime-integrity.json'],
         f'{META}/licenses/LICENSE': files['LICENSE'],
         f'{META}/METADATA': metadata(),
         f'{META}/WHEEL': f'Wheel-Version: 1.0\nGenerator: Dairn\nRoot-Is-Purelib: true\nTag: {TAG}\n'.encode(),
@@ -81,7 +81,7 @@ def wheel_from_files(files, destination):
         for path, data in sorted(entries.items()):
             info = zipfile.ZipInfo(path, (2026, 10, 22, 0, 0, 0))
             info.create_system = 3
-            info.external_attr = (0o100755 if path.endswith('.com') else 0o100644) << 16
+            info.external_attr = (0o100755 if path.endswith('.com') or path == f'{DIST}/dairn' else 0o100644) << 16
             zipped.writestr(info, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
     return name
 
@@ -96,7 +96,7 @@ def sdist_from_files(files, destination):
             for path, data in sorted(entries.items()):
                 info = tarfile.TarInfo(stem + '/' + path)
                 info.size = len(data)
-                info.mode = 0o755 if path.endswith(('.sh', '.com')) or path == 'bin/dairn.cjs' else 0o644
+                info.mode = 0o755 if path.endswith(('.sh', '.com')) or path in {'bin/dairn.cjs', 'dairn'} else 0o644
                 info.mtime = 1792627200
                 tar.addfile(info, io.BytesIO(data))
     return name

@@ -12,7 +12,7 @@ symbols: ["dairn work start", "dairn work verify"]
 
 # Work Execution Contract
 
-`dairn work` 是**持久化过程记录器**，不是 Agent 调度器。一个任务有稳定 ID、分类、顺序阶段、当前 Skill 与状态。简单任务按推荐路由跳过不适用阶段；多会话通过 `.dairn/work/<id>.json` 恢复上下文。CLI 不自动执行 AI，不声称人类已审批。文件由项目所有，不参与核心运行时的受管理文件哈希。调用入口是项目 launcher，本文中的 `dairn` 是它的简写；`dairn work next` / `status` / `verify` 返回 `invocation` 块给出 posix、windows 与 doctor 命令，解析顺序、vendored 运行时与安全边界见 [launcher 契约](launcher.md)。
+`dairn work` 是**持久化过程记录器**，不是 Agent 调度器。一个任务有稳定 ID、分类、顺序阶段、当前 Skill 与状态。简单任务按推荐路由跳过不适用阶段；多会话通过 `.dairn/work/<id>.json` 恢复上下文。CLI 不自动执行 AI，不声称人类已审批。文件由项目所有，不参与核心运行时的受管理文件哈希。调用入口是项目根启动器 `dairn`（Windows `dairn.cmd`），本文中的 `dairn` 是它的简写；`dairn work next` / `status` / `verify` 返回 `invocation` 块给出 posix、windows 与 doctor 命令，解析顺序、vendored 运行时与安全边界见 [launcher 契约](launcher.md)。
 
 ## 生命周期
 

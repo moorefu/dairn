@@ -20,6 +20,8 @@ for _key in ('GITHUB_ACTIONS','GITHUB_EVENT_NAME','GITHUB_EVENT_PATH','GITHUB_RE
              'GITLAB_CI','CI_PIPELINE_SOURCE','CI_MERGE_REQUEST_DIFF_BASE_SHA','CI_MERGE_REQUEST_LABELS'):
     os.environ.pop(_key, None)
 binary = root / 'runtime/dairn-embedded.com'
+# 验收本次构建，而不是 .dairn/runtime 中可能较旧的 vendored 快照。
+os.environ['DAIRN_RUNTIME'] = str(binary)
 before = hashlib.sha256(binary.read_bytes()).hexdigest()
 results = {}
 # 不自动下载新工具链或依赖；默认 Go 集成使用标准工具链，不启用 race/CGO。
@@ -42,7 +44,8 @@ with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
     for name, script in [('core', 'test_core.mjs'), ('policy', 'test_native.mjs'), ('host', 'test_host_native.mjs'),
                          ('governance', 'test_governance_native.mjs'),
                          ('handoff', 'test_handoff_native.mjs'),
-                         ('gov', 'test_gov_native.mjs')]:
+                         ('gov', 'test_gov_native.mjs'),
+                         ('launcher', 'test_launcher_native.mjs')]:
         result = subprocess.run([str(native), str(root / 'quickjs/tests' / script)],
                                 env=env, capture_output=True, timeout=40)
         (out / ('linux-' + name + '.log')).write_bytes(result.stdout + result.stderr)
@@ -58,6 +61,7 @@ with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
         'quickjs.tests.test_hooks',
         'quickjs.tests.test_notes_seal',
         'quickjs.tests.test_launcher',
+        'quickjs.tests.test_root_launcher',
         'quickjs.tests.test_doctor',
         'quickjs.tests.test_audit_logs',
         'quickjs.tests.test_review_identity',
@@ -68,6 +72,8 @@ with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
         'quickjs.tests.test_project_lifecycle',
         'quickjs.tests.test_handoff',
         'quickjs.tests.test_governance_cli',
+        'quickjs.tests.test_runtime_lock_diagnostic',
+        'quickjs.tests.test_docs_retrieval',
     ])
     def flatten(suite):
         for case in suite:
