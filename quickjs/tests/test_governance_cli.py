@@ -6,6 +6,7 @@ evidence-honest feedback. Pure semantics live in test_gov_native.mjs.
 """
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -74,12 +75,20 @@ class GovernanceCLI(unittest.TestCase):
         self.assertEqual(plan['classification']['effective_risk'], 'L2')
         self.assertEqual(len(plan['requirements']), 4)
         self.assertEqual(plan['approvals'], [{'authority': 'scm-native', 'natural_person': True,
-                                              'required': True, 'origin': 'risk-L2'}])
+                                              'min_count': 1, 'required': True, 'origin': 'risk-L2'}])
         self.assertEqual(plan['status'], 'ready-to-execute')
-        # Remove the integration executor: the plan must report the gap and exit nonzero.
+        # Head 删除执行器不能削弱当前 Base 的必需矩阵。
         del policy['modules'][0]['checks']['integration']
         policy_path.write_text(json.dumps(policy))
-        gap = self.call('governance', 'plan', '--base', base)
+        unchanged = self.obj('governance', 'plan', '--base', base)['plan']
+        self.assertEqual(len(unchanged['requirements']), 4)
+        self.assertTrue(any(executor['check_id'] == 'integration' for executor in unchanged['executors']))
+        # 缺失执行器确实属于新的 Base 时，后续变更必须显式报告缺口。
+        self.git('add', '.dairn/governance/project.json')
+        self.git('commit', '-qm', 'establish missing integration executor')
+        missing_base = self.git('rev-parse', 'HEAD')
+        self.commit_change(self.repo / 'auth.go', 'package hello\nfunc VerifyToken(s string) bool { return len(s) > 1 }\n')
+        gap = self.call('governance', 'plan', '--base', missing_base)
         self.assertNotEqual(gap.returncode, 0, 'missing capability must not plan as ready')
         self.assertIn('MISSING_CAPABILITY', gap.stderr + gap.stdout)
 
@@ -109,7 +118,9 @@ class GovernanceCLI(unittest.TestCase):
             'migration': {'strategy': 'incremental',
                           'exit_conditions': ['no-new-failures-beyond-baseline', 'no-legacy-callers']},
             'debt': {'allowed_transitional_items': [], 'known_failures': []},
-            'paths': ['legacy/']}
+            'paths': ['legacy/'],
+            'executors': {'contract': {'argv': [sys.executable, '-B', '-c', 'print("契约夹具检查")'],
+                                       'cwd': '.'}}}
         contract_file = self.repo / 'contract.json'
         contract_file.write_text(json.dumps(contract))
         plan = self.obj('refactor', 'plan', '--id', 'retire-legacy', '--file', 'contract.json')
@@ -119,12 +130,20 @@ class GovernanceCLI(unittest.TestCase):
         self.assertTrue(applied['applied'])
         status = self.obj('refactor', 'status', '--id', 'retire-legacy')
         self.assertEqual(status['id'], 'retire-legacy')
-        # The planner now appends the contract's requirement for matching paths.
+        # Head 提议的契约尚未进入 Base，不能在本次计划中冒充已生效约束。
+        proposed = self.obj('governance', 'plan', '--base', base)['plan']
+        self.assertFalse(any(r.get('refactor') == 'retire-legacy' for r in proposed['requirements']))
+        self.git('add', '.dairn/governance/refactors/retire-legacy.json')
+        self.git('commit', '-qm', 'establish effective refactor contract')
+        # 后续变更读取已生效 Base 契约，并绑定它的显式执行器。
         head = self.commit_change(self.repo / 'legacy' / 'new.go', 'package legacy\n')
         base2 = self.git('rev-parse', 'HEAD^')
         plan2 = self.obj('governance', 'plan', '--base', base2)['plan']
         self.assertTrue(any(r['origin'] == 'approved-refactor-contract:retire-legacy'
                             for r in plan2['requirements']))
+        self.assertTrue(any(e['requirement_id'] == 'retire-legacy.contract'
+                            and e['argv'] == contract['executors']['contract']['argv']
+                            for e in plan2['executors']))
         # compare/verify consume the locally recorded run evidence.
         compare = self.call('refactor', 'compare', '--id', 'retire-legacy')
         self.assertEqual(compare.returncode, 0, compare.stdout + compare.stderr)

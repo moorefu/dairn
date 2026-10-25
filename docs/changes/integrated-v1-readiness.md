@@ -4,7 +4,7 @@
 
 ## 交付判断
 
-源码组件已实现，并在独立审查后修复候选生命周期、事务恢复、观测闭合、回放真实性、Base 策略绑定、内置检查分派和审批证据打包问题。最终源码正在进行本地及无网络 Podman 验收，结果将在提交前填入。
+源码组件已实现，并在独立审查后修复候选生命周期、事务恢复、观测闭合、回放真实性、Base 策略绑定、内置检查分派和审批证据打包问题。本地四项门禁和三类制品冒烟已经通过；无网络 Podman 全套已执行完毕，140 项专项中 137 项通过、3 项旧预期断言失败。安全行为没有放行；受影响用例与治理 CLI 模块在同一环境补验 7 项全部通过（退出码 0）。本轮验收由原始完整套件和该补验共同组成，最终分支仍待 PR CI 整套复验。
 
 PCC-02 尚未达到提案的 Done：本次没有部署专用 GitHub App、隔离 Publisher、线上 Required Gate 或 Ruleset，也没有真实 PR 拒绝合并的故障注入证据。Windows 实机、ARM64 与六平台矩阵等待 CI；OBS-02 的真实宿主接线同样未验收。PR 用于组件审查和平台验证，不能标记整份提案已经交付。
 
@@ -67,7 +67,7 @@ PCC-02 尚未达到提案的 Done：本次没有部署专用 GitHub App、隔离
 
 ## 验证记录
 
-最终构建版本为 `0.1.0-nightly.20261025232338`，APE SHA256 为 `0b503ce3fd7246fc135ad13ddefde865cdce0fb221893e7ac557a93ff9a3784a`。本地四项门禁全部通过（退出码 0，`validation/ship-e-local-check.log`；候选摘要 `validation/runtime-builds/35666-axr38g5r/summary.json`，清理 completed），其中工具单测 107 项通过。Linux 结果待本轮完成后更新；三类制品安装冒烟已经通过（退出码 0，`validation/ship-e-package-smoke/summary.json`）。所有 `validation/` 日志均为本地生成物，不纳入 Git，也不代表平台受信签名。
+最终构建版本为 `0.1.0-nightly.20261025232338`，APE SHA256 为 `0b503ce3fd7246fc135ad13ddefde865cdce0fb221893e7ac557a93ff9a3784a`。本地四项门禁全部通过（退出码 0，`validation/ship-e-local-check.log`；候选摘要 `validation/runtime-builds/35666-axr38g5r/summary.json`，清理 completed），其中工具单测 107 项通过。Linux 完整命令原始退出码为 1：共享 lint/unit/integration 全部退出 0，专项 140 项中 137 项通过、3 项失败、0 错误、0 跳过；APE 原始字节不变。原始记录为 `validation/ship-linux-e/linux-summary.json`、`linux-regression.log` 与 `podman.json`，没有重写为通过。三类制品安装冒烟已经通过（退出码 0，`validation/ship-e-package-smoke/summary.json`）。所有 `validation/` 日志均为本地生成物，不纳入 Git，也不代表平台受信签名。
 
 独立审查的窄回归日志：
 
@@ -103,3 +103,11 @@ python tools/verify-podman.py \
 ```
 
 实际镜像在预备阶段装齐工具，测试阶段为 network=none、UID/GID=1000。镜像 ID 为 `2033a1e29aa9bc47a5e115252db7b94aacad65e7ac7b8ed7e1bd37be79e6181b`；Linux amd64，Python 3.11.2（python/python3 同一解释器）、Go 1.27.3、Node 18.20.4、npm 9.2.0、jq 1.6、OpenSSL 3.0.22、Git 2.39.5。工具版本原始记录 `validation/ship-e-linux-toolchain.log`。这是本次本地镜像环境，不冒充 `tools/Containerfile.validation` 的 Python 3.12/Node 22 默认组合或六平台 CI。
+
+Linux 完整套件发现 `test_policy_change_invalidates_machine_evidence` 的旧诊断断言失败：程序已按不可变 Base 验证，Head 策略文件修改触发 `Worktree changed`，测试仍匹配 `Policy changed`。单条原用例已在同一环境复现（退出 1，`validation/linux-policy-diagnostic-red.log`）；修正后同时断言 Run 绑定真实 Base 策略摘要、Head 修改仍非零拒绝，补跑 1 项通过（退出 0，`validation/linux-policy-diagnostic-green-v2.log`）。没有修改核心或最终 APE，也没有放宽拒绝条件。补验入口初次因夹具路径层级不足退出 1，调整独立夹具路径后成功，原失败日志保留。完整套件的原始退出码和失败记录不会被补验覆盖，最终汇总分别列出。
+
+完整 Linux 的另外两条失败位于治理 CLI 旧夹具：审批预期缺少新增的 `min_count: 1`；契约预期把仅在 Head 提议的记录直接视为 Base 生效契约。修正测试后明确验证：Head 删除执行器不能削弱本次 Base，新 Base 自身缺执行器仍报 MISSING_CAPABILITY；Head 契约不会自动生效，进入后续 Base 后必须有显式执行器。原失败由完整套件真实复现，没有修改核心来迎合旧断言。补验覆盖策略证据用例及整个治理 CLI 模块，最终结果见 `validation/linux-final-followup/`。
+
+最终补验结果：`validation/linux-final-followup/tests.log` 记录 7 项通过、0 失败、0 跳过，耗时 122.768 秒；驱动退出 0，候选摘要记录 cleanup=completed。`summary.json` 保存同一镜像、network=none、普通用户和 APE 摘要。完整套件专项耗时 1656.675 秒，原始退出 1 保留；全部诊断均已复制，任务容器已清理。最终源码修正仅涉及两份测试与本记录，运行时核心和制品字节不变。
+
+`./dairn tasks check` 退出 0（8 个任务、0 错误、0 告警）；任务未批量标记 Done，因为跨平台和 PCC 部署证据尚缺。`guide impact --base origin/main` 退出 0、结果为 heuristic 的 contract-impact，仅用于文档审查，不作为语义正确或批准证明。远端 main 复核仍为 `3ba5568d46f34bdb3aec46c34a65df976f19d087`。

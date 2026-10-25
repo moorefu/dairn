@@ -2,7 +2,7 @@
 Runs Dairn itself and real Go gates; never mocks an AI executor.
 """
 from pathlib import Path
-import json, subprocess, tempfile, unittest
+import hashlib, json, subprocess, tempfile, unittest
 
 RUNTIME=Path(__file__).resolve().parents[2]
 CLI=RUNTIME/'dairn'
@@ -133,11 +133,17 @@ class AgentProtocol(unittest.TestCase):
     def test_policy_change_invalidates_machine_evidence(self):
         self.implement();base=self.commit_base();self.go_change()
         self.cmd('check','--base',base,'--task','auth','--root',self.root,ok=True)
+        task=json.loads((self.root/'.dairn/work/auth.json').read_text())
+        link=next(stage for stage in task['stages'] if stage['id']=='implement')['machine_runs'][-1]
+        run=json.loads((self.root/link['path']).read_text())
+        base_policy=subprocess.check_output(['git','show',base+':.dairn/governance/project.json'],cwd=self.root)
+        self.assertEqual(run['execution']['policy_sha256'],hashlib.sha256(base_policy).hexdigest())
         policy=self.root/'.dairn/governance/project.json'
         policy.write_text(policy.read_text()+'\n')
         result=self.cmd('work','verify','auth','--require-machine-gates','--root',self.root)
         self.assertNotEqual(result.returncode,0)
-        self.assertIn('Policy changed',result.stdout+result.stderr)
+        # Base 策略不可被 Head 替换；Head 文件修改由输入快照变化拒绝。
+        self.assertIn('Worktree changed',result.stdout+result.stderr)
 
     def gate_reason(self,project,gate='lint'):
         root=Path(project)
