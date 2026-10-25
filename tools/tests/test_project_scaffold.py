@@ -3,7 +3,11 @@
 模板事实源是 quickjs/assets/templates/project/（随运行时嵌入）。本测试用固定配置跑
 init，对关键文件做 sha256 黄金断言，并验证模板确实随运行时嵌入——这样 core 装配层、
 模板内容、启动器换行约定中任何一处意外漂移都会在 `check-source.py unit` 中失败。
+
+每次 init 的成本主要在复制运行时负载与摘要计算，因此两次 init（python+none、go+both）
+在类级夹具里并行执行一次，由多个断言方法共享；黄金断言与检查强度不因此减少。
 """
+import concurrent.futures
 import hashlib
 import os
 from pathlib import Path
@@ -63,32 +67,66 @@ def _temp_root():
         return tempfile.TemporaryDirectory(prefix='dairn-scaffold-')
 
 
+def _run_init(project, args):
+    """在独立项目目录执行一次 init；失败时抛出带子进程输出摘要的断言错误。"""
+    env = dict(os.environ,
+               DAIRN_RUNTIME=str(RUNTIME),
+               DAIRN_RUNTIME_DIR=str(RUNTIME.parent),
+               DAIRN_RUNTIME_SOURCE='external',
+               PYTHONDONTWRITEBYTECODE='1')
+    result = subprocess.run(
+        [str(RUNTIME), '/zip/quickjs/main.mjs', 'init', '--name', 'parity_demo', '--apply'] + args,
+        cwd=project, env=env, capture_output=True, text=True, encoding='utf-8', errors='replace',
+        timeout=180)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or '').strip()
+        raise AssertionError('init 失败（%s，exit %s）：%s'
+                             % (' '.join(args), result.returncode, detail))
+    return result
+
+
+def _init_project(base, label, stack, ci):
+    project = base / label
+    project.mkdir()
+    _run_init(project, ['--stack', stack, '--ci', ci])
+    return project
+
+
 @unittest.skipUnless(RUNTIME.is_file(), '需要先构建仓库根 runtime/dairn-embedded.com（python tools/build.py）')
 @unittest.skipUnless(TEMPLATES.is_dir(), '缺少 quickjs/assets/templates/project 模板目录')
 class ProjectScaffoldTest(unittest.TestCase):
-    def setUp(self):
-        self.temp = _temp_root()
-        self.addCleanup(self.temp.cleanup)
-        self.base = Path(self.temp.name)
+    @classmethod
+    def setUpClass(cls):
+        """并行构建两个 init 夹具（python+none、go+both），供全部黄金断言方法共享。
 
-    def _run(self, project, args):
-        env = dict(os.environ,
-                   DAIRN_RUNTIME=str(RUNTIME),
-                   DAIRN_RUNTIME_DIR=str(RUNTIME.parent),
-                   DAIRN_RUNTIME_SOURCE='external',
-                   PYTHONDONTWRITEBYTECODE='1')
-        result = subprocess.run(
-            [str(RUNTIME), '/zip/quickjs/main.mjs', 'init', '--name', 'parity_demo', '--apply'] + args,
-            cwd=project, env=env, capture_output=True, text=True, encoding='utf-8', errors='replace',
-            timeout=180)
-        self.assertEqual(result.returncode, 0, 'init 失败：' + (result.stderr or result.stdout))
-        return result
-
-    def _init(self, label, stack, ci):
-        project = self.base / label
-        project.mkdir()
-        self._run(project, ['--stack', stack, '--ci', ci])
-        return project
+        两次 init 使用各自独立的临时项目目录；subprocess 释放 GIL，故 2 个 init 的
+        wall time 约等于单次 init；低核环境最坏退化为串行。夹具失败时汇总带输出的
+        错误，避免逐个测试重复尝试。
+        """
+        temp = _temp_root()
+        try:
+            base = Path(temp.name)
+            specs = (
+                ('python-none', 'python', 'none'),
+                ('go-both', 'go', 'both'),
+            )
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                futures = {label: pool.submit(_init_project, base, label, stack, ci)
+                           for label, stack, ci in specs}
+            projects = {}
+            failures = []
+            for label, future in futures.items():
+                try:
+                    projects[label] = future.result()
+                except Exception as exc:  # 汇总全部并行夹具错误，统一报告后再失败
+                    failures.append('%s: %s' % (label, exc))
+            if failures:
+                raise AssertionError('脚手架夹具 init 失败：\n' + '\n'.join(failures))
+        except BaseException:
+            temp.cleanup()
+            raise
+        cls.addClassCleanup(temp.cleanup)
+        cls.projects = projects
 
     def _sha(self, path):
         return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -125,17 +163,22 @@ class ProjectScaffoldTest(unittest.TestCase):
         self.assertTrue(windows.endswith(b'\r\n') and b'\r\n' in windows, 'Windows 启动器必须为 CRLF')
 
     def test_init_python_none_matches_golden_bytes(self):
-        project = self._init('python-none', 'python', 'none')
+        project = self.projects['python-none']
         self.assertScaffold(project, PYTHON)
+        # --ci none 必须不生成 CI 模板；占位符扫描刻意跳过 CI 文件，故在此显式断言。
+        self.assertFalse((project / '.github/workflows/dairn.yml').exists(),
+                         '--ci none 不应生成 GitHub CI 模板')
+        self.assertFalse((project / '.gitlab-ci.yml').exists(),
+                         '--ci none 不应生成 GitLab CI 模板')
 
-    def test_init_go_github_matches_golden_bytes(self):
-        project = self._init('go-github', 'go', 'github')
+    def test_init_go_both_matches_golden_bytes(self):
+        project = self.projects['go-both']
         self.assertScaffold(project, GO)
         self.assertEqual(self._sha(project / '.github/workflows/dairn.yml'), CI_GITHUB_SHA,
                          'GitHub CI 模板哈希漂移')
 
-    def test_init_python_gitlab_ci_template(self):
-        project = self._init('python-gitlab', 'python', 'gitlab')
+    def test_init_go_both_gitlab_ci_template(self):
+        project = self.projects['go-both']
         self.assertEqual(self._sha(project / '.gitlab-ci.yml'), CI_GITLAB_SHA, 'GitLab CI 模板哈希漂移')
 
     def test_templates_embedded_in_runtime(self):
