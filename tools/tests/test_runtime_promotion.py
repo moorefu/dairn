@@ -28,16 +28,23 @@ class RuntimePromotion(unittest.TestCase):
                 result = subprocess.run(invocation + [str(script), str(pid)], cwd=ROOT, env=env,
                     capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                return json.loads(result.stdout)
+                state = json.loads(result.stdout)
+                if state['target'] is None:
+                    state['diagnostic'] = result.stderr
+                return state
 
             process = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
             try:
                 state = probe(process.pid)
                 self.assertIs(state['self'], True)
                 self.assertIsNone(process.poll(), '只读存活探测不得终止目标进程')
-                self.assertIs(state['target'], True)
+                self.assertIs(state['target'], True, state)
                 self.assertEqual(state['invalid'], [None, None, None])
                 if os.name == 'nt':
+                    windows_root = os.environ['SYSTEMROOT'].replace('\\', '/')
+                    mapped_root = '/' + windows_root[0] + windows_root[2:]
+                    mapped = probe(process.pid, {**os.environ, 'SYSTEMROOT': mapped_root})
+                    self.assertIs(mapped['target'], True, mapped)
                     unavailable = probe(process.pid, {**os.environ, 'SYSTEMROOT': directory})
                     self.assertIsNone(unavailable['target'], '探测工具不可用必须返回未知')
                     self.assertIsNone(process.poll())

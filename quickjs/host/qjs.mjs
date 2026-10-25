@@ -261,21 +261,32 @@ function processAlive(pid) {
     if (os.platform === 'win32') {
       // 固定的 Cosmo 4.0.2 在 Windows 上可能把 kill(pid, 0) 当作终止操作，
       // 或把不存在的 PID 报为 EPERM；不得把权限错误降级成“已退出”。
-      const systemRoot = std.getenv('SYSTEMROOT') || std.getenv('SystemRoot');
-      if (!systemRoot || !/^[A-Za-z]:[\\/]/.test(systemRoot)) return null;
-      const powershell = normalize(systemRoot) + '/System32/WindowsPowerShell/v1.0/powershell.exe';
+      const configuredRoot = std.getenv('SYSTEMROOT') || std.getenv('SystemRoot');
+      const systemRoot = configuredRoot ? normalize(configuredRoot) : null;
+      if (!systemRoot || !/^[A-Za-z]:[\\/]/.test(systemRoot)) {
+        host.error('Windows 进程状态查询缺少绝对 SYSTEMROOT：' + JSON.stringify(systemRoot));
+        return null;
+      }
+      const powershell = systemRoot + '/System32/WindowsPowerShell/v1.0/powershell.exe';
       const script = 'try {$p = [System.Diagnostics.Process]::GetProcessById(' + pid + ')} ' +
         'catch [System.ArgumentException] {[Console]::Out.Write("exited"); exit 0} catch {exit 3}; ' +
         'try {if ($p.HasExited) {[Console]::Out.Write("exited")} else {[Console]::Out.Write("alive")}} ' +
         'catch {exit 3} finally {$p.Dispose()}';
       const result = run([powershell, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], host.cwd(), 10);
-      if (result.timedOut || result.code !== 0) return null;
+      if (result.timedOut || result.code !== 0) {
+        host.error('Windows 进程状态查询失败：' + JSON.stringify(result).slice(0, 1200));
+        return null;
+      }
       const state = result.output.trim();
+      if (state !== 'alive' && state !== 'exited') host.error('Windows 进程状态查询响应未知：' + state.slice(0, 1200));
       return state === 'alive' ? true : state === 'exited' ? false : null;
     }
     const code = os.kill(pid, 0);
     return code === 0 ? true : code === -3 ? false : null;
-  } catch (_) { return null; }
+  } catch (error) {
+    if (os.platform === 'win32') host.error('Windows 进程状态查询不可用：' + String(error).slice(0, 1200));
+    return null;
+  }
 }
 export const host = {
   read, readBytes, write, writeBytes, exists, mkdirs, realpath, run,
