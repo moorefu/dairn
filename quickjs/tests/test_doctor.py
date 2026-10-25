@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import shutil
 import unittest
 
 
@@ -25,11 +26,28 @@ class Doctor(unittest.TestCase):
                               env={**os.environ, **(env or {})}, capture_output=True,
                               encoding='utf-8', errors='replace', timeout=60)
 
+    def probe_doctor(self, env):
+        # 在加载 APE 后注入故障，只测试 Doctor 的工具/捕获路径诊断。
+        probe = Path(self.temp.name) / 'doctor-probe.mjs'
+        probe.write_text(
+            "import * as std from 'std';\n"
+            "import {host} from '/zip/quickjs/host/qjs.mjs';\n"
+            "import {dispatch} from '/zip/quickjs/core/project.mjs';\n"
+            "for (const [key,value] of Object.entries(" + json.dumps(env) + ")) std.setenv(key,value);\n"
+            "std.exit(dispatch(host," + json.dumps(['doctor', '--root', str(self.root)]) + "));\n",
+            encoding='utf-8')
+        copy = Path(self.temp.name) / 'qjs.com'
+        shutil.copyfile(ROOT / 'runtime/dairn-embedded.com', copy)
+        copy.chmod(0o700)
+        command = [str(copy)] if os.name == 'nt' else ['/bin/sh', str(copy)]
+        return subprocess.run([*command, str(probe)], capture_output=True,
+                              encoding='utf-8', errors='replace', timeout=60)
+
     def test_missing_git_makes_doctor_unready(self):
         # 使用隔离的空 PATH，而不是依赖「解释器目录恰好没有 git」的平台假设。
         empty = Path(self.temp.name) / 'empty-bin'
         empty.mkdir()
-        result = self.call('doctor', env={'PATH': str(empty)})
+        result = self.probe_doctor({'PATH': str(empty)})
         report = json.loads(result.stdout)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(report['status'], 'unready')
@@ -39,19 +57,7 @@ class Doctor(unittest.TestCase):
     def test_unwritable_capture_directory_makes_doctor_unready(self):
         blocked = Path(self.temp.name) / 'not-a-directory'
         blocked.write_text('阻止将普通文件用作临时目录', encoding='utf-8')
-        # APE 加载器也会使用 TMPDIR；在启动后注入，确保检查到宿主捕获路径。
-        probe = Path(self.temp.name) / 'blocked-temp.mjs'
-        probe.write_text(
-            "import * as std from 'std';\n"
-            "import {host} from '/zip/quickjs/host/qjs.mjs';\n"
-            "import {dispatch} from '/zip/quickjs/core/project.mjs';\n"
-            "for (const key of ['TMPDIR','TEMP','TMP']) std.setenv(key, " + json.dumps(str(blocked)) + ");\n"
-            "std.exit(dispatch(host, " + json.dumps(['doctor', '--root', str(self.root)]) + "));\n",
-            encoding='utf-8')
-        runtime = str(ROOT / 'runtime/dairn-embedded.com')
-        command = [runtime] if os.name == 'nt' else ['/bin/sh', runtime]
-        result = subprocess.run([*command, str(probe)], capture_output=True,
-                                encoding='utf-8', errors='replace', timeout=60)
+        result = self.probe_doctor({key: str(blocked) for key in ('TMPDIR', 'TEMP', 'TMP')})
         self.assertTrue(result.stdout.strip(), result.stderr)
         report = json.loads(result.stdout)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -62,10 +68,15 @@ class Doctor(unittest.TestCase):
     def test_default_temp_failure_uses_project_temp(self):
         blocked = Path(self.temp.name) / 'blocked-system-temp'
         blocked.write_text('模拟系统临时目录不可写', encoding='utf-8')
-        result = self.call('doctor', env={'PATH': str(Path(sys.executable).parent),
-                                        'TMPDIR': '', 'TEMP': str(blocked), 'TMP': str(blocked)})
+        policy_path = self.root / '.dairn/governance/project.json'
+        policy = json.loads(policy_path.read_text(encoding='utf-8'))
+        for check in policy['modules'][0]['checks'].values():
+            check['argv'][0] = sys.executable
+        policy_path.write_text(json.dumps(policy), encoding='utf-8')
+        result = self.probe_doctor({'PATH': str(Path(sys.executable).parent),
+                                    'TMPDIR': '', 'TEMP': str(blocked), 'TMP': str(blocked)})
         report = json.loads(result.stdout)
-        self.assertEqual(report['tools']['python'], 'available', result.stdout + result.stderr)
+        self.assertEqual(report['tools'][sys.executable], 'available', result.stdout + result.stderr)
         self.assertTrue((self.root / '.dairn/tmp').is_dir())
         self.assertNotIn('Cannot open command output', json.dumps(report))
 

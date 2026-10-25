@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from check_catalog import CI_SOURCE_STAGES
 
 root = Path(__file__).resolve().parent.parent
 out = Path(sys.argv[1]).resolve()
@@ -24,6 +25,13 @@ binary = root / 'runtime/dairn-embedded.com'
 os.environ['DAIRN_RUNTIME'] = str(binary)
 before = hashlib.sha256(binary.read_bytes()).hexdigest()
 results = {}
+# 与本地执行同一必需目录，额外 Linux/Go 回归不能替代这些 Check-ID。
+for stage in CI_SOURCE_STAGES:
+    result = subprocess.run([sys.executable, '-B', 'tools/check-source.py', stage],
+                            cwd=root, capture_output=True, timeout=3000)
+    (out / ('source-' + stage + '.log')).write_bytes(result.stdout + result.stderr)
+    results['source-' + stage] = result.returncode
+    print('source-' + stage, result.returncode, flush=True)
 # 不自动下载新工具链或依赖；默认 Go 集成使用标准工具链，不启用 race/CGO。
 os.environ.update(GOTOOLCHAIN='local', GOPROXY='off', CGO_ENABLED='0',
                   DAIRN_TEST_EVIDENCE_DIR=str(out))
@@ -85,6 +93,9 @@ with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
     selected = unittest.TestSuite(cases)
     with (out / 'linux-regression.log').open('w', encoding='utf-8') as stream:
         regression = unittest.TextTestRunner(stream=stream, verbosity=2).run(selected)
+    # 控制台同步输出失败详情，避免 CI 仅展示失败总数而必须下载制品定位。
+    for _, traceback in regression.failures + regression.errors:
+        print(traceback, flush=True)
     results.update(tests_run=regression.testsRun, failures=len(regression.failures),
                    errors=len(regression.errors), skipped=len(regression.skipped), excluded=[])
 evidence = out / 'linux-go-checks.json'
@@ -95,6 +106,7 @@ results['ape_sha256'] = before
 results['original_unchanged'] = hashlib.sha256(binary.read_bytes()).hexdigest() == before
 (out / 'linux-summary.json').write_text(json.dumps(results, indent=2) + '\n', encoding='utf-8')
 print(json.dumps(results, indent=2), flush=True)
-sys.exit(0 if regression.wasSuccessful() and not regression.skipped and evidence.exists()
+sys.exit(0 if all(results['source-' + stage] == 0 for stage in CI_SOURCE_STAGES)
+         and regression.wasSuccessful() and not regression.skipped and evidence.exists()
          and results['core'] == results['host'] == results['policy'] == results['governance'] == results['handoff'] == results['gov'] == 0
          and results['original_unchanged'] else 1)

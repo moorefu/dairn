@@ -179,3 +179,11 @@ dairn analyze plan --base origin/main --apply --json --out .dairn/tmp/analyzer-p
 - 不把 Analysis Run、Quality Observation 或 Fitness Verdict 冒充 Check Run 或可信 Gate。
 - 不自动安装工具链、不下载分析器、不修改项目环境。
 - 不用质量总分替代分维度的质量目标；缺数据时输出 UNKNOWN，而不是猜测 PASS。
+
+## 报告导入边界
+
+Import Analyzer 的 Doctor 不探测执行器，argv/cwd 为 null。Suite 可混合 execute/import，按注册模式逐项执行或导入；导入失败记为 report-error，继续处理后续项，整体返回非零退出码。导入结果保持 unverified-import 来源。
+
+JUnit 仅接受扁平 testsuites → testsuite → testcase → failure/error/skipped 结构，支持单/双引号属性与标准 XML 声明。每个 testsuite 必须显式提供 tests/failures/errors/skipped，并与 testcase 子节点一致；testsuites 提供的汇总计数也须一致。重复属性、残缺 XML、未知节点、实体声明、CDATA 或计数矛盾均拒绝，Fitness 将缺失观测判为 UNKNOWN。
+
+Dairn JSON 导入最多接受 500 个 findings 或 surface changes、100 个 metrics；超过上限报错，不静默截断。

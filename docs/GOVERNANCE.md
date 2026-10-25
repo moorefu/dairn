@@ -2,11 +2,11 @@
 
 ## 工作方式
 
-Agent 读取目标项目的 `AGENTS.md` 和 `.agents/skills/dairn-*/SKILL.md`，调用 Dairn 执行确定性操作。`CLAUDE.md` 只作导航；接管已有项目时不覆盖其原有内容。内核不调用模型，不读取 Agent 的私有推理，也不授予合并审批。当前发行版为 `0.1.0-rc.1`（预发布；正式版由 `v<版本>` 标签决定）。
+Agent 读取目标项目的 `AGENTS.md` 和 `.agents/skills/dairn-*/SKILL.md`，调用 Dairn 执行确定性操作。`CLAUDE.md` 只作导航；接管已有项目时不覆盖其原有内容。内核不调用模型，不读取 Agent 的私有推理，也不授予合并审批。当前发行版本以 Git 的 `v<版本>` 标签和对应 Release 为准。
 
 `work next` 返回下一步；Agent 修改代码、运行检查并记录可观察证据。普通变更依次经过 Orient → Grill → Specify → Slice → Implement → Review → Synchronize；Grill 阶段必须以人类访谈消除设计树上的未决问题（`--kind grill`），未决问题未清零时不能推进到 Specify。Review 要求当前 HEAD 与 `standards`、`spec_fidelity` 两条审查结论；后者为 `pass` 时需有效 `spec_ref`。存在 Implement 阶段时，还需当前 HEAD 的机器门禁通过。Synchronize 要求 `status`、`head`、`reviewed_docs`、`reason`，记录文档已更新或无需更新的依据。任务完成记录不等于合并批准。
 
-项目初始化后使用项目根的 `dairn`（Windows `dairn.cmd`）作为推荐入口；AGENTS 托管块首行记录该入口，本文与资产中的 `dairn` 均为其简写。Agent 不得自行安装 Dairn；启动器缺失或 `doctor` 失败时应报告环境问题，而不是安装或下载运行时（详见“根启动器与 vendored runtime”）。Dairn 源码仓库的根启动器（`./dairn`/`dairn.cmd`）直接执行项目内 `.dairn/runtime/` 的 vendored 快照，不经过第二层 launcher，也不要求每次构建。
+项目初始化后使用项目根的 `dairn`（Windows `dairn.cmd`）作为推荐入口；AGENTS 托管块首行记录该入口，本文与资产中的 `dairn` 均为其简写。Agent 不得自行安装 Dairn；启动器缺失或 `doctor` 失败时应报告环境问题，而不是安装或下载运行时（详见“根启动器与 vendored runtime”）。Dairn 源码仓库的根启动器（`./dairn`/`dairn.cmd`）解析项目内 `.dairn/runtime/` 的 vendored 快照（POSIX 通过按 SHA256 寻址的缓存镜像执行），不经过第二层 launcher，也不要求每次构建。
 
 评审与复盘使用结构化证据：Review 记录 Standards / Spec Fidelity 两轴；Reflect 要求二选一改进项（新增确定性检查，或写入 Review 轴使用的标准文档）。`dairn validate` 只做结构校验，`dairn check` 才真实执行质量门禁；两者都不代表合并批准。
 

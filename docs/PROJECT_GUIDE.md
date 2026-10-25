@@ -6,7 +6,7 @@ Dairn 是确定性的工程治理内核，不调用模型，不代替 GitHub 的
 
 能力驱动分析入口为 `dairn analyze plan`（默认 dry-run，仅对受信策略允许的只读 execute analyzer 在超时预算内执行）与 `dairn context`（Phase 1 上下文解析 MVP）。二者属于 advisory 决策/检索层，不构成 Gate 判定；契约见 `dairn docs show dairn.engineering.analyzer-selection` 与 `dairn docs show dairn.engineering.context-intelligence`。
 
-`tools/build.py` 与 `tools/build.cjs` 使用 `quickjs.lock.json` 固定的 QuickJS，将当前源码嵌入 APE，生成 ZIP、Wheel 和 npm 制品。Python 和 npm 只提供构建、安装和调用入口，不替代治理内核。源码构建到根目录 `runtime/`（构建产物，仅用于构建、打包和显式验证新源码）；`.dairn/runtime/` 是项目内 vendor 的治理运行时快照，由根目录 `dairn`/`dairn.cmd` 直接执行，是日常命令的实际执行者。两者不得混淆：运行 `runtime/` 必须通过 `DAIRN_RUNTIME` 显式指定。
+`tools/build.py` 与 `tools/build.cjs` 使用 `quickjs.lock.json` 固定的 QuickJS，将当前源码嵌入 APE，生成 ZIP、Wheel 和 npm 制品。Python 和 npm 只提供构建、安装和调用入口，不替代治理内核。源码构建到根目录 `runtime/`（构建产物，仅用于构建、打包和显式验证新源码）；`.dairn/runtime/` 是项目内 vendor 的治理运行时快照，由根目录 `dairn`/`dairn.cmd` 解析，是日常命令的实际执行者；POSIX 按内容摘要复用私有执行镜像，避免修改原文件字节或权限；默认用户缓存不可写时可显式设置绝对路径的 `DAIRN_CACHE_HOME`。两者不得混淆：运行 `runtime/` 必须通过 `DAIRN_RUNTIME` 显式指定。
 
 ## 本地开发与门禁
 
@@ -18,10 +18,10 @@ Dairn 是确定性的工程治理内核，不调用模型，不代替 GitHub 的
 | --- | --- | --- |
 | lint | 内嵌规范与技能检查、分发资产回归 | `validation/source-checks/lint-*.log` |
 | unit | QuickJS 原生策略、摘要、治理与交接测试、构建发布工具单元测试 | `validation/source-checks/unit-*.log` |
-| integration | 原生宿主、真实临时 Git 项目四项检查、失败与超时证据、doctor、vendor 离线升级 | `validation/source-checks/integration/`、`integration-*.log` |
+| integration | 原生宿主、真实临时 Git 项目四项检查、失败与超时证据、Doctor、Context、Runtime Lock、Docs、Launcher 与 Analyzer/Quality | `validation/source-checks/integration/`、`integration-*.log` |
 | build | Python 和 npm 构建、三类制品校验清单 | `validation/source-checks/build-*.log`、独立 `build-*/checksums.json` |
 
-每阶段生成同目录下的 `<阶段>.json`，记录真实 argv、退出码和日志位置；构建记录中的 `artifact_dir` 指向本轮独立制品目录，避免与旧制品混杂。它们是本地执行记录，不是签名门禁证据；完整 Dairn Run 由 `check` 生成。
+必需测试目录统一维护在 `tools/check_catalog.py`，本地与 Linux/Windows CI 共用 `tools/check-source.py`。每阶段生成同目录下的 `<阶段>.json`，记录真实 argv、退出码、日志位置与必需/已执行 Check-ID 覆盖；缺项、重复或失败拒绝聚合成功；构建记录中的 `artifact_dir` 指向本轮独立制品目录，避免与旧制品混杂。它们是本地执行记录，不是签名门禁证据；完整 Dairn Run 由 `check` 生成。
 
 默认集成只需要 Python 3.10+、Git 和已构建的 QuickJS；完整本地门禁的构建阶段还需要 Node 18+ 和 npm。普通 Go 检查属于专项兼容性验收，按需运行 `tools/verify-windows.py`，或运行需要 Go、jq、OpenSSL 和 sha256sum 的 `tools/verify-linux.py`。Go race/CGO 不属于默认或 CI 验收。缺失本次所选检查的依赖直接失败，不自动安装。
 

@@ -16,7 +16,7 @@ symbols: ["dairn init", "dairn upgrade", "dairn doctor"]
 
 ## 唯一的启动器与放置位置
 
-- 脚本正文的唯一源码位置是 `quickjs/core/launcher-scripts.mjs`：源码仓库根的两个文件由构建工具从该模块生成，项目根的两个文件由 `dairn init` / `dairn adopt` / `dairn upgrade --apply` 写入，分发包中的两个文件与源码仓库根文件字节一致。
+- 脚本正文的唯一源码位置是 `quickjs/assets/templates/project/launcher/`：源码仓库根的两个文件由 `tools/render-launchers.mjs` 从模板生成，项目根的两个文件由 `dairn init` / `dairn adopt` / `dairn upgrade --apply` 写入，分发包中的两个文件与源码仓库根文件字节一致。
 - 项目根的 `dairn` / `dairn.cmd` 是**受管文件**：纳入项目 lock 的受管哈希，脚本头标注为生成文件。修改入口行为只能升级 Dairn 后重新生成，不能直接编辑。
 - 两个脚本按行尾区分：POSIX 脚本必须保持 LF，Windows 脚本必须保持 CRLF。项目根 `.gitattributes` 与受管 `.dairn/.gitattributes` 负责在 `core.autocrlf=true` 的检出上保持稳定。
 - POSIX 与 Windows 启动器统一命名为 `dairn` / `dairn.cmd`，旧版 POSIX 脚本名不再生成，项目启动器也不再放在 `.dairn/bin/`。旧版本生成的 `.dairn/bin/dairn` 与 `.dairn/bin/dairn.cmd` 是退役受管文件，由 `dairn upgrade --plan` 列出、`--apply` 删除。
@@ -29,7 +29,11 @@ symbols: ["dairn init", "dairn upgrade", "dairn doctor"]
 2. **启动器同目录 `.dairn/runtime/dairn-embedded.com`**（项目或解压出的发行包内 vendor 的运行时）。存在时导出 `DAIRN_RUNTIME_SOURCE=vendored`，`DAIRN_RUNTIME_DIR` 为 `.dairn/runtime`。
 3. 两个位置都没有运行时：向 stderr 报告 `DAIRN_NOT_AVAILABLE: governance runtime not found`，并提示从解压的发行包运行、先用 `dairn init` / `dairn adopt` 创建项目，或在源码仓库设置 `DAIRN_RUNTIME` 指向新构建；以 **2** 退出。
 
-启动器在需要时补运行时的执行位（POSIX），不改写文件内容。任何位置都不再从 `runtime/` 目录隐式取运行时：源码仓库根的 `runtime/` 只是构建产物，使用它必须显式设置 `DAIRN_RUNTIME`。
+POSIX 启动器使用按原运行时 SHA256 寻址的持久执行镜像。首次使用某个内容摘要时创建私有临时文件，复制并只给镜像设置 0700 权限，校验摘要后通过原子重命名发布；并发首次调用允许准备相同字节的镜像，发布过程不原地改写正在执行的文件。后续命中只读取原文件及镜像摘要，再通过 `exec /bin/sh` 执行镜像，不复制、不补权限、不删除。原运行时的字节与权限保持不变。
+
+镜像缓存目录为 `${DAIRN_CACHE_HOME:-${XDG_CACHE_HOME:-$HOME/.cache}/dairn}/runtime-images-v1`，必须为当前用户拥有、权限 0700 的真实目录；解析中间符号链接后的父路径须由当前用户或 root 拥有，拒绝非 sticky 的组/其他用户可写目录；`DAIRN_CACHE_HOME` 必须为绝对路径。镜像为 `<源文件摘要>.com`。符号链接、非普通文件、不属于当前用户、权限不是 0700 或摘要不匹配均以退出码 2 拒绝执行；缺少 SHA256 工具、缓存目录不可用或准备失败也退出 2，不回退执行原文件。每次运行仍读取并校验源文件和镜像的摘要，缓存不提升信任级别，也不能替代外部 pin。源运行时升级后自然使用不同摘要的镜像，旧镜像保留，维护者可在没有相关命令运行时清理整个缓存目录。
+
+参数、标准输入输出、工作目录、退出码和信号通过 `exec` 保持原生透传。缓存命中时没有额外的后台监护进程或退出清理。Windows 原生 PE 入口维持直接执行。任何位置都不再从 `runtime/` 目录隐式取运行时：源码仓库根的 `runtime/` 只是构建产物，使用它必须显式设置 `DAIRN_RUNTIME`。
 
 ## 分发与安装时的目录结构
 
@@ -57,7 +61,7 @@ npm / PyPI 安装提供同样的启动器与包内运行时。在项目目录中
 - `DAIRN_RUNTIME_DIR`：启动器导出的**运行时所在目录**（vendored 为项目 `.dairn/runtime/`；external 为 `DAIRN_RUNTIME` 所在目录；安装适配层为包内运行时目录）。init/adopt/upgrade 只把它当作待复制载荷的目录，不参与启动解析。
 - `DAIRN_RUNTIME_SOURCE`：启动器导出的来源观察值，取 `vendored` 或 `external`，只用于 `dairn doctor` 报告，不参与身份判断。
 
-`dairn doctor` 报告的 `runtime.source`（`vendored` / `external` / `unknown`）与 `runtime.freshness`（`current` / `outdated` / `unknown` / `not-source-repo`）只是观察字段：source 说明从哪调用，freshness 提示内嵌源码与工作树的陈旧关系；运行时身份仍以项目 lock 的 `runtime_sha256` 为准。旧启动器的快速缓存开关（`DAIRN_FAST_RUNTIME`、`DAIRN_CACHE_HOME`）已随旧根启动器移除，当前启动器不再提供缓存或转换逻辑。
+`dairn doctor` 报告的 `runtime.source`（`vendored` / `external` / `unknown`）与 `runtime.freshness`（`current` / `outdated` / `unknown` / `not-source-repo`）只是观察字段：source 说明从哪调用，freshness 提示内嵌源码与工作树的陈旧关系；运行时身份仍以项目 lock 的 `runtime_sha256` 为准。旧 `DAIRN_FAST_RUNTIME` 转换开关不再使用；当前 `DAIRN_CACHE_HOME` 仅选择执行镜像缓存位置，不切换运行时来源。`DAIRN_RUNTIME_DIR` 始终指向原载荷目录，不指向镜像缓存。
 
 ## `.dairn/launcher.json`
 

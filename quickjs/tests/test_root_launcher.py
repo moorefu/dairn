@@ -7,11 +7,16 @@ DAIRN_RUNTIME 显式交给构建/验证流程。启动器同时导出 DAIRN_RUNT
 本测试不假设调用者先构建过 runtime/：需要真实 APE 的分支会从 ROOT/runtime 复制。
 """
 import os
+import concurrent.futures
 from pathlib import Path
 import shutil
 import subprocess
+import signal
+import shlex
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 APE = ROOT / 'runtime/dairn-embedded.com'
@@ -28,8 +33,11 @@ def run(argv, env=None, cwd=None):
 
 class RootLauncher(unittest.TestCase):
     def setUp(self):
-        self.temp = Path(tempfile.mkdtemp(prefix='dairn-root-launcher-'))
+        self.temp = Path(tempfile.mkdtemp(prefix='dairn-root-launcher-')).resolve()
         self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
+        cache_env = patch.dict(os.environ, {'DAIRN_CACHE_HOME': str(self.temp / 'runtime-cache')})
+        cache_env.start()
+        self.addCleanup(cache_env.stop)
 
     def _copy_launcher(self):
         source = ROOT / ('dairn.cmd' if os.name == 'nt' else 'dairn')
@@ -142,6 +150,166 @@ class RootLauncher(unittest.TestCase):
         result = run(cmd, env={'DAIRN_RUNTIME': 'missing/dairn-embedded.com'})
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn('DAIRN_RUNTIME', result.stderr)
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX APE 加载器自修改回归')
+    def test_concurrent_launches_reuse_verified_runtime_image(self):
+        launcher = self._copy_launcher()
+        scratch = self.temp / '临时 目录'
+        scratch.mkdir()
+        for external in (False, True):
+            with self.subTest(external=external):
+                runtime = self._vendored() if not external else self.temp / 'external.com'
+                runtime.write_text('#!/bin/sh\n'
+                                   'printf "%s\\n" "$0" "$DAIRN_RUNTIME_DIR" "$PWD" "$@"\n'
+                                   'echo runtime-error >&2\nexit 37\n', encoding='utf-8')
+                runtime.chmod(0o444)
+                original = runtime.read_bytes()
+                env = {'TMPDIR': str(scratch), 'DAIRN_FAST_RUNTIME': '1'}
+                if external:
+                    env['DAIRN_RUNTIME'] = str(runtime)
+                def invoke(_):
+                    return run(['/bin/sh', str(launcher), '含 空格', '*', ''], env=env, cwd=self.temp)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+                    results = list(pool.map(invoke, range(3)))
+                paths = []
+                for result in results:
+                    self.assertEqual(result.returncode, 37, result.stderr)
+                    lines = result.stdout.splitlines()
+                    paths.append(lines[0])
+                    self.assertNotEqual(Path(lines[0]), runtime)
+                    self.assertEqual(lines[1:], [str(runtime.parent), str(self.temp),
+                                              '/zip/quickjs/main.mjs', '含 空格', '*', ''])
+                    self.assertEqual(result.stderr, 'runtime-error\n')
+                self.assertEqual(len(set(paths)), 1)
+                image = Path(paths[0])
+                before = image.stat()
+                env['DAIRN_FAST_RUNTIME'] = '0'
+                repeated = invoke(0)
+                self.assertEqual(repeated.returncode, 37, repeated.stderr)
+                after = image.stat()
+                self.assertEqual((before.st_ino, before.st_mtime_ns, before.st_ctime_ns),
+                                 (after.st_ino, after.st_mtime_ns, after.st_ctime_ns))
+                self.assertEqual(list(image.parent.glob('.prepare.*')), [])
+                self.assertEqual(runtime.read_bytes(), original)
+                self.assertEqual(runtime.stat().st_mode & 0o777, 0o444)
+                self.assertEqual(list(scratch.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX 缓存完整性')
+    def test_unsafe_or_tampered_cache_cannot_execute(self):
+        launcher = self._copy_launcher()
+        runtime = self._vendored()
+        runtime.write_text('#!/bin/sh\necho ORIGINAL\n', encoding='utf-8')
+        first = run(['/bin/sh', str(launcher), 'version'])
+        self.assertEqual(first.returncode, 0, first.stderr)
+        image = next((self.temp / 'runtime-cache/runtime-images-v1').glob('*.com'))
+        for mode in (0o777, 0o644):
+            image.chmod(mode)
+            result = run(['/bin/sh', str(launcher), 'version'])
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertNotIn('ORIGINAL', result.stdout)
+            self.assertIn('permissions', result.stderr)
+        image.chmod(0o700)
+        image.write_text('#!/bin/sh\necho TAMPERED\n', encoding='utf-8')
+        result = run(['/bin/sh', str(launcher), 'version'])
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertNotIn('TAMPERED', result.stdout)
+        self.assertIn('checksum', result.stderr)
+        image.unlink()
+        image.symlink_to(runtime)
+        result = run(['/bin/sh', str(launcher), 'version'])
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('unsafe', result.stderr)
+        image.unlink()
+        runtime.write_text('#!/bin/sh\necho NEW_VERSION\n', encoding='utf-8')
+        result = run(['/bin/sh', str(launcher), 'version'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'NEW_VERSION')
+        self.assertNotEqual(next(image.parent.glob('*.com')), image)
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX 源文件不变')
+    def test_self_modifying_image_never_changes_payload(self):
+        launcher = self._copy_launcher()
+        runtime = self._vendored()
+        runtime.write_text('#!/bin/sh\nprintf "# modified\\n" >> "$0"\necho IMAGE\n')
+        runtime.chmod(0o444)
+        original = runtime.read_bytes()
+        first = run(['/bin/sh', str(launcher), 'version'])
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(runtime.read_bytes(), original)
+        self.assertEqual(runtime.stat().st_mode & 0o777, 0o444)
+        self.assertEqual(run(['/bin/sh', str(launcher), 'version']).returncode, 2)
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX 缓存目录创建失败')
+    def test_unusable_cache_fails_without_executing_original(self):
+        launcher = self._copy_launcher()
+        runtime = self._vendored()
+        runtime.write_text('#!/bin/sh\necho EXECUTED\n', encoding='utf-8')
+        blocked = self.temp / 'blocked'
+        blocked.write_text('not a directory')
+        result = run(['/bin/sh', str(launcher), 'version'], env={'DAIRN_CACHE_HOME': str(blocked)})
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertNotIn('EXECUTED', result.stdout)
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX 缓存父路径隔离')
+    def test_writable_parent_and_link_to_writable_parent_are_refused(self):
+        launcher = self._copy_launcher()
+        runtime = self._vendored()
+        runtime.write_text('#!/bin/sh\necho EXECUTED\n')
+        unsafe = self.temp / 'unsafe'
+        unsafe.mkdir(mode=0o777)
+        unsafe.chmod(0o777)
+        alias = self.temp / 'alias'
+        alias.symlink_to(unsafe, target_is_directory=True)
+        for parent in (unsafe, alias):
+            result = run(['/bin/sh', str(launcher), 'version'],
+                         env={'DAIRN_CACHE_HOME': str(parent / 'cache')})
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertNotIn('EXECUTED', result.stdout)
+            self.assertIn('unsafe writable', result.stderr)
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX 输入与终止信号')
+    def test_stdin_and_signals_pass_through_exec(self):
+        launcher = self._copy_launcher()
+        runtime = self._vendored()
+        scratch = self.temp / 'scratch'
+        scratch.mkdir()
+        runtime.write_text('#!/bin/sh\nread -r value\nprintf "%s\\n" "$value"\n')
+        env = {**os.environ, 'TMPDIR': str(scratch)}
+        env.pop('DAIRN_RUNTIME', None)
+        result = subprocess.run(['/bin/sh', str(launcher)], input='input with spaces\n',
+                                capture_output=True, text=True, env=env, timeout=10)
+        self.assertEqual((result.returncode, result.stdout), (0, 'input with spaces\n'))
+        for sig, code in ((signal.SIGINT, -2), (signal.SIGTERM, -15), (signal.SIGHUP, -1)):
+            with self.subTest(signal=sig):
+                program = "import time; print('ready',flush=True); time.sleep(60)"
+                runtime.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) +
+                                   ' -c ' + shlex.quote(program) + '\n')
+                process = subprocess.Popen(['/bin/sh', str(launcher)], stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE, text=True, env=env)
+                try:
+                    self.assertEqual(process.stdout.readline().strip(), 'ready')
+                    process.send_signal(sig)
+                    process.communicate(timeout=5)
+                    self.assertEqual(process.returncode, code)
+                    self.assertEqual(list(scratch.iterdir()), [])
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate(timeout=5)
+
+    @unittest.skipUnless(os.name == 'posix' and APE.is_file(), '需要真实 APE')
+    def test_real_ape_preserves_original_bytes_and_mode(self):
+        launcher = self._copy_launcher()
+        runtime = self._vendored()
+        shutil.copyfile(APE, runtime)
+        runtime.chmod(0o444)
+        original = runtime.read_bytes()
+        for _ in range(2):
+            result = run(['/bin/sh', str(launcher), 'version'])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('Dairn', result.stdout)
+            self.assertEqual(runtime.read_bytes(), original)
+            self.assertEqual(runtime.stat().st_mode & 0o777, 0o444)
 
     def test_missing_runtime_is_clear(self):
         launcher = self._copy_launcher()

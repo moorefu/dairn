@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from check_catalog import CI_SOURCE_STAGES
 from release_config import (artifact_names, build_instant, format_instant, load_release,
                             version_from_artifacts)
 
@@ -103,6 +104,7 @@ def run(name, argv, expected=0, cwd=ROOT, timeout=180, run_env=None):
 
 
 names = ['cli', 'host', 'policy', 'core', 'governance', 'npm', 'wheel-install', 'wheel']
+names += ['source-' + stage for stage in CI_SOURCE_STAGES]
 if not args.artifacts:
     names += ['npm-pack']
 names += ['npm-install', 'npm-installed']
@@ -110,6 +112,8 @@ if not args.skip_go:
     names += ['go-env', 'go-init', 'go-checks']
 for name in names:
     (OUT / (name + '.log')).write_bytes(b'')
+for stage in CI_SOURCE_STAGES:
+    run('source-' + stage, [sys.executable, '-B', 'tools/check-source.py', stage], timeout=3000)
 run('cli', [sys.executable, '-B', '-X', 'utf8', '-m', 'unittest',
             'quickjs.tests.test_windows', 'quickjs.tests.test_doctor', '-v'])
 run('host', [HOST_QJS, ROOT / 'quickjs/tests/test_host_native.mjs'])

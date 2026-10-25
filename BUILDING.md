@@ -35,13 +35,13 @@ python tools/checksums.py      # 校验发布目录仅有三类制品并写入�
 
 在仓库中，`python tools/build.py`（Python 3.10+）与 `npm run build`（Node 18+）都会先获取现成 QuickJS，再由它把当前 JS/资源嵌入新 APE 并更新 `runtime/`。各入口共用下载锁和缓存；固定 `DAIRN_BUILD_TIME` 时重复构建字节一致，未固定时 nightly 时间戳变化会带来新的版本和产物名。ZIP 解压即可运行，不携带源码或构建脚本；源码自举需使用仓库。Python/npm 使用内部暂存区构建。
 
-根目录的 `dairn`、`dairn.cmd` 是唯一启动器来源，由 `tools/render-launchers.mjs` 从 `quickjs/core/launcher-scripts.mjs` 生成；ZIP、npm/Wheel 与 `dairn init`/`dairn adopt` 生成的项目启动器都与它们同源。源码仓库中，根启动器执行 `.dairn/runtime/` 的治理运行时快照（日常命令不需要先构建）；仓库根 `runtime/` 只是构建/打包/显式验证的产物，使用时必须用 `DAIRN_RUNTIME` 显式指定。启动器按“显式 `DAIRN_RUNTIME` → 同目录 `.dairn/runtime/dairn-embedded.com` → 报错并以 2 退出”的顺序解析运行时，不隐式回退到 `runtime/`、不联网下载。npm 与 Wheel 原样收录启动器与包内运行时，安装适配层把 `DAIRN_RUNTIME_DIR` 指向包内运行时；在 POSIX 调用启动器，在 Windows 直接执行包内 APE，参数、工作目录和退出码透传。发布制品在 POSIX 构建时保留运行时的执行位；若安装或复制后丢失该位，POSIX 启动器只补执行位、不改写文件内容，因为 APE 的 sh 加载器用 `command -v "$0"` 定位自身，而 bash（macOS 的 `/bin/sh`）对不可执行路径会返回失败。旧根启动器的 `DAIRN_FAST_RUNTIME` / `DAIRN_CACHE_HOME` 快速缓存已随之移除，当前启动器没有缓存或转换开关。Python 不再单独复制或转换运行时。
+根目录的 `dairn`、`dairn.cmd` 是唯一启动器来源，由 `tools/render-launchers.mjs` 从 `quickjs/assets/templates/project/launcher/` 生成；ZIP、npm/Wheel 与 `dairn init`/`dairn adopt` 生成的项目启动器都与它们同源。源码仓库中，根启动器执行 `.dairn/runtime/` 的治理运行时快照（日常命令不需要先构建）；仓库根 `runtime/` 只是构建/打包/显式验证的产物，使用时必须用 `DAIRN_RUNTIME` 显式指定。启动器按“显式 `DAIRN_RUNTIME` → 同目录 `.dairn/runtime/dairn-embedded.com` → 报错并以 2 退出”的顺序解析运行时，不隐式回退到 `runtime/`、不联网下载。npm 与 Wheel 原样收录启动器与包内运行时，安装适配层把 `DAIRN_RUNTIME_DIR` 指向包内运行时；在 POSIX 调用启动器，在 Windows 直接执行包内 APE，参数、工作目录和退出码透传。POSIX 启动器按原 APE 的 SHA256 复用持久执行镜像：首次复制到私有临时文件、设置镜像 0700 权限并校验后原子发布；命中只校验源文件和镜像摘要，然后 `exec /bin/sh` 执行，不再逐次复制、chmod 或删除。原文件字节和权限保持不变。镜像缓存在 `${DAIRN_CACHE_HOME:-${XDG_CACHE_HOME:-$HOME/.cache}/dairn}/runtime-images-v1`；目录须由当前用户拥有且权限 0700，缓存异常或工具缺失退出 2。不同运行时内容使用不同镜像，旧镜像可在没有命令运行时手动清理。校验仍读取摘要，操作系统页缓存可减少物理磁盘读取；缓存不构成受信证据。`DAIRN_RUNTIME_DIR` 始终指向原载荷，Python/npm 在 POSIX 共用此入口。
 
 POSIX 首次启动 APE 需要 `uname`、`mkdir`、`dd`、`gzip`、`chmod`、`mv` 初始化加载器缓存；macOS ARM64 还需要系统 `cc`。取得 QuickJS 后，嵌入和 ZIP 写入由它自身完成。
 
 ## 根启动器与 CI 测试运行时
 
-`dairn init` / `dairn adopt` 会在目标项目根生成受管启动器 `dairn`、`dairn.cmd` 与保持行尾的 `.dairn/.gitattributes`，以及项目自有的 `.dairn/launcher.json`；模板来自嵌入运行时。它们的源码位置是 `quickjs/core/launcher-scripts.mjs`，源码仓库根的两个文件由 `tools/render-launchers.mjs` 生成，生成副本纳入 lock 受管资源。项目启动器按“`DAIRN_RUNTIME` → 同目录 `.dairn/runtime/dairn-embedded.com` → 报错退出 2”解析，实际执行项目内 `.dairn/runtime/` 的 vendored 运行时。旧版本生成的 `.dairn/bin/dairn` / `.dairn/bin/dairn.cmd` 是退役受管文件，由 `dairn upgrade --apply` 迁移删除。这些文件只影响目标项目，不改变发布制品的字节；发布构建与 6 平台矩阵安装 npm/Wheel/ZIP 后仍使用包内运行时，并执行 `docs check`，不依赖目标项目的启动器。
+`dairn init` / `dairn adopt` 会在目标项目根生成受管启动器 `dairn`、`dairn.cmd` 与保持行尾的 `.dairn/.gitattributes`，以及项目自有的 `.dairn/launcher.json`；模板来自嵌入运行时。它们的模板源码位置是 `quickjs/assets/templates/project/launcher/`，源码仓库根的两个文件由 `tools/render-launchers.mjs` 生成，生成副本纳入 lock 受管资源。项目启动器按“`DAIRN_RUNTIME` → 同目录 `.dairn/runtime/dairn-embedded.com` → 报错退出 2”解析，实际执行项目内 `.dairn/runtime/` 的 vendored 运行时。旧版本生成的 `.dairn/bin/dairn` / `.dairn/bin/dairn.cmd` 是退役受管文件，由 `dairn upgrade --apply` 迁移删除。这些文件只影响目标项目，不改变发布制品的字节；发布构建与 6 平台矩阵安装 npm/Wheel/ZIP 后仍使用包内运行时，并执行 `docs check`，不依赖目标项目的启动器。
 
 本仓库的 `runtime/` 是构建产物（`.gitignore` 中 `/runtime/`）：日常运行根启动器使用已提交的 `.dairn/runtime/` 快照，因此 fresh checkout 可以直接 `./dairn version`；只有修改内核/资产或需要刷新治理运行时 / 打包时才先 `python tools/build.py` 或 `npm run build`。发布工作流的 `test-python` job 不重新下载 QuickJS，而是从已构建的发布 ZIP 中提取 `<prefix>/.dairn/runtime/dairn-embedded.com` 与 `<prefix>/.dairn/runtime/runtime-integrity.json` 到仓库 `runtime/`，再以 `DAIRN_RUNTIME` 指向它运行 `tools/verify-linux.py`（完整 Python 套件 + native 测试，需要 Go/git/openssl/jq）；本地等价做法是先构建，再运行同一脚本。
 
@@ -92,8 +92,10 @@ Linux 可在 `python:3.12-bookworm` 容器中执行该脚本。Windows Podman �
 
 除矩阵外还有两个集成回归 job，均被 `accepted` 汇总门禁：
 
-- **test-python**（`ubuntu-24.04`）：从发布 ZIP 提取运行时，运行 `tools/verify-linux.py` 的 15 个 Python 套件 + native policy/host；工作流清空 CI 平台变量，模拟本地开发者环境。
+- **test-python**（`ubuntu-24.04`）：从发布 ZIP 提取运行时，运行 `tools/verify-linux.py` 的共享源码门禁与额外 Python/Go/native 回归；工作流清空 CI 平台变量，模拟本地开发者环境。
 - **test-python-windows**（`windows-2025`）：与 Linux 套件同源复用 build job 的 `dairn-packages` artifact——从发布 ZIP 提取运行时，并把 wheel/npm 制品复制到 `dist/`（`verify-windows.py --artifacts incoming --skip-go`），不在 Windows 重新构建任何制品；不下载 QuickJS、不跑 `python tools/build.py`，也不安装 MinGW。脚本同样清空 CI 平台变量；覆盖 launcher/vendored runtime、npm/Wheel 安装与 fresh-clone 受管哈希；产物写入 `validation/windows` 并上传 artifact。
+
+Linux 与 Windows 验收均调用 `tools/check-source.py lint|unit|integration`，必需测试唯一目录位于 `tools/check_catalog.py`，覆盖 Analyze Plan Native、Context CLI、Runtime Diagnostic、Docs Retrieval 及报告适配器回归。`validation/source-checks/<阶段>.json` 保存必需/已执行 Check-ID 与覆盖结果，并随日志上传；任一必需项缺失、重复或失败即拒绝聚合成功。这些本地覆盖记录不构成受信 CI 签名。
 
 各任务独立保存结果，不跳过失败；矩阵、test-python 与 test-python-windows 全部成功后汇总才通过。Windows ARM64 由系统兼容层执行 APE 的 Windows x64 入口。流程支持 push、PR 和手动运行，上游版本统一从锁文件读取；发布只由标签触发。
 

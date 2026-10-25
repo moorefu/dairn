@@ -116,7 +116,7 @@ export function analyzerDoctor(h,root){
    try{const result=h.run(probe,root,10);tools.push({id:s.id,executor:cmd,status:result.code===0?'available':'missing',detail:result.output.trim().slice(0,160),requires:known?.requires||null});}
    catch(e){tools.push({id:s.id,executor:cmd,status:'missing',detail:String(e.message),requires:known?.requires||null});}
  }
- return {schema:1,configured:configured.map(s=>({id:s.id,domain:s.domain,mode:s.mode||'execute',argv:s.execution.argv,cwd:s.execution.cwd||'.'})),tools,ready:tools.every(x=>x.status!=='missing'),notes:'Probes are advisory and do not install dependencies. Templates are opt-in and execute only via guide impact --analyzer ID.'};
+ return {schema:1,configured:configured.map(s=>({id:s.id,domain:s.domain,mode:s.mode||'execute',argv:s.execution?.argv||null,cwd:s.execution?(s.execution.cwd||'.'):null})),tools,ready:tools.every(x=>x.status!=='missing'),notes:'Probes are advisory and do not install dependencies. Templates are opt-in and execute only via guide impact --analyzer ID.'};
 }
 export function analyzerInit(h,root,{template='python',id='surface',apply=false}={}){
  assert(Object.hasOwn(TEMPLATES,template),'unknown template: '+template);
