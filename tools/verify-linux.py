@@ -1,4 +1,4 @@
-"""在含 Python、Git 和 Go 的 Linux 容器中运行核心及 Go 集成回归。"""
+"""在 Linux 容器中运行核心、治理流程和语言集成回归。"""
 import hashlib
 import json
 import os
@@ -8,6 +8,7 @@ import subprocess
 import sys
 import unittest
 from check_catalog import CI_SOURCE_STAGES
+from runtime_context import test_runtime
 
 root = Path(__file__).resolve().parent.parent
 out = Path(sys.argv[1]).resolve()
@@ -19,12 +20,12 @@ for _key in ('GITHUB_ACTIONS','GITHUB_EVENT_NAME','GITHUB_EVENT_PATH','GITHUB_RE
              'GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB','GITHUB_REPOSITORY','GITHUB_WORKFLOW',
              'GITLAB_CI','CI_PIPELINE_SOURCE','CI_MERGE_REQUEST_DIFF_BASE_SHA','CI_MERGE_REQUEST_LABELS'):
     os.environ.pop(_key, None)
-binary = root / 'runtime/dairn-embedded.com'
+binary = test_runtime()
 # 验收本次构建，而不是 .dairn/runtime 中可能较旧的 vendored 快照。
 os.environ['DAIRN_RUNTIME'] = str(binary)
 before = hashlib.sha256(binary.read_bytes()).hexdigest()
 results = {}
-# 与本地执行同一必需目录，额外 Linux/Go 回归不能替代这些 Check-ID。
+# 与本地执行同一必需目录，额外 Linux 回归不能替代这些 Check-ID。
 for stage in CI_SOURCE_STAGES:
     result = subprocess.run([sys.executable, '-B', 'tools/check-source.py', stage],
                             cwd=root, capture_output=True, timeout=3000)
@@ -42,7 +43,7 @@ go_env = subprocess.run(['go', 'env', '-json', 'GOVERSION', 'GOOS', 'GOARCH',
                         capture_output=True, check=True, timeout=30)
 (out / 'linux-go-env.json').write_bytes(go_env.stdout)
 results['go_environment'] = json.loads(go_env.stdout)
-# 共享门禁已执行全部 native 和基础 Python 回归；这里只运行额外 Linux/Go 场景。
+# 共享门禁已执行全部 native 和基础 Python 回归；这里只运行额外治理与语言场景。
 suites = unittest.defaultTestLoader.loadTestsFromNames([
     'quickjs.tests.test_project_guidance',
     'quickjs.tests.test_workflow_facts',
@@ -68,9 +69,9 @@ for _, traceback in regression.failures + regression.errors:
     print(traceback, flush=True)
 results.update(tests_run=regression.testsRun, failures=len(regression.failures),
                errors=len(regression.errors), skipped=len(regression.skipped), excluded=[])
-evidence = out / 'linux-go-checks.json'
+evidence = out / 'linux-python-checks.json'
 if evidence.exists():
-    results['go_checks'] = [{k: c.get(k) for k in ['id', 'module', 'status', 'exit_code', 'argv']}
+    results['python_checks'] = [{k: c.get(k) for k in ['id', 'module', 'status', 'exit_code', 'argv']}
                             for c in json.loads(evidence.read_text(encoding='utf-8'))['checks']]
 results['ape_sha256'] = before
 results['original_unchanged'] = hashlib.sha256(binary.read_bytes()).hexdigest() == before

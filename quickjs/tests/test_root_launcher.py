@@ -19,14 +19,18 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-APE = ROOT / 'runtime/dairn-embedded.com'
+APE = Path(os.environ['DAIRN_TEST_RUNTIME'])
 VENDORED = Path('.dairn/runtime/dairn-embedded.com')
 
 
 def run(argv, env=None, cwd=None):
     # 门禁可能为验证新构建而设置 DAIRN_RUNTIME*；这里默认隔离，只有用例显式覆盖时才生效。
     clean = {k: v for k, v in os.environ.items() if not k.startswith('DAIRN_RUNTIME')}
-    clean.update(env or {})
+    for key, value in (env or {}).items():
+        if value is None:
+            clean.pop(key, None)
+        else:
+            clean[key] = value
     return subprocess.run(argv, cwd=cwd or ROOT, env=clean,
                           capture_output=True, encoding='utf-8', errors='replace', timeout=120)
 
@@ -249,6 +253,111 @@ class RootLauncher(unittest.TestCase):
         result = run(['/bin/sh', str(launcher), 'version'], env={'DAIRN_CACHE_HOME': str(blocked)})
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertNotIn('EXECUTED', result.stdout)
+
+    def _cache_fixture(self, project=True):
+        launcher = self._copy_launcher()
+        self._vendored().write_text('#!/bin/sh\nprintf "%s\\n" "$0"\n')
+        if project:
+            (self.temp / '.dairn/lock.json').write_text('{}\n')
+        home = self.temp / 'default-home'
+        (home / '.cache').mkdir(parents=True)
+        return launcher, {'DAIRN_CACHE_HOME': None, 'XDG_CACHE_HOME': None, 'HOME': str(home)}
+
+    @unittest.skipUnless(os.name == 'posix' and os.geteuid() != 0, 'POSIX 非 root 权限场景')
+    def test_default_cache_permission_failure_falls_back_to_project(self):
+        launcher, env = self._cache_fixture()
+        (self.temp / 'default-home/.cache').chmod(0o500)
+        result = run(['/bin/sh', str(launcher), 'version'], env=env, cwd=self.temp)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(Path(result.stdout.strip()).parent, self.temp / '.dairn/cache/ape-exec')
+        self.assertEqual(result.stderr, '')
+        self.assertEqual((self.temp / '.dairn/cache/ape-exec').stat().st_mode & 0o777, 0o700)
+
+    @unittest.skipUnless(os.name == 'posix' and os.geteuid() != 0, 'POSIX 非 root 权限场景')
+    def test_explicit_unavailable_cache_never_falls_back(self):
+        launcher, env = self._cache_fixture()
+        blocked = self.temp / 'explicit-cache'
+        blocked.mkdir(mode=0o500)
+        env['DAIRN_CACHE_HOME'] = str(blocked)
+        result = run(['/bin/sh', str(launcher)], env=env, cwd=self.temp)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('DAIRN_RUNTIME_CACHE_UNAVAILABLE', result.stderr)
+        self.assertFalse((self.temp / '.dairn/cache').exists())
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX 缓存优先级')
+    def test_xdg_precedes_home_and_project(self):
+        launcher, env = self._cache_fixture()
+        env['XDG_CACHE_HOME'] = str(self.temp / 'xdg')
+        result = run(['/bin/sh', str(launcher)], env=env, cwd=self.temp)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(Path(result.stdout.strip()).parent, self.temp / 'xdg/dairn/runtime-images-v1')
+        self.assertFalse((self.temp / '.dairn/cache').exists())
+
+    @unittest.skipUnless(os.name == 'posix' and os.geteuid() != 0, 'POSIX 非 root 权限场景')
+    def test_all_unavailable_without_identified_project_has_diagnostic(self):
+        launcher, env = self._cache_fixture(project=False)
+        (self.temp / 'default-home/.cache').chmod(0o500)
+        # 门禁 TMPDIR 位于仓库中；此用例不能意外向上找到真实仓库的项目标记。
+        with tempfile.TemporaryDirectory(prefix='dairn-uninitialized-', dir='/tmp') as outside:
+            result = run(['/bin/sh', str(launcher)], env=env, cwd=outside)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('DAIRN_RUNTIME_CACHE_UNAVAILABLE', result.stderr)
+        self.assertIn('No safe fallback cache directory is available', result.stderr)
+        self.assertIn('Set DAIRN_CACHE_HOME', result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertFalse((self.temp / '.dairn/cache').exists())
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX 缓存风险不得回退')
+    def test_default_unsafe_cache_cannot_be_hidden_by_fallback(self):
+        launcher, env = self._cache_fixture()
+        unsafe = self.temp / 'default-home/.cache/dairn'
+        unsafe.mkdir(mode=0o777)
+        unsafe.chmod(0o777)
+        result = run(['/bin/sh', str(launcher)], env=env, cwd=self.temp)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('unsafe', result.stderr)
+        self.assertFalse((self.temp / '.dairn/cache').exists())
+        unsafe.chmod(0o700)
+        unsafe.rmdir()
+        target = self.temp / 'private-target'
+        target.mkdir(mode=0o700)
+        unsafe.symlink_to(target, target_is_directory=True)
+        result = run(['/bin/sh', str(launcher)], env=env, cwd=self.temp)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('unsafe', result.stderr)
+        self.assertFalse((self.temp / '.dairn/cache').exists())
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX 显式配置严格校验')
+    def test_empty_or_relative_explicit_cache_never_uses_defaults(self):
+        launcher, env = self._cache_fixture()
+        for value in ('', 'relative-cache'):
+            result = run(['/bin/sh', str(launcher)], env={**env, 'DAIRN_CACHE_HOME': value}, cwd=self.temp)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn('absolute', result.stderr)
+            self.assertFalse((self.temp / 'default-home/.cache/dairn').exists())
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX 默认镜像篡改拒绝')
+    def test_default_image_tampering_never_triggers_project_fallback(self):
+        launcher, env = self._cache_fixture()
+        first = run(['/bin/sh', str(launcher)], env=env, cwd=self.temp)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        Path(first.stdout.strip()).write_text('#!/bin/sh\necho TAMPERED\n')
+        result = run(['/bin/sh', str(launcher)], env=env, cwd=self.temp)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('checksum', result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertFalse((self.temp / '.dairn/cache').exists())
+
+    @unittest.skipUnless(os.name == 'posix' and os.geteuid() != 0, 'POSIX 非 root 权限场景')
+    def test_all_candidates_unavailable_still_exit_2(self):
+        launcher, env = self._cache_fixture()
+        (self.temp / 'default-home/.cache').chmod(0o500)
+        local = self.temp / '.dairn/cache'
+        local.mkdir(mode=0o500)
+        result = run(['/bin/sh', str(launcher)], env=env, cwd=self.temp)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('DAIRN_RUNTIME_CACHE_UNAVAILABLE', result.stderr)
+        self.assertEqual(result.stdout, '')
 
     @unittest.skipUnless(os.name == 'posix', 'POSIX 缓存父路径隔离')
     def test_writable_parent_and_link_to_writable_parent_are_refused(self):

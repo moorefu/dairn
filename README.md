@@ -32,7 +32,7 @@ Dairn 运行在开发者和 AI Agent 之间，把“改代码”变成**按需�
 | npm | `npm install -D @moorefu/dairn` | 预发布用 `@moorefu/dairn@next`；安装后在项目根运行 `npx dairn init` / `npx dairn adopt` |
 | PyPI | `python -m pip install dairn` | 预发布加 `--pre`；安装后在项目根运行 `dairn init` / `dairn adopt` |
 | GitHub Release | 下载并解压 `dairn-latest.zip` | 解压目录含 `dairn`、`dairn.cmd` 与 `.dairn/runtime/`；在项目根解压后运行 `./dairn init`（Windows `dairn.cmd init`） |
-| 源码构建 | 见 [BUILDING.md](BUILDING.md) | 构建根启动器与 `runtime/`，并可打包 ZIP/Wheel/npm |
+| 源码构建 | 见 [BUILDING.md](BUILDING.md) | 在独占暂存区构建候选并打包 ZIP/Wheel/npm；项目固定运行时另行提升 |
 
 安装命令不代表对应版本一定已发布；建议固定精确版本并校验制品摘要。
 
@@ -78,6 +78,7 @@ Dairn 的集成面全部是普通文件：`AGENTS.md`（Codex/通用入口）、
 | [docs/AGENT_INTEGRATION.md](docs/AGENT_INTEGRATION.md) | Skill 生命周期、各宿主加载契约与排查 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 演进方向、目标命令、Context Intelligence、试点计划 |
 | [AGENTS.md](AGENTS.md) | Agent 与维护者的仓库入口（命令、规则、安全） |
+| [docs/PCC_V1.md](docs/PCC_V1.md) | PCC 组件、信任来源与平台部署验收边界 |
 | [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md) | 本仓库的开发、门禁、发布与证据边界 |
 | [docs/GOVERNANCE.md](docs/GOVERNANCE.md) | 治理配置、hooks、受保护 CI 与模板 |
 | [BUILDING.md](BUILDING.md) | 构建、打包、制品结构与本地复核 |
@@ -93,7 +94,7 @@ Dairn 的集成面全部是普通文件：`AGENTS.md`（Codex/通用入口）、
 
 ## 贡献
 
-见 [ROADMAP.md](docs/ROADMAP.md) 的参与方向与试点计划；开发与提交流程见 [AGENTS.md](AGENTS.md) 与 [BUILDING.md](BUILDING.md)。提交前请运行 `./dairn check --base <trusted-ref>` 与 `python -m unittest`，不要伪造证据或批准。
+见 [ROADMAP.md](docs/ROADMAP.md) 的参与方向与试点计划；开发与提交流程见 [AGENTS.md](AGENTS.md) 与 [BUILDING.md](BUILDING.md)。提交前请运行 `./dairn check --base <trusted-ref>` 与 `python tools/with-built-runtime.py -- python -m unittest`，不要伪造证据或批准。
 
 ## 许可证
 

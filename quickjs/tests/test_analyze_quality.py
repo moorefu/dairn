@@ -259,8 +259,8 @@ class AnalyzeQualityCapability(unittest.TestCase):
         (self.root / 'api.go').write_text('package hello\nfunc C(){}\n')
         self.commit('change')
         plan = self.obj('governance', 'plan', '--base', base, '--json')
-        self.assertTrue(plan['plan']['quality_goals']['configured'])
-        self.assertIn('no-err', plan['plan']['quality_goals']['required'])
+        self.assertTrue(plan['advisory']['quality_goals']['configured'])
+        self.assertIn('no-err', plan['advisory']['quality_goals']['required'])
         hand = self.obj('handoff', '--base', base, '--json')
         self.assertIn('analyzers', json.dumps(hand))
 

@@ -51,7 +51,10 @@ function run(command, args) {
   if (result.error) throw result.error;
   if (result.status !== 0) throw Error('构建失败，退出码：' + result.status);
 }
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'dairn-npm-build-'));
+if (stageOnly) throw Error('源码目录禁止直接 npm pack；请使用 npm run build 在隔离暂存区生成发行包');
+fs.mkdirSync(path.join(root,'.build','runs'),{recursive:true});
+const temp=fs.mkdtempSync(path.join(root,'.build','runs','package-npm-'));
+fs.chmodSync(temp,0o700);
 try {
   const fetch = process.platform === 'win32'
     ? ['powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'tools/bootstrap.ps1'), '-FetchOnly']]

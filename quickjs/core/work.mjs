@@ -1,3 +1,4 @@
+import {validateRetro} from './retro.mjs';
 /* Dairn task ledger. Advisory workflow tracking, not agent execution or CI attestation.
  * Project-owned task files, stage-specific evidence hash checks and fail-closed writes.
  */
@@ -74,18 +75,35 @@ function reportStage(t){return t.stages.find(s=>s.status==='active')||null;}
  * operation itself, never the eligibility or outcome of the Check run. */
 export function checkTaskPresence(h,root,id){
   const t=readTask(h,root,id);
-  ok(t.stages.some(s=>s.id==='implement'),'Task has no implement stage to reference runs: '+id);
+  ok(t.stages.some(s=>s.id==='implement'),'Task has no implement stage to reference runs: '+id+'; use work revise '+id+' --kind change --reason "implementation required" to restart with implementation checks');
   return {task:t,head:gitHead(h,root)};
 }
 function machineProblems(h,root,t,requirePassed=false){
   const errors=[];
-  // Worktree capture and policy hashing are comparison-wide, not per-run: compute
-  // them lazily once so a task with several historical runs stays linear.
+  // 同一策略的快照与摘要只计算一次。Base Run 必须重用执行时的不可变策略，
+  // Head 提议的排除项不能改变其输入闭包；本地引用仍不授予受保护 CI 信任。
   const exclusions=taskExclusions(t);
-  let currentWorktree=null,currentPolicy=null,currentSnapshotExclusions=null;
-  const snapshotExclusions=()=>{if(currentSnapshotExclusions===null){try{const policyTxt=h.read(root.replace(/\/$/,'')+'/.dairn/governance/project.json');const policy=JSON.parse(policyTxt);currentSnapshotExclusions=Array.isArray(policy.snapshot_exclusions)?policy.snapshot_exclusions:[];}catch(_){currentSnapshotExclusions=[];}}return currentSnapshotExclusions;};
-  const worktree=()=>currentWorktree??(currentWorktree=captureWorktree(h,root,120,exclusions,{snapshot_exclusions:snapshotExclusions()}));
-  const policyHash=()=>{if(currentPolicy===null)currentPolicy=sha256(h.read(root.replace(/\/$/,'')+'/.dairn/governance/project.json'));return currentPolicy;};
+  const policies=new Map(),worktrees=new Map();
+  const policyFor=evidence=>{
+    const base=evidence.schema==='dairn.check-run.v1'?evidence.subject?.base_commit:null;
+    const key=base?'base:'+base:'current';
+    if(!policies.has(key)){
+      let raw;
+      if(base){
+        ok(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(base),'Machine run Base must be a full Git SHA');
+        const result=h.run(['git','show',base+':.dairn/governance/project.json'],root,30);
+        ok(!result.timedOut&&result.code===0,'Cannot resolve machine run Base policy: '+base);
+        raw=result.output;
+      }else raw=h.read(root.replace(/\/$/,'')+'/.dairn/governance/project.json');
+      const policy=JSON.parse(raw);
+      policies.set(key,{sha256:sha256(raw),snapshot_exclusions:Array.isArray(policy.snapshot_exclusions)?policy.snapshot_exclusions:[]});
+    }
+    return policies.get(key);
+  };
+  const worktree=policy=>{
+    if(!worktrees.has(policy.sha256))worktrees.set(policy.sha256,captureWorktree(h,root,120,exclusions,{snapshot_exclusions:policy.snapshot_exclusions}));
+    return worktrees.get(policy.sha256);
+  };
   for(const stage of t.stages)for(const link of stage.machine_runs||[]){
     try{
       ok(stage.id==='implement','Machine runs may only be linked to implement');
@@ -127,21 +145,25 @@ function machineProblems(h,root,t,requirePassed=false){
       const passing=(stage.machine_runs||[]).filter(x=>x.status==='passed'&&x.commit===head);
       if(!passing.length)errors.push('No passing machine run for current HEAD');
       else{
-        // Only the run that would satisfy progression is held to the current
-        // policy/worktree; older passing runs merely remain inspectable history.
-        const runIds=new Set(passing.map(x=>x.run_id));
-        for(const link of stage.machine_runs||[]){
-          if(!runIds.has(link.run_id))continue;
+        // 全部历史 Run 的完整性已在上面校验；推进只需一份适用于当前输入的
+        // 成功记录，旧成功的输入快照不应否决后续的有效成功。
+        const applicabilityErrors=[];
+        let applicable=false;
+        for(const link of passing){
           try{
             const evidence=JSON.parse(h.read(safe(h,root,link.path)));
             const runPolicy=evidence.policy_sha256??evidence.execution?.policy_sha256;
-            ok(runPolicy===policyHash(),'Policy changed since machine run: '+link.path);
+            const policy=policyFor(evidence);
+            ok(runPolicy===policy.sha256,'Policy changed since machine run: '+link.path);
             // v2 runs carry a full worktree snapshot; v1 runs carry the
             // snapshot digest captured before the checks executed.
             const before=evidence.worktree?evidence.worktree.snapshot_sha256:evidence.execution?.snapshot_before_sha256;
-            ok(before===worktree().snapshot_sha256,'Worktree changed since machine run: '+link.path);
-          }catch(e){errors.push('implement: '+e.message);}
+            ok(before===worktree(policy).snapshot_sha256,'Worktree changed since machine run: '+link.path);
+            applicable=true;
+            break;
+          }catch(e){applicabilityErrors.push('implement: '+e.message);}
         }
+        if(!applicable)errors.push(...applicabilityErrors);
       }
     }
   }
@@ -162,7 +184,7 @@ function runLinkFrom(evidence,rel,raw){
 export function linkCheckRun(h,root,id,rel,expectedRun){
   const t=readTask(h,root,id);
   const implement=t.stages.find(s=>s.id==='implement');
-  ok(implement,'Task has no implement stage: '+id);
+  ok(implement,'Task has no implement stage: '+id+'; use work revise '+id+' --kind change --reason "implementation required"');
   const file=safe(h,root,rel),raw=h.read(file);
   const evidence=JSON.parse(raw);
   if(expectedRun)ok(raw===JSON.stringify(expectedRun,null,2)+'\n','Run content changed on disk before linking');
@@ -210,7 +232,7 @@ function stageContract(h,root,t,active){
     active.id==='grill'?[{id:'grill-questions',kind:'artifact',format:'grill-questions',questions:'no-open-frontier',confirmation:'human-sourced-advisory'}]:
     active.id==='specify'?[{id:'spec',kind:'artifact',format:'spec',acceptance:'non-empty-when-json'}]:
     active.id==='slice'?[{id:'slice-artifact',kind:'artifact',format:'tasks-or-note'}]:
-    active.id==='reflect'?[{id:'retro-resolution',kind:'artifact',format:'retro-resolution',resolution:'check|standard'}]:
+    active.id==='reflect'?[{id:'retro-resolution',kind:'artifact',format:'dairn.retro.v1',resolution:'findings|no-action|insufficient-evidence'}]:
     [{id:'stage-artifact',kind:'artifact',verification:'sha256-integrity-only'}];
   return {schema:1,task_id:t.id,stage:active.id,executor:active.id==='review'?'hybrid':'agent',skill:active.skill,goal:active.goal,
     invocation,
@@ -221,6 +243,9 @@ function stageContract(h,root,t,active){
 
 function proofCheck(h,root,t){
   const errors=[];
+  for(const revision of t.stage_revisions||[]){
+    try{const path=safe(h,root,revision.path);ok(exists(h,path)&&sha256(h.read(path))===revision.sha256,'changed or missing revision archive '+revision.path);}catch(e){errors.push('revision-history: '+e.message);}
+  }
   for(const s of t.stages){
     for(const p of s.evidence||[]){
       try{const path=safe(h,root,p.path);if(!exists(h,path))errors.push(s.id+': missing evidence '+p.path);
@@ -228,6 +253,9 @@ function proofCheck(h,root,t){
         else if(s.id==='review'||s.id==='synchronize'){
           const current=gitHead(h,root),saved=JSON.parse(h.read(path));
           if(saved.head!==current)errors.push(s.id+': evidence belongs to stale Git HEAD '+p.path);
+        }else if(s.id==='reflect'&&p.kind==='retro'){
+          const report=validateRetro(h,root,JSON.parse(h.read(path)),{taskId:t.id});
+          errors.push(...report.errors.map(error=>'reflect: '+p.path+': '+error));
         }
       }catch(e){errors.push(s.id+': '+e.message);}
     }
@@ -382,23 +410,9 @@ function safeEvidence(h,root,t,stage,path,kind,fallbackActor=null){
   if(stage==='reflect'){
     ok(kind==='retro','Reflect requires --kind retro');
     let retro;try{retro=JSON.parse(data);}catch(_){throw Error('Reflect evidence must be JSON');}
-    ok(isObj(retro)&&retro.schema===1,'Retro evidence must be schema 1 JSON');
-    ok(retro.task_id===t.id,'Retro evidence must reference task '+t.id);
-    ok(Array.isArray(retro.observed)&&retro.observed.length>0&&retro.observed.every(nonEmpty),'Retro evidence requires a nonempty observed array of strings');
-    const resolution=retro.resolution;
-    ok(isObj(resolution)&&!Array.isArray(resolution),'Retro evidence requires exactly one resolution object');
-    ok(resolution.kind==='check'||resolution.kind==='standard','Retro resolution kind must be check|standard');
-    if(resolution.kind==='check'){
-      const names=configuredChecks(readPolicy(h,root));
-      ok(nonEmpty(resolution.check)&&names.has(resolution.check),'Retro check must name a configured project check: '+(resolution.check||'(missing)'));
-      ok(nonEmpty(resolution.red_evidence),'Retro check resolution requires red_evidence');
-      ok(exists(h,safe(h,root,resolution.red_evidence)),'Retro red_evidence file does not exist: '+resolution.red_evidence);
-      ok(resolution.verified_red===true,'Retro check resolution requires verified_red: true');
-    }else{
-      ok(typeof resolution.document==='string'&&(resolution.document==='AGENTS.md'||resolution.document.startsWith('docs/')),'Retro standard document must be AGENTS.md or docs/*');
-      ok(exists(h,safe(h,root,resolution.document)),'Retro standard document does not exist: '+resolution.document);
-      ok(nonEmpty(resolution.section),'Retro standard resolution requires a nonempty section');
-    }
+    const prior=t.stages.find(s=>s.id==='reflect')?.evidence?.filter(e=>e.kind==='retro').slice(-1)[0];
+    const report=validateRetro(h,root,retro,{taskId:t.id,previous:prior?JSON.parse(h.read(safe(h,root,prior.path))):null});
+    ok(report.errors.length===0,report.errors.join('; '));
   }
   return {path,kind,sha256:sha256(data),observed_at:h.now(),source:'user-supplied; not independently attested',
     actor,assurance:'self-asserted; actor is not authenticated'};
@@ -448,7 +462,7 @@ export function runWork(h,root,o){
     const title=o.pos.slice(1).join(' ').trim();ok(title&&title.length<=300,'Usage: dairn work start <task title> [--id task-id]');
     const id=o.id||sluggify(title);ok(idRe.test(id||''),'Provide --id safe-ascii-task-id for this title');
     const target=safe(h,root,checkPath(id));
-    const r=recommendWorkflow(title);
+    const r=recommendWorkflow(title,{intent:o.kind||null});
     const selected=r.stages.map((s,i)=>({id:s.id,skill:s.skill,goal:s.goal,status:i===0?'active':'pending',evidence:[],machine_runs:[]}));
     const task={schema:1,id,title,classification:r.classification,revision:1,created_at:h.now(),updated_at:h.now(),status:'active',current_stage:selected[0].id,stages:selected,
       assurance:'advisory-records; not CI attestation or human approval'};
@@ -464,6 +478,32 @@ export function runWork(h,root,o){
   }
   const id=idFor(o), t=readTask(h,root,id),active=reportStage(t);
   const lifecycleReason=()=>typeof o.reason==='string'?o.reason.trim():typeof o.pos[2]==='string'?o.pos[2].trim():'';
+  if(op==='revise'){
+    const reason=lifecycleReason();
+    ok(reason,'Usage: dairn work revise '+id+' --stage <stage> --reason "..." [--kind change]');
+    ok(['active','recorded-complete'].includes(t.status),'Only active or recorded-complete tasks can be revised');
+    ok(o.stage||o.kind,'revise requires --stage or --kind');
+    ok(!o.kind||!o.stage||o.stage==='orient','Changing workflow kind must restart at orient');
+    const expected=revisionOf(t),before=h.read(safe(h,root,checkPath(id)));
+    let stages=t.stages,classification=t.classification;
+    if(o.kind){const route=recommendWorkflow(t.title,{intent:o.kind});classification=route.classification;stages=route.stages.map(s=>({...s,status:'pending',evidence:[],machine_runs:[]}));}
+    const target=o.kind?'orient':o.stage,index=stages.findIndex(s=>s.id===target);
+    ok(index>=0,'Unknown task stage: '+target);
+    ok(o.kind||index<=t.stages.findIndex(s=>s===active)||t.status==='recorded-complete','Cannot revise a future stage');
+    const revised=stages.map((s,i)=>i<index?s:{...s,status:i===index?'active':'pending',evidence:[],machine_runs:[]});
+    // Earlier invalid evidence cannot be silently accepted by restarting a later stage.
+    const candidate={...t,stages:revised};
+    ok(!proofCheck(h,root,candidate).length,'Earlier evidence or revision history is invalid; revise the earliest affected stage');
+    const archive='.dairn/work/history/'+id+'/'+expected+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,8)+'.json';
+    withTaskLock(h,root,id,()=>{
+      ok(revisionOf(readTask(h,root,id))===expected,'Task changed concurrently; retry');
+      const path=safe(h,root,archive);h.mkdirs(path.slice(0,path.lastIndexOf('/')));h.writeExclusive(path,before);
+      t.stage_revisions=[...(t.stage_revisions||[]),{path:archive,sha256:sha256(before),reason,stage:target,from_revision:expected,at:h.now()}];
+      t.stages=revised;t.classification=classification;t.status='active';t.current_stage=target;
+      commitTask(h,root,id,t,expected);
+    });
+    return result(h,{event:'revised',task:id,revision:t.revision,archive,next:reportStage(t),assurance:'local revision only; subsequent checks and reviews must run again'});
+  }
   if(op==='cancel'){
     const reason=lifecycleReason();
     ok(reason,'Usage: dairn work cancel '+id+' --reason "..."');
@@ -554,6 +594,7 @@ export function runWork(h,root,o){
       }
     }
     check.evidence_errors=errors;check.machine_gates_required=!!o.require_machine_gates;
+    check.recovery=t.stages.filter(s=>errors.some(e=>e.startsWith(s.id+':'))).map(s=>({stage:s.id,command:'work revise '+id+' --stage '+s.id+' --reason "重新执行已失效的阶段"'}));
     check.session_anchor_required=!!o.require_session_anchor;
     check.linked_runs=(t.stages.find(s=>s.id==='implement')?.machine_runs||[]).map(x=>({run_id:x.run_id,status:x.status}));
     h.log(JSON.stringify(check,null,2));return op==='verify'&&errors.length?2:0;
@@ -606,5 +647,5 @@ export function runWork(h,root,o){
     withTaskLock(h,root,id,()=>commitTask(h,root,id,t,expected));
     return result(h,{task:id,status:t.status,completed_stage:active.id,next:reportStage(t),assurance:'local records only; CI attestation is produced by the protected evidence chain, never by the task ledger'});
   }
-  throw Error('Usage: dairn work start|list|status|next|record|advance|skip|verify|finish|cancel|reopen|link-check');
+  throw Error('Usage: dairn work start|list|status|next|record|advance|skip|verify|finish|cancel|reopen|revise|link-check');
 }

@@ -247,14 +247,14 @@ test('FBK-03 healthy history recommends no action', () => {
   assert(report.recommendations.length === 0, 'healthy history produced recommendations');
 });
 
-test('FBK-04 flaky failures surface as POLICY_NOISE with preserved requirements', () => {
+test('FBK-04 high failure frequency without equivalent inputs is not flaky', () => {
   const flaky = Array.from({length: 12}, (_, i) => ({run_id: 'run-f-' + i, subject_commit: 'd'.repeat(40),
     status: i % 4 === 0 ? 'failed' : 'passed',
     checks: [{id: 'unit', module: 'app', status: i % 4 === 0 ? 'failed' : 'passed', duration_sec: 3}]}));
   const report = recommendAdaptations({runs: flaky, minSamples: 10});
-  const noise = report.recommendations.find(r => r.kind === 'POLICY_NOISE');
+  const noise = report.recommendations.find(r => r.kind === 'FREQUENT_FAILURE');
   assert(noise, 'flaky check not flagged');
-  assert(noise.proposed_action.includes('narrow') && noise.requirements_preserved.includes('app:unit'), 'noise advice drops assurance');
+  assert(noise.proposed_action.includes('不得自动删除') && noise.requirements_preserved.includes('app:unit'), 'noise advice drops assurance');
 });
 
 print('DAIRN_NATIVE_GOV_RESULT ' + JSON.stringify({engine: 'native-qjs', platform: os.platform, passed: tests.length - failures, failed: failures, tests}));

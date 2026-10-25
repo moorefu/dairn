@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 from check_catalog import CI_SOURCE_STAGES
+from runtime_context import test_runtime
 from release_config import (artifact_names, build_instant, format_instant, load_release,
                             version_from_artifacts)
 
@@ -56,7 +57,7 @@ for _key in ('GITHUB_ACTIONS','GITHUB_EVENT_NAME','GITHUB_EVENT_PATH','GITHUB_RE
              'GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB','GITHUB_REPOSITORY','GITHUB_WORKFLOW',
              'GITLAB_CI','CI_PIPELINE_SOURCE','CI_MERGE_REQUEST_DIFF_BASE_SHA','CI_MERGE_REQUEST_LABELS'):
     os.environ.pop(_key, None)
-APE = ROOT / 'runtime/dairn-embedded.com'
+APE = test_runtime()
 # host 契约测试要求真正的 QuickJS 解释器作为子进程；构建缓存里有 qjs 时优先使用。
 _QJS_CANDIDATES = sorted((ROOT / '.build/quickjs').glob('qjs-*.com')) if (ROOT / '.build/quickjs').is_dir() else []
 HOST_QJS = _QJS_CANDIDATES[0] if _QJS_CANDIDATES else APE

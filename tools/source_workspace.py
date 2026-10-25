@@ -85,15 +85,14 @@ def prepare_workspace(root, destination, archive=None, version=None):
         copy(Path(name))
     if archive is not None:
         binary, integrity = runtime_payload(root, archive, release['version'])
-        # 仓库根 runtime/ 是 verify-linux 的 DAIRN_RUNTIME 构建槽；.dairn/runtime
-        # 是根启动器实际执行的治理运行时，回归必须使用待测 ZIP 的载荷。
-        for relative in ('runtime', '.dairn/runtime'):
+        # 这是全新发行夹具的首次初始化；源码候选由 with-built-runtime 单独管理。
+        for relative in ('.dairn/runtime',):
             target = destination / relative
             target.mkdir(parents=True, exist_ok=True)
             (target / 'dairn-embedded.com').write_bytes(binary)
             (target / 'dairn-embedded.com').chmod(0o755)
             (target / 'runtime-integrity.json').write_bytes(integrity)
         # 回归使用本次发布的运行时及其内嵌 manifest。
-        with zipfile.ZipFile(destination / 'runtime/dairn-embedded.com') as zipped:
+        with zipfile.ZipFile(destination / '.dairn/runtime/dairn-embedded.com') as zipped:
             (destination / 'quickjs/assets/manifest.json').write_bytes(zipped.read('quickjs/assets/manifest.json'))
     return destination

@@ -6,7 +6,7 @@
 
 Python 工程采用 `pyproject.toml` + `src/dairn/` 布局；npm 入口为 `package.json` + `bin/dairn.cjs`。构建工具集中在 `tools/`，分发测试位于 `tools/tests/`，共享的 QuickJS 下载锁为根目录 `quickjs.lock.json`。
 
-发版只需推送 `v<版本>` 标签；标签版本会写入内嵌 manifest、运行时校验元数据和三类制品文件名，`package.json` 不再需要跟着升版（没有标签的本地构建以它的三段基础版本加构建时间生成 nightly）。构建自动生成这些版本信息，无需手动同步。CLI 从内嵌 manifest 读取版本，Python 模块从安装元数据读取版本。仓库不提交 `.com`，构建后用 `DAIRN_RUNTIME` 显式指向 `runtime/` 中的产物验证；启动器不会从 `runtime/` 隐式回退。
+发版只需推送 `v<版本>` 标签；标签版本会写入内嵌 manifest、运行时校验元数据和三类制品文件名，`package.json` 不再需要跟着升版（没有标签的本地构建以它的三段基础版本加构建时间生成 nightly）。构建自动生成这些版本信息，无需手动同步。CLI 从内嵌 manifest 读取版本，Python 模块从安装元数据读取版本。仓库不提交根目录构建产物；显式维护的 `.dairn/runtime/` 自测快照通过审阅后的 Runtime Promotion 更新。源码验证使用隔离候选包装器，不更新该快照。
 
 ## 三类发布制品
 
@@ -26,16 +26,16 @@ ZIP 解压到目标项目根即可运行：根启动器从同目录 `.dairn/runt
 
 ```sh
 python tools/nightly-version.py  # 预览本轮构建会生成的 nightly 版本
-python tools/build.py          # Python 3.10+，生成 Wheel 和 ZIP
-npm run build                 # Node.js 18+，生成 npm tarball 和同一 ZIP
+python tools/build.py          # Python 3.10+，生成 Wheel 和 ZIP，候选随私有暂存区清理
+npm run build                 # Node.js 18+，生成 npm tarball 和同一 ZIP，候选随私有暂存区清理
 python tools/checksums.py      # 校验发布目录仅有三类制品并写入清单
 ```
 
-两种入口支持 `--out`。PEP 517 可用 `python -m build --wheel` 或 `python -m pip wheel --no-deps .`。根目录直接 `npm pack` 会通过 `prepack` 生成 `runtime/`（这条本地路径按 `package.json` 的三段基础版本构建，不带构建时间戳）；正式 npm 包没有安装脚本。
+两种入口支持 `--out`。PEP 517 可用 `python -m build --wheel` 或 `python -m pip wheel --no-deps .`。源码根目录直接 `npm pack` 由 prepack 拒绝并提示 `npm run build`，防止覆盖项目 Pin；正式包在独占暂存区生成，没有安装脚本。
 
-在仓库中，`python tools/build.py`（Python 3.10+）与 `npm run build`（Node 18+）都会先获取现成 QuickJS，再由它把当前 JS/资源嵌入新 APE 并更新 `runtime/`。各入口共用下载锁和缓存；固定 `DAIRN_BUILD_TIME` 时重复构建字节一致，未固定时 nightly 时间戳变化会带来新的版本和产物名。ZIP 解压即可运行，不携带源码或构建脚本；源码自举需使用仓库。Python/npm 使用内部暂存区构建。
+在仓库中，`python tools/build.py`（Python 3.10+）与 `npm run build`（Node 18+）都会先获取现成 QuickJS，再由它把当前 JS/资源嵌入临时 APE，不更新固定项目 Runtime 或根 `runtime/`。各入口共用下载锁和缓存；固定 `DAIRN_BUILD_TIME` 时重复构建字节一致，未固定时 nightly 时间戳变化会带来新的版本和产物名。ZIP 解压即可运行，不携带源码或构建脚本；源码自举需使用仓库。Python/npm 使用内部暂存区构建。
 
-根目录的 `dairn`、`dairn.cmd` 是唯一启动器来源，由 `tools/render-launchers.mjs` 从 `quickjs/assets/templates/project/launcher/` 生成；ZIP、npm/Wheel 与 `dairn init`/`dairn adopt` 生成的项目启动器都与它们同源。源码仓库中，根启动器执行 `.dairn/runtime/` 的治理运行时快照（日常命令不需要先构建）；仓库根 `runtime/` 只是构建/打包/显式验证的产物，使用时必须用 `DAIRN_RUNTIME` 显式指定。启动器按“显式 `DAIRN_RUNTIME` → 同目录 `.dairn/runtime/dairn-embedded.com` → 报错并以 2 退出”的顺序解析运行时，不隐式回退到 `runtime/`、不联网下载。npm 与 Wheel 原样收录启动器与包内运行时，安装适配层把 `DAIRN_RUNTIME_DIR` 指向包内运行时；在 POSIX 调用启动器，在 Windows 直接执行包内 APE，参数、工作目录和退出码透传。POSIX 启动器按原 APE 的 SHA256 复用持久执行镜像：首次复制到私有临时文件、设置镜像 0700 权限并校验后原子发布；命中只校验源文件和镜像摘要，然后 `exec /bin/sh` 执行，不再逐次复制、chmod 或删除。原文件字节和权限保持不变。镜像缓存在 `${DAIRN_CACHE_HOME:-${XDG_CACHE_HOME:-$HOME/.cache}/dairn}/runtime-images-v1`；目录须由当前用户拥有且权限 0700，缓存异常或工具缺失退出 2。不同运行时内容使用不同镜像，旧镜像可在没有命令运行时手动清理。校验仍读取摘要，操作系统页缓存可减少物理磁盘读取；缓存不构成受信证据。`DAIRN_RUNTIME_DIR` 始终指向原载荷，Python/npm 在 POSIX 共用此入口。
+根目录的 `dairn`、`dairn.cmd` 是唯一启动器来源，由 `tools/render-launchers.mjs` 从 `quickjs/assets/templates/project/launcher/` 生成；ZIP、npm/Wheel 与 `dairn init`/`dairn adopt` 生成的项目启动器都与它们同源。源码仓库中，根启动器执行 `.dairn/runtime/` 的治理运行时快照（日常命令不需要先构建）；根 `runtime/` 是旧构建遗留，新的构建与测试不再依赖它。源码验证使用 `python tools/with-built-runtime.py -- <测试命令>`，候选覆盖仅注入子进程。启动器按“显式 `DAIRN_RUNTIME` → 同目录 `.dairn/runtime/dairn-embedded.com` → 报错并以 2 退出”的顺序解析运行时，不隐式回退到 `runtime/`、不联网下载。npm 与 Wheel 原样收录启动器与包内运行时，安装适配层把 `DAIRN_RUNTIME_DIR` 指向包内运行时；在 POSIX 调用启动器，在 Windows 直接执行包内 APE，参数、工作目录和退出码透传。POSIX 启动器按原 APE 的 SHA256 复用持久执行镜像：首次复制到私有临时文件、设置镜像 0700 权限并校验后原子发布；命中只校验源文件和镜像摘要，然后 `exec /bin/sh` 执行，不再逐次复制、chmod 或删除。原文件字节和权限保持不变。镜像缓存在 `${DAIRN_CACHE_HOME:-${XDG_CACHE_HOME:-$HOME/.cache}/dairn}/runtime-images-v1`；目录须由当前用户拥有且权限 0700，缓存异常或工具缺失退出 2。不同运行时内容使用不同镜像，旧镜像可在没有命令运行时手动清理。校验仍读取摘要，操作系统页缓存可减少物理磁盘读取；缓存不构成受信证据。`DAIRN_RUNTIME_DIR` 始终指向原载荷，Python/npm 在 POSIX 共用此入口。
 
 POSIX 首次启动 APE 需要 `uname`、`mkdir`、`dd`、`gzip`、`chmod`、`mv` 初始化加载器缓存；macOS ARM64 还需要系统 `cc`。取得 QuickJS 后，嵌入和 ZIP 写入由它自身完成。
 
@@ -43,13 +43,15 @@ POSIX 首次启动 APE 需要 `uname`、`mkdir`、`dd`、`gzip`、`chmod`、`mv`
 
 `dairn init` / `dairn adopt` 会在目标项目根生成受管启动器 `dairn`、`dairn.cmd` 与保持行尾的 `.dairn/.gitattributes`，以及项目自有的 `.dairn/launcher.json`；模板来自嵌入运行时。它们的模板源码位置是 `quickjs/assets/templates/project/launcher/`，源码仓库根的两个文件由 `tools/render-launchers.mjs` 生成，生成副本纳入 lock 受管资源。项目启动器按“`DAIRN_RUNTIME` → 同目录 `.dairn/runtime/dairn-embedded.com` → 报错退出 2”解析，实际执行项目内 `.dairn/runtime/` 的 vendored 运行时。旧版本生成的 `.dairn/bin/dairn` / `.dairn/bin/dairn.cmd` 是退役受管文件，由 `dairn upgrade --apply` 迁移删除。这些文件只影响目标项目，不改变发布制品的字节；发布构建与 6 平台矩阵安装 npm/Wheel/ZIP 后仍使用包内运行时，并执行 `docs check`，不依赖目标项目的启动器。
 
-本仓库的 `runtime/` 是构建产物（`.gitignore` 中 `/runtime/`）：日常运行根启动器使用已提交的 `.dairn/runtime/` 快照，因此 fresh checkout 可以直接 `./dairn version`；只有修改内核/资产或需要刷新治理运行时 / 打包时才先 `python tools/build.py` 或 `npm run build`。发布工作流的 `test-python` job 不重新下载 QuickJS，而是从已构建的发布 ZIP 中提取 `<prefix>/.dairn/runtime/dairn-embedded.com` 与 `<prefix>/.dairn/runtime/runtime-integrity.json` 到仓库 `runtime/`，再以 `DAIRN_RUNTIME` 指向它运行 `tools/verify-linux.py`（共享源码门禁 + 额外 Python/Go 回归，需要 Go/git/openssl/jq）；本地等价做法是先构建，再运行同一脚本。
+源码回归统一使用临时候选，不写根 `runtime/` 或 `.dairn/runtime/`。例如 `python tools/with-built-runtime.py -- python tools/check-source.py unit`；直接运行 check-source.py 且没有候选上下文时会自动调用同一包装器。包装器在 `.build/runs/<id>/` 构建、校验 APE，将 DAIRN_TEST_RUNTIME 等变量仅传给子进程，退出后清理候选，日志和摘要保存在 `validation/runtime-builds/`。
+
+发布工作流从已构建 ZIP 创建隔离候选：`python tools/with-built-runtime.py --from-zip incoming -- python tools/verify-linux.py validation/ci`。Windows 同样包装 verify-windows.py，复用同一制品而不下载另一版本。固定 Runtime 的提升、回滚与事务恢复见 [生命周期契约](quickjs/assets/specs/engineering/runtime-lifecycle.md)；它们是独立的维护操作。
 
 ### Windows 实机验收
 
 日常集成使用 `python tools/check-source.py integration`，跨平台只需要 Python、Git 和已构建的 QuickJS。它在临时 Git 项目中运行实际的语法检查、单元计算、独立子进程调用和构建检查，验证成功、非零退出、超时三类 Run，再验证 vendor 升级和离线启动；真实日志与 Run 副本在 `validation/source-checks/integration/`。该流程不需要 Go、gcc、Node 或 npm，不替代三类发布制品的完整验收。
 
-在 Windows x64 + Git for Windows 上先 `python tools/build.py`，再运行 `python tools/verify-windows.py`（需要 node/git/npm；需要 Go 时默认从 `C:\Program Files\Go\bin` 查找，也可用 `--go-bin` 指定）。Go 门禁使用普通 `go test ./...`，不启用 race/CGO；没有 Go 工具链时加 `--skip-go`，跳过 `go-env/go-init/go-checks`，其余 CLI、launcher、native host/policy、npm、wheel 步骤照常执行并参与总体验收。
+在 Windows x64 + Git for Windows 上运行 `python tools/with-built-runtime.py -- python tools/verify-windows.py`（需要 node/git/npm；需要 Go 时默认从 `C:\Program Files\Go\bin` 查找，也可用 `--go-bin` 指定）。Go 门禁使用普通 `go test ./...`，不启用 race/CGO；没有 Go 工具链时加 `--skip-go`，跳过 `go-env/go-init/go-checks`，其余 CLI、launcher、native host/policy、npm、wheel 步骤照常执行并参与总体验收。
 
 Go race/CGO 不属于默认或 CI 验收；需要普通 Go 门禁时直接运行 `python -B -X utf8 tools\verify-windows.py`，没有 Go 工具链则加 `--skip-go`。
 
@@ -142,8 +144,11 @@ python -B -X utf8 tools/verify-packages.py
 python tools/checksums.py
 python -B -X utf8 tools/verify-packages.py --smoke --artifacts dist --package npm --out validation/smoke/windows-npm
 python -B -X utf8 tools/verify-podman.py --image localhost/dairn-validation:2026-10-22 --smoke --artifacts dist --package zip --out validation/smoke/linux-zip
+python tools/verify-podman.py --image localhost/dairn-validation:2026-10-22 --runtime-zip dist/dairn-<版本>.zip --test-user dairn-test --timeout 3600 --out validation/linux-full
 ```
 
-`--package` 可选 `npm`、`wheel`、`zip` 或默认的 `all`。`--smoke` 与 Actions 保持一致；不加此参数可在本地运行完整制品验收。`tools/verify-linux.py` 在 Linux CI 执行，本地也可按需运行。共享 lint/unit/integration 门禁统一执行 native 和基础 Python 测试，Linux 补充集合只执行其余 16 个 Python 模块（含真实 Go 检查），同一检查不重复执行。原生测试结果见 `validation/source-checks/unit-*.log` 与 `integration-1.log`，专项日志和汇总写入脚本指定的输出目录。本地镜像由 `tools/Containerfile.validation` 组合，运行验收时断网。日志与 JSON 结果保存在已忽略的 `validation/`。
+`--package` 可选 `npm`、`wheel`、`zip` 或默认的 `all`。`--smoke` 与 Actions 保持一致；不加此参数可在本地运行完整制品验收。`tools/verify-linux.py` 在 Linux CI 执行，本地也可用 with-built-runtime.py 包装运行。共享 lint/unit/integration 门禁统一执行 native 和基础 Python 测试，Linux 补充集合只执行其余 16 个 Python 模块（含标准库 Python 实测与独立语言场景），同一检查不重复执行。原生测试结果见 `validation/source-checks/unit-*.log` 与 `integration-1.log`，专项日志和汇总写入脚本指定的输出目录。本地镜像由 `tools/Containerfile.validation` 组合，运行验收时断网。日志与 JSON 结果保存在已忽略的 `validation/`。
+
+离线容器会先核对并复制本地 `.build/quickjs/` 中与 `quickjs.lock.json` 匹配的解释器；缓存未预热时明确拒绝，不在禁网回归里隐式下载。`--quickjs-cache` 可指定已有缓存。`--test-user dairn-test` 使用镜像内的普通用户运行，权限负向测试才能实际覆盖；容器使用独立 init 回收子进程。超时或失败仍导出已生成的 `/results`、候选构建与源码门禁诊断，最后只删除本次创建的容器，不重置 VM 或已有镜像。
 
 本地覆盖 Windows x64 和 Linux x64；macOS/ARM64 以 [moorefu/dairn 的 Actions](https://github.com/moorefu/dairn/actions) 对应提交结果为准。

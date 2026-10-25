@@ -37,6 +37,16 @@ jq -nc --arg provider "$PROVIDER" --arg repo "$REPO" --arg ref "$REF" --arg sha 
 # Bundle the run plus this origin so the isolated signer verifies bytes, not stories.
 BUNDLE=.dairn/governance/evidence/bundle.json
 [ ! -e "$BUNDLE" ] || { echo 'Refuse overwriting evidence bundle' >&2;exit 2; }
-"$DAIRN_CI_BIN" evidence bundle --run "$RUN_ID" --evidence "$RUN_JSON" \
-  --origin .dairn/governance/evidence/ci-build-origin.json --out "$BUNDLE"
+set -- evidence bundle --run "$RUN_ID" --evidence "$RUN_JSON" --origin "$ORIGIN" --out "$BUNDLE"
+if [ -n "${DAIRN_CI_APPROVAL_VERDICT:-}" ]; then
+  # 管理员提供由受信 SCM 抓取/裁决得到的文件；只归档原始字节，不由 JSON 自证来源。
+  case "$DAIRN_CI_APPROVAL_VERDICT" in /*) ;; *) echo 'Approval verdict path must be absolute' >&2;exit 2;; esac
+  case "$DAIRN_CI_APPROVAL_VERDICT" in "$PWD"/*) echo 'Approval verdict must come from outside checkout' >&2;exit 2;; esac
+  [ -f "$DAIRN_CI_APPROVAL_VERDICT" ] && [ ! -L "$DAIRN_CI_APPROVAL_VERDICT" ] || { echo 'Unsafe/missing approval verdict' >&2;exit 2; }
+  APPROVAL=.dairn/governance/evidence/ci-approval-verdict.json
+  [ ! -e "$APPROVAL" ] || { echo 'Refuse overwriting approval verdict' >&2;exit 2; }
+  cp "$DAIRN_CI_APPROVAL_VERDICT" "$APPROVAL"
+  set -- "$@" --approval "$APPROVAL"
+fi
+"$DAIRN_CI_BIN" "$@"
 printf 'DAIRN_PROTECTED_BUILD_SUCCEEDED head=%s run=%s job=%s\n' "$HEAD" "$RUN_ID" "$JOB_ID"

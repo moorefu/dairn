@@ -81,8 +81,10 @@ class AnalyzerCIReview(unittest.TestCase):
   # chain (approval was enforced pre-merge by the platform); pre-merge without
   # approval evidence stays INDETERMINATE, never a silent pass. The gate binds
   # the verified statement to THIS run id, so the fixture reuses the real one.
-  self.subject_file(head)
-  v1run=self.v1_run_file(head,run_id)
+  # Gate 必须消费签名覆盖的原始 Run，不能复用 run_id 伪造另一份绿色 JSON。
+  v1run='.dairn/governance/evidence/runs/'+head+'/'+run_id+'/run.json'
+  actual=json.loads((self.project/v1run).read_text())
+  (self.project/'.dairn/governance/evidence/subject.json').write_text(json.dumps(actual['subject']))
   gate=lambda stage='post-merge',key=None: self.call('gate','evaluate','--subject','.dairn/governance/evidence/subject.json',
    '--policy','.dairn/governance/project.json','--check',v1run,
    '--attestation','.dairn/governance/evidence/statement.json',

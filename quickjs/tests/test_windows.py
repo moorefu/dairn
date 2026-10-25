@@ -9,7 +9,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI = ROOT / 'dairn.cmd'
-QJS = os.environ.get('DAIRN_QJS_BIN') or str(ROOT / 'runtime/dairn-embedded.com')
+QJS = os.environ.get('DAIRN_QJS_BIN') or str(Path(os.environ['DAIRN_TEST_RUNTIME']))
 
 
 @unittest.skipUnless(os.name == 'nt', '仅适用于 Windows')
@@ -126,8 +126,8 @@ class WindowsAcceptance(unittest.TestCase):
         return env
 
     def test_project_launcher_vendored_doctor_and_offline_run(self):
-        runtime = ROOT / 'runtime/dairn-embedded.com'
-        integrity = ROOT / 'runtime/runtime-integrity.json'
+        runtime = Path(os.environ['DAIRN_TEST_RUNTIME'])
+        integrity = Path(os.environ['DAIRN_TEST_RUNTIME']).with_name('runtime-integrity.json')
         if not runtime.exists() or not integrity.exists():
             self.skipTest('build runtime/ first (python tools/build.py)')
         self.init()

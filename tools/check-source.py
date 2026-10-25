@@ -10,6 +10,7 @@ import sys
 import tempfile
 
 from release_config import build_instant, format_instant
+from runtime_context import test_runtime
 from check_catalog import NATIVE_UNIT, PYTHON_INTEGRATION, coverage, required_ids
 
 # Windows 上 Cosmopolitan 用 _COSMO_FDS_V2 向子进程传递 fd 表；原生工具
@@ -40,9 +41,10 @@ def main():
     temp.mkdir(exist_ok=True)
     env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1',
            'TMPDIR': str(temp), 'TEMP': str(temp), 'TMP': str(temp)}
-    runtime = ROOT / 'runtime/dairn-embedded.com'
-    if not runtime.is_file():
-        parser.error('缺少 runtime/，请先运行 python tools/build.py')
+    if not os.environ.get('DAIRN_TEST_RUNTIME'):
+        return subprocess.call([sys.executable, '-B', str(ROOT / 'tools/with-built-runtime.py'),
+                                '--', sys.executable, '-B', str(Path(__file__).resolve()), args.stage], cwd=ROOT)
+    runtime = test_runtime()
     env['DAIRN_QJS_BIN'] = str(runtime)
     # 门禁必须验证本次构建，而不是 .dairn/runtime 里可能较旧的 vendored 快照。
     env['DAIRN_RUNTIME'] = str(runtime)

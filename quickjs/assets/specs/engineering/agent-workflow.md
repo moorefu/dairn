@@ -24,7 +24,7 @@ symbols: ["dairn workflow recommend", "dairn workflow stages", "dairn guide drif
 - **Implement**：按公共接口执行红绿测试循环，先有失败信号再做最小实现；所有通过结论必须源于真实执行。
 - **Review**：Standards 与 Spec Fidelity 独立得出证据结论；无权威 Spec 则 Fidelity 为 `not-applicable`，不能写“通过”。
 - **Synchronize**：`dairn guide drift` 映射被改的模块、依赖、入口和 Spec 到受影响文档，需审查 Diff；不能自动修正文档或接受快照。
-- **Reflect**：只有发生真实摩擦或失败才复盘；改进必须二选一：新增确定性检查，或写入 Review 标准文档。详见 [retro 契约](retro.md)。
+- **Reflect**：只有发生真实摩擦或失败才复盘；采用 dairn.retro.v1 的七类改进与 no-action，分别记录来源、回放和效果。详见 [retro 契约](retro.md)。
 
 ## 流程变体
 
@@ -34,6 +34,8 @@ symbols: ["dairn workflow recommend", "dairn workflow stages", "dairn guide drif
 - 文档：orient → synchronize；涉及规则变化时按普通变更处理。
 - 纯评审：orient → review → synchronize。
 - 设计：orient → grill → specify → slice → review → synchronize。
+
+标题包含“实现、实施、重构、精简、优化、迭代”等明确实现意图时，采用包含 implement 的普通变更流程，不因同时包含架构、文档或 PR 等词而降为纯设计或评审。“仅评审”“仅设计”仍采用对应流程；`work start --kind` 可以显式选择，误分类可通过 `work revise --kind` 归档后重启。
 
 `dairn workflow stages` 输出当前运行时支持的阶段表；`dairn workflow recommend <task>` 返回建议裁剪，不执行 Skill、不分配 Issue。
 

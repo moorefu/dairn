@@ -1,77 +1,31 @@
 ---
 id: dairn.engineering.retro
-title: Reflect 复盘与二选一改进契约
-summary: 从真实会话摩擦中提炼改进项，并强制在“新增确定性检查”与“写入 Review 标准文档”之间二选一；机器校验结构与目标存在，不证明改进有效。
+title: Retro v1 多项改进、回放与效果复评
+summary: 人工发起的 dairn.retro.v1，七类改进、无建议状态、本地引用完整性、回放与可比效果；记录不授予门禁或升级权限。
 kind: spec
 module: engineering
-keywords: ["retro", "复盘", "反思", "确定性检查", "编码标准", "reflect", "改进项"]
-aliases: ["Reflect 阶段", "会话复盘", "Developer Experience Retro"]
+keywords: ["retro", "复盘", "reflect", "回放", "prune", "效果"]
+aliases: ["Reflect 阶段", "会话复盘"]
 related: ["dairn.engineering.review", "dairn.engineering.feedback", "dairn.skills.lifecycle", "dairn.engineering.workflow"]
-symbols: ["dairn work record", "dairn validate"]
+symbols: ["dairn work record", "dairn validate", "dairn observe suggest"]
 ---
 
-# Reflect 复盘与二选一改进契约
+# Retro v1
 
-## 触发条件
+由人显式发起；只读 Detector 可以提出 Episode，不能自动批准或改写治理环境。普通任务不要求 Reflect。协议只使用 `schema: dairn.retro.v1`；旧 `schema: 1` 草案显式拒绝，迁移时补齐真实来源，不把旧布尔值当作新证明。
 
-由人显式请求，或在 G2/G3 事故、反复摩擦后执行；普通任务不自动创建复盘。优先读取真实会话输出、失败命令与已有测试证据，不凭印象推断 Agent 失败。
+顶层包含 `retro_id`、可选 `task_id`、`scope`、`status`、`findings`。scope 包含 repository、完整 base_commit/head_commit、UTC window.start/end 以及 cli/harness/ci coverage。coverage 取 complete、partial、available、unknown、unavailable。未知顶层和 Finding 字段拒绝，扩展放 extensions。
 
-## 二选一输出
+`no-action` 与 `insufficient-evidence` 是合法顶层状态，findings 必须为空；其他状态至少一条 Finding。每条包含唯一 id、独立 status、category、severity、observed、sources、confidence、hypothesis、resolution、verification_plan，后续可有 decision、implementation、verification、follow_up。混合状态顶层用 proposed，同一状态可聚合为该状态。
 
-每条改进必须落到两种形态之一，并给出可验证目标：
+resolution.kind 与 category 一致，只能是 check、review-standard、navigation、tooling、harness-integration、information-access、prune。resolution.action 描述实际环境动作。verification_plan 包含 method、fixture、success_metric、target 和非空 guardrails。不能把 none 写成 Finding。
 
-- **新增确定性检查**（`resolution.kind: "check"`）：把机械错误变成项目已有检查集里的门禁项。`check` 必须填写 `.dairn/governance/project.json` 中已配置的检查名（`modules[].checks` 或 `required_checks` 的键），不是整条命令；`red_evidence` 指向仓库内已存在的证据文件；`verified_red` 必须为 `true`，表示已观察到改进前失败。
-- **写入 Review 轴使用的标准文档**（`resolution.kind: "standard"`）：判断性问题写入 Review 的 Standards 轴消费的文档。`document` 只能是 `AGENTS.md` 或 `docs/` 下已存在的文件；`section` 写该文档中的小节标题。
+sources 引用 observation-event、check-run、scm-reference 或 document。本地路径拒绝越界和链接，文件与事件必须存在；可带 sha256。SCM HTTPS 引用为尚未认证的线索，不能据此宣称平台已批准。
 
-同一条改进不能同时声称“已自动化”和“仅靠人记”。既不新增检查、也不进入标准文档的复盘项视为未落地。
+状态为 proposed、accepted、deferred、rejected、implemented、verified、monitoring、effective、ineffective、retained、revised、retired。accepted 之后要有 decision 的 accepted 状态、actor 和 reference；实施后要有 implementation.commit 与 reference。ineffective/revised/retired 必须提供同状态的 follow_up.status 和非空 follow_up.reason，保留来源、决定和实施引用；实施验证失败可从 implemented 进入 revised，再进入 retired，无需伪造绿色验证。这些都是本地自述，不能授权 Runtime/Policy 写入或 SCM Gate。
 
-```json
-{
-  "schema": 1,
-  "task_id": "auth",
-  "observed": [
-    "同类缺陷连续两次由人工 Review 发现",
-    "修改公共接口后忘记同步调用点测试"
-  ],
-  "resolution": {
-    "kind": "check",
-    "check": "unit",
-    "red_evidence": ".dairn/governance/engineering/feedback/feedback-0123.json",
-    "verified_red": true
-  }
-}
-```
+verified/monitoring/effective/retained 等成功结论不能用 verification.passed 布尔值自证，必须有可核对的成功验证。check 类型须有 red/green 运行引用，引用含 path、sha256、module、check_id，解析 dairn.check-run.v1、精确检查退出码、argv 及日志摘要。其他类型提供 replay.path/sha256，内容为 dairn.retro-replay.v1、status passed、非空且至多 1000 条 trials；每次试验包含非空字符串 argv、零 exit_code、项目内相对 output_path 与 output_sha256，并核对真实输出文件摘要。预期失败的场景由回放驱动程序验证后零退出，不能直接把非零命令记录为成功回放。文件完整性仍不证明受信 CI 来源。
 
-`kind: "standard"` 时 `resolution` 改为：
+effective/retained 还要求 follow_up 引用真实 baseline/experiment 的路径与 SHA256，内容为 dairn.retro-cohort.v1。每组至少 10 个可验证样本，输入夹具、仓库、策略、Runtime、工具链、完整必需保障及其执行配置相同，按 criteria 的数值阈值重算改善，同时记录 limitations 和 side_effects。样本需含计划摘要、declared-complete 输入覆盖及一致的运行前后快照；改善前后的提交和快照可变化，Subject 绑定不计入执行契约的等价比较。每个必需项都须唯一匹配结果和包含 argv/cwd/timeout/implementation_digest 的执行配置，实际 argv/cwd 必须一致。duration_ms 只接受全部必需保障成功且 Run passed 的样本，不能把失败提前退出当作耗时收益；failure_rate 允许目标检查的确定非零失败，其余必需保障仍须成功。字段不全或契约漂移返回 insufficient-evidence。比较只给出可比样本的描述性差异，不证明因果关系；普通 CI 变绿不能代替效果观察。prune 只能提出撤销建议，不能自动删除 Required Check。
 
-```json
-{
-  "kind": "standard",
-  "document": "docs/CODING_STANDARDS.md",
-  "section": "错误处理"
-}
-```
-
-- `observed` 至少一条，写可复述的真实摩擦，不写笼统感受。
-- `check` 必须是项目配置里真实存在的检查名；`red_evidence` 必须存在。
-- `document` 与 `section` 必须非空，文档必须存在；缺失文件会导致记录失败。
-
-## 记录方式
-
-证据文件放在 `.dairn/governance/retro/<task-id>.json`，用 `dairn work record <task-id> <path> --kind retro` 记录；文件须已存在且位于仓库内。该记录只对 reflect 阶段有效，`dairn work advance` 在缺少合法 retro 证据时失败。
-
-## 机器能验证什么
-
-- 能：JSON 可解析、`schema` 为 1、`task_id` 匹配、`observed` 非空、`resolution.kind` 取值、`check` 属于项目配置的检查集、`red_evidence` 文件存在、`verified_red` 为 true、`document` 存在、`section` 非空。
-- 不能：证明改进真的有效、检查真的能抓住原错误、`section` 指向的小节确实存在或标准真的被后续 Review 消费。结构通过只是“已记录”，不是“已改善”。
-- 现有工具链已覆盖的检查不应重复新建；先确认既有门禁是否静默失效。
-
-## 权限边界
-
-- 默认不改 `AGENTS.md`、Skills 或治理门禁；涉及长期规则变更时进入常规评审并留下审查记录。
-- 只有持久、非显而易见且存在真实备选方案的设计取舍才创建 Agent Note。
-- Retro 不是事故 Postmortem，不能替代用户或组织的批准。
-
-## 与其他阶段的关系
-
-Reflect 在 Review 与 Synchronize 之后。机械缺口补检查，判断缺口补 Review 标准；改进项落地前不宣称已修复。
+用 `dairn work record <id> <path> --kind retro` 在 Reflect 阶段记录。Work 只校验结构与引用，不证明收益或人类身份，也不增加 Gate 特权。

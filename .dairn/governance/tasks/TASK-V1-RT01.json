@@ -1,0 +1,15 @@
+{
+  "id": "TASK-V1-RT01",
+  "title": "候选构建与测试迁移",
+  "acceptance": "按 docs/changes/integrated-v1-proposal.md 对应正负向矩阵执行并保留证据；平台能力未部署不得声称上线。",
+  "status": "in-progress",
+  "blocked_by": [],
+  "kind": "change",
+  "write_scopes": [
+    "tools/"
+  ],
+  "test_seams": [
+    "实际 CLI、临时 Git 项目及原生单元测试"
+  ],
+  "owner": "当前实现 Agent"
+}

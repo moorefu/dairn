@@ -16,7 +16,7 @@ symbols: ["dairn work start", "dairn work verify"]
 
 ## 生命周期
 
-- `dairn work start <title> --id <id>`：新建任务，返回第一个阶段；重复 ID 拒绝覆盖。
+- `dairn work start <title> --id <id> [--kind change|bug|documentation|review|design|incident]`：新建任务，返回第一个阶段；重复 ID 拒绝覆盖。显式 kind 优先，未提供时由标题推断。
 - `dairn work list`、`dairn work status`、`dairn work next <id> --json`：输出阶段、Skill、已记录证据和下一步，不改变状态。
 - `dairn work record <id> <path> --kind <kind>`：仅接收仓库内现有证据文件并记录 SHA256；拒绝符号链接、越界、空文件和超大制品；不保证该证据是真实的执行记录。
 - `dairn work verify <id>`：重新计算证据 SHA256；证据丢失或被修改时失败。`--require-machine-gates` 要求当前 HEAD 有通过的机器门禁运行；`--require-session-anchor` 要求该任务至少登记过一个会话锚点；`--require-review-actor`（或环境变量 `DAIRN_REQUIRE_REVIEW_ACTOR=true`）要求最后一条 review 证据带非空 `actor` 声明。
@@ -24,6 +24,8 @@ symbols: ["dairn work start", "dairn work verify"]
 - `dairn work skip <id> --reason "<原因>"`：显式跳过规划类阶段（orient/grill/diagnose/specify/slice/reflect），保留跳过理由；implement/review/synchronize 等证据阶段不可跳过。
 - `dairn work cancel <id> --reason "<原因>"`：关闭活跃任务并保留已有证据与历史；取消不是删除。
 - `dairn work reopen <id> --reason "<原因>"`：从取消或 `recorded-complete` 状态恢复任务，保留原证据并要求重新满足当前阶段规则。
+- `dairn work revise <id> --stage <阶段> --reason "<原因>"`：证据内容或 HEAD 变化时，重新进入最早受影响阶段。原账本按原始字节归档并记录摘要；该阶段及后续阶段清空当前证据、机器关联和完成状态，必须重新执行。更早失效的证据不能通过修订较晚阶段掩盖。
+- `dairn work revise <id> --kind change --reason "<原因>"`：显式纠正误分类，从 orient 重建流程。支持的 kind 与 start 相同；这不会导入旧的通过状态，也不授予机器或人类批准。
 - `dairn work finish <id>`：只有最后阶段才能完成，结果为 `recorded-complete`，不是生产或审查批准。
 
 ## 证据 kind
@@ -42,7 +44,7 @@ symbols: ["dairn work start", "dairn work verify"]
 | implement | `--kind test` 或 `machine-evidence`；推进需要当前 HEAD 有通过的机器门禁运行 |
 | review | `--kind review`；`standards` 为 pass|fail、`spec_fidelity` 为 pass|fail|not-applicable、`head` 为当前提交；失败结论可记录留痕，但 `advance` 只接受 `standards=pass` 且 Fidelity 不为 fail；Fidelity 为 pass 时必须给出已存在的 `docs/specs/*.md` 作为 `spec_ref`；若任务包含 implement 阶段，还需当前 HEAD 有通过的机器运行；可选 `actor` 为 self-asserted 审查者声明，不认证身份 |
 | synchronize | `--kind document`；JSON 含 `status`、当前 `head`、非空 `reviewed_docs` 与不少于 10 字符的 `reason`；若任务包含 review 阶段，该阶段必须已完成 |
-| reflect | `--kind retro`；schema 1、task_id 匹配、`observed` 非空、`resolution.kind` 取 check|standard 且字段完整 |
+| reflect | `--kind retro`；dairn.retro.v1、task_id 匹配，findings 与来源、验证计划及状态合法；允许 no-action/insufficient-evidence |
 
 普通变更的阶段是 `orient → grill → specify → slice → implement → review → synchronize`；`diagnose` 是缺陷/事故变体的阶段，`reflect` 仅属于事故变体流程，下表只描述各阶段自身的判据，不代表每种分类都会经过全部阶段。
 
@@ -56,7 +58,7 @@ review 证据可带可选 `actor`（不超过 200 字符）：优先级为 `revi
 - 每个写操作先取 per-task 锁，再按读取时的 revision 做 compare-and-swap；另一个会话已推进时报 `Task changed concurrently; retry`，不覆盖更新状态。
 - 锁文件 `.dairn/work/.<id>.lock` 超过 10 分钟视为崩溃遗留，CLI 会回收一次再重试；仍不可获取时报清晰错误而不是静默跳过写入。
 - 多个 Agent 会话可以并行工作，但各自只记录自己的证据文件；覆盖、重置或删除他人账本属于违规。
-- 证据以 SHA256 绑定内容；同一路径文件被修改后旧记录失效，需要重新记录。
+- 证据以 SHA256 绑定内容；同一路径文件被修改后旧记录失效，通过 revise 归档旧账本、回到相应阶段后重新记录。历史归档自身的存在与摘要也必须保持完整。
 - HEAD 变化后，review、synchronize 与机器门禁证据视为过期，重新执行后才能推进。
 - 受保护构建独立执行 `dairn check --base <可信基线>`，不依赖账本或任务阶段。合并产生新提交后，需为合并提交重新生成机器证据；Work 可用 `dairn work link-check` 引用已有 Run，本地 review/synchronize 记录不构成合并后或受保护 CI 的证明。
 - 显式跳过的规划阶段记录在 `skips[]`，不会伪造证据；跳过理由随账本保留。

@@ -147,7 +147,7 @@ class LightIntegration(unittest.TestCase):
         vendor = self.root / '.dairn/runtime'
         vendor.mkdir(parents=True, exist_ok=True)
         for name in ('dairn-embedded.com', 'runtime-integrity.json'):
-            shutil.copyfile(ROOT / 'runtime' / name, vendor / name)
+            shutil.copyfile(Path(os.environ['DAIRN_TEST_RUNTIME']).parent / name, vendor / name)
         if os.name != 'nt':
             (vendor / 'dairn-embedded.com').chmod(0o755)
         self.call('upgrade', '--vendor-runtime', '.dairn/runtime', '--plan')

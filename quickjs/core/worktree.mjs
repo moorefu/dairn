@@ -4,7 +4,7 @@ import {sha256, sha256Bytes} from './sha256.mjs';
 const DATA_PREFIXES = [
   '.dairn/governance/changes/', '.dairn/governance/operations/',
   '.dairn/governance/evidence/', '.dairn/work/', '.dairn/facts/',
-  '.dairn/cache/', '.dairn/tmp/'
+  '.dairn/cache/', '.dairn/tmp/', '.dairn/observe/', '.dairn/runtime-transactions/', '.dairn/runtime-promotion.lock'
 ];
 const MAX_FILES = 20000;
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
@@ -139,6 +139,8 @@ export function captureWorktree(h, root, timeout = 120, exclude = [], options = 
   const exclusions = normalizedExclusions(exclude);
   const snapshotPatterns = normalizeSnapshotExclusions(opts.snapshot_exclusions);
   const pathspec = exclusions.length ? ['--', ...exclusions.map(x => ':(exclude,literal)' + x)] : [];
+  const observedTracked=listed(h,root,['ls-files','--cached','-z','--','.dairn/observe/','.dairn/runtime-transactions/','.dairn/runtime-promotion.lock'],timeout).filter(p=>p.startsWith('.dairn/observe/')||p.startsWith('.dairn/runtime-transactions/')||p==='.dairn/runtime-promotion.lock');
+  ok(!observedTracked.length,'Process data boundary contains tracked input: '+observedTracked.join(', '));
   const tracked = listed(h, root, ['ls-files', '--cached', '-z', ...pathspec], timeout);
   const untracked = listed(h, root, ['ls-files', '--others', '--exclude-standard', '-z', ...pathspec], timeout);
   const ignoredAll = listed(h, root, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z'], timeout);

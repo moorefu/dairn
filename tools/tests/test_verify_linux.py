@@ -24,8 +24,13 @@ class LinuxVerification(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'tools').mkdir()
-            (root / 'runtime').mkdir()
-            (root / 'runtime/dairn-embedded.com').write_bytes('测试载荷'.encode())
+            candidate=root/'.build/runs/fixture/runtime'
+            candidate.mkdir(parents=True)
+            payload = candidate/'dairn-embedded.com'
+            payload.write_bytes('测试载荷'.encode())
+            import hashlib
+            (candidate/'runtime-integrity.json').write_text(json.dumps({
+                'binary': payload.name, 'sha256': hashlib.sha256(payload.read_bytes()).hexdigest()}))
             target = root / 'tools/verify-linux.py'
             shutil.copyfile(script, target)
             out = root / 'out'
@@ -44,7 +49,7 @@ class LinuxVerification(unittest.TestCase):
                 executed.extend('python.assets-lint' if name.endswith('.test_assets_lint')
                                 else name for name in names)
                 if evidence:
-                    (out / 'linux-go-checks.json').write_text('{"checks": []}')
+                    (out / 'linux-python-checks.json').write_text('{"checks": []}')
 
                 def regression():
                     if regression_outcome == 'fail':
@@ -54,7 +59,7 @@ class LinuxVerification(unittest.TestCase):
 
                 return unittest.TestSuite([unittest.FunctionTestCase(regression)])
 
-            with patch.dict(os.environ), patch.object(sys, 'argv', [str(target), str(out)]), \
+            with patch.dict(os.environ, {'DAIRN_TEST_RUNTIME': str(payload)}), patch.object(sys, 'argv', [str(target), str(out)]), \
                     patch.object(sys, 'path', list(sys.path)), \
                     patch('subprocess.run', side_effect=run), \
                     patch('shutil.which', return_value='/工具'), \

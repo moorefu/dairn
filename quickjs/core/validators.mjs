@@ -1,3 +1,4 @@
+import {validateRetro} from './retro.mjs';
 /* Dairn validation contracts ported to portable ES Modules for official QuickJS.
  * These are structural checks, NOT proof of human approval or trusted CI execution.
  */
@@ -209,3 +210,15 @@ export function archiveValidate(h,root,base=null) {
   return errors;
 }
 validators.archive=archiveValidate;
+
+validators.retro=(h,root)=>{
+  const dir=join(root,'.dairn/governance/retro');
+  if(!h.exists(dir))return [];
+  if(h.isSymlink(dir))return ['Retro directory is a symlink'];
+  const errors=[];
+  for(const name of h.list(dir).filter(n=>n.endsWith('.json'))){
+    try{const p=join(dir,name);if(h.isSymlink(p))throw Error('Retro file is a symlink');const report=validateRetro(h,root,JSON.parse(h.read(p)));errors.push(...report.errors.map(e=>name+': '+e));}
+    catch(e){errors.push(name+': '+e.message);}
+  }
+  return errors;
+};

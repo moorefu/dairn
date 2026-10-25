@@ -75,6 +75,8 @@ class DocsRetrievalTest(unittest.TestCase):
         payload = json.loads(report.stdout)
         self.assertEqual(payload['hits'], [])
         self.assertFalse(payload['truncated'])
+        self.assertIn('AND', payload['hint'])
+        self.assertIn('没有匹配规范', text.stderr)
 
     def test_show_full_and_line_range(self):
         full = self.json_call('docs', 'show', SPEC_ID, '--json')

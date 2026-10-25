@@ -4,7 +4,7 @@ NATIVE_UNIT = (
     'test_core.mjs', 'test_native.mjs', 'test_governance_native.mjs',
     'test_handoff_native.mjs', 'test_gov_native.mjs',
     'test_analysis_plan_native.mjs', 'test_launcher_native.mjs',
-    'test_report_adapters_native.mjs',
+    'test_report_adapters_native.mjs', 'test_integrated_native.mjs',
 )
 PYTHON_INTEGRATION = (
     'quickjs.tests.test_integration_light',

@@ -60,8 +60,8 @@ class ProjectLauncher(unittest.TestCase):
 
     def install_payload(self):
         """把构建运行时放进可复用的载荷目录，并返回其路径。inspectRuntimePayload 只读。"""
-        source = ROOT / 'runtime/dairn-embedded.com'
-        integrity_source = ROOT / 'runtime/runtime-integrity.json'
+        source = Path(os.environ['DAIRN_TEST_RUNTIME'])
+        integrity_source = Path(os.environ['DAIRN_TEST_RUNTIME']).with_name('runtime-integrity.json')
         self.assertTrue(source.is_file(), 'missing build runtime: ' + str(source))
         self.assertTrue(integrity_source.is_file(), 'missing runtime integrity: ' + str(integrity_source))
         payload = self.work / 'payload'

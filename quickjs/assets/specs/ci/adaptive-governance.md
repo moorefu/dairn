@@ -43,4 +43,4 @@ symbols: ["dairn governance plan --base", "dairn governance explain --base", "da
 
 ## 治理反馈（governance recommend）
 
-`dairn governance recommend --window <days>` 只输出**有证据的建议**（CI_SLOW/REPEATED_RUNS/POLICY_NOISE），每条附观测数据、被保留的保证目标，且全部 `requires_approval`；样本不足时如实输出 `insufficient-evidence`，不宣称任何节约。建议永不自动应用，也不影响计划或门禁的强制项。
+`dairn governance recommend --window <days>` 只输出**有证据的建议**（CI_SLOW/REPEATED_RUNS/FREQUENT_FAILURE/SUSPECTED_FLAKY），每条附观测数据、被保留的保证目标，且全部 `requires_approval`；样本不足时如实输出 `insufficient-evidence`，不宣称任何节约。建议永不自动应用，也不影响计划或门禁的强制项。

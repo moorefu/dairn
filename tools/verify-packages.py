@@ -56,7 +56,7 @@ summary = {'platform': platform.platform(), 'machine': platform.machine(), 'step
            'selected_packages': sorted(selected), 'artifact_mode': bool(args.artifacts),
            'mode': 'smoke' if args.smoke else 'full'}
 sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
-runtime_path = ROOT / 'runtime/dairn-embedded.com'
+runtime_path = ROOT / '.dairn/runtime/dairn-embedded.com'
 before = sha(runtime_path) if runtime_path.exists() else None
 
 

@@ -9,7 +9,8 @@
 import {validateSubject} from './subject.mjs';
 import {validateCheckRun} from './evidence.mjs';
 import {verifyApproval} from './approval.mjs';
-import {validateStatement} from './attestation.mjs';
+import {validateStatement,isVerifiedAttestation} from './attestation.mjs';
+import {sha256} from './sha256.mjs';
 import {resolvePolicy, approvalPolicyFor, requiredChecksFor} from './policy-resolver.mjs';
 
 const VERIFIED_ATTESTATION = 'dairn.verified-attestation.v1';
@@ -53,7 +54,7 @@ function coverageErrors(policy, risk, run, requestedModules) {
  * statement bytes with a CI-controlled public key (T35). The gate never
  * upgrades a bare statement JSON into trust. */
 function verifiedAttestationErrors(v, subject, check) {
-  if (!v || typeof v !== 'object' || v.schema !== VERIFIED_ATTESTATION)
+  if (!isVerifiedAttestation(v) || v.schema !== VERIFIED_ATTESTATION)
     return ['attestation must be a verified result (schema ' + VERIFIED_ATTESTATION + ') produced by real Ed25519 verification, not a bare statement'];
   const st = v.statement;
   if (!st || typeof st !== 'object') return ['verified attestation must embed the statement it verified'];
@@ -80,6 +81,7 @@ export function evaluate(input = {}) {
   if (!policy) fail.push('trusted policy missing or invalid');
   const checkErrors = validateCheckRun(input.check);
   if (checkErrors.length) fail.push(...checkErrors.map(x => 'check: ' + x));
+  if(stage==='pre-merge')pending.push('SCM_ORIGIN_UNVERIFIED: 本地 JSON 不能认证受信 Check/Review 来源；需由受保护 PCC Verifier 实时查询 SCM');
   if (input.check && !checkErrors.length) {
     if (input.check.status !== 'passed') fail.push('required checks did not pass');
     else fail.push(...coverageErrors(input.trustedPolicy || input.policy, risk, input.check, input.modules).map(x => 'coverage: ' + x));
@@ -111,7 +113,19 @@ export function evaluate(input = {}) {
   }
   if (stage === 'post-merge' || stage === 'release') {
     if (!input.verifiedAttestation) pending.push('attestation evidence missing (cannot determine signed evidence)');
-    else fail.push(...verifiedAttestationErrors(input.verifiedAttestation, input.subject, input.check));
+    else {
+      fail.push(...verifiedAttestationErrors(input.verifiedAttestation,input.subject,input.check));
+      if(isVerifiedAttestation(input.verifiedAttestation)){
+        const st=input.verifiedAttestation.statement;
+        if(!input.checkRaw||sha256(input.checkRaw)!==st.digests?.run_json_sha256)fail.push('RUN_DIGEST_MISMATCH');
+        if(input.checkRaw&&JSON.stringify(JSON.parse(input.checkRaw))!==JSON.stringify(input.check))fail.push('RUN_CONTENT_MISMATCH');
+        if(st.ci?.stage!==stage)fail.push('ATTESTATION_STAGE_MISMATCH');
+        if(st.runtime_sha256!==input.check?.execution?.runtime_sha256)fail.push('RUNTIME_IDENTITY_MISMATCH');
+        if(!st.plan_sha256||st.plan_sha256!==input.check?.execution?.check_plan_sha256)fail.push('PLAN_OR_POLICY_MISMATCH');
+        if(approvalRequired&&(!input.approvalRaw||sha256(input.approvalRaw)!==st.digests?.approval_snapshot_sha256))fail.push('APPROVAL_DIGEST_MISMATCH');
+        if(input.check?.execution?.policy_sha256!==st.policy_sha256||!input.policyRaw||sha256(input.policyRaw)!==st.policy_sha256)fail.push('POLICY_DIGEST_MISMATCH');
+      }
+    }
   }
   if (fail.length) return verdict('FAIL', fail);
   if (pending.length) return verdict('INDETERMINATE', pending);
