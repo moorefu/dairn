@@ -112,8 +112,10 @@ L0 小改动可直接编辑 → 检查 → 必需评审 → CI/SCM，**Skill 不
 | `skills list` 为空 / Skill 未触发 | `dairn skills catalog`、`.agents/skills/<name>/SKILL.md` | `dairn skills add <name> --apply`；按宿主约定显式加载 |
 | `skills add` 报未知名称或非 stable | 名称拼写、frontmatter `dairn-stage` | 使用 stable Skill，或经人工评审后启用 |
 | `Managed file differs` / lock 漂移 | `dairn upgrade --plan` 的差异项 | 审阅 `upgrade` 计划；**不要手改摘要** |
+| 退出码 `4` / `Runtime Lock drift: …` | `dairn doctor --json` 与 `dairn upgrade --plan --json` 的 `runtime_lock`（`drift` 的 `code/expected/actual`、`next_actions`） | 诊断只读、不改 lock；按 `next_actions` 审阅 `upgrade` 计划，由维护者批准 `--apply`；GATE 命令不会因诊断能力放行 |
 | hook 未记录锚点 | provider/session（`CLAUDE_SESSION_ID`、`CODEX_SESSION_ID`、`DSH_SESSION_ID`） | 用 `--provider/--session` 显式传入重试；保留失败退出码 |
 | `docs find` 无结果 | 关键词语言/拼写；资产是否完整 | 换中英文关键词；源码仓库运行 `dairn docs check` |
+| `docs find` 结果过多 / 不知道读哪篇 | `dairn docs find <terms> --json` 的 `score` 与 `rank_reason` | 用 `dairn docs show <id> --section <title>` 或 `--lines A-B` 精确读取，不必全文灌入 |
 
 ## 5. 安全边界
 

@@ -72,6 +72,8 @@ with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
         'quickjs.tests.test_project_lifecycle',
         'quickjs.tests.test_handoff',
         'quickjs.tests.test_governance_cli',
+        'quickjs.tests.test_runtime_lock_diagnostic',
+        'quickjs.tests.test_docs_retrieval',
     ])
     def flatten(suite):
         for case in suite:

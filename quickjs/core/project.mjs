@@ -59,7 +59,7 @@ export function runtimeIdentity(h){
   for(const x of m.assets||[]) invariant(sha256(read(h,ASSETS+x.type+'/'+x.path))===x.sha256,'Embedded asset checksum mismatch: '+x.path);
   return sha256(raw);
 }
-const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--analyzer','--suite','--artifact','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars','--window','--file','--capability','--for','--limit'];
+const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--analyzer','--suite','--artifact','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars','--window','--file','--capability','--for','--limit','--section','--lines'];
 const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--discover':'discover','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--refresh':'refresh','--change':'change','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
 function argsParse(args){
   const out={cmd:args[0]||'help',pos:[],root:'.',stack:'auto',ci:'none',timeout:120};
@@ -347,19 +347,62 @@ function lockRead(h,root,required){
     'Only dairn-* managed Skills are supported');
   return lock;
 }
+/* S0 诊断基元：只读描述运行时身份与受管资源漂移，不写入、不授予信任。
+ * dairn.runtime-lock.v1 是 doctor / upgrade 与 Agent 自动恢复共同消费的稳定结构。 */
+function managedDigest(h,rel,path){
+  const original=read(h,path);const block=rel==='AGENTS.md'?managedBlock(original):null;
+  // 受管文本在 autocrlf=true 的 Windows checkout 上可能被转成 CRLF；
+  // 除有意使用 CRLF 的 .cmd 外，哈希前统一换行，避免“看起来被编辑”。
+  const normalize=text=>rel.endsWith('.cmd')?text:String(text).replace(/\r\n/g,'\n');
+  return rel==='AGENTS.md'?(block?sha256(normalize(block.raw)):''):sha256(normalize(original));
+}
+function nextActionsFor(drift){
+  const actions=[{command:'dairn doctor --json',description:'read-only Runtime Lock diagnostic; report status, drift codes and expected/actual digests',requires_review:false}];
+  if(drift.length){
+    actions.push({command:'dairn upgrade --plan --json',description:'review planned managed-resource changes; planning never writes',requires_review:true});
+    actions.push({command:'dairn upgrade --apply',description:'apply a reviewed plan; a human must review it before authorization',requires_review:true});
+  }
+  return actions;
+}
+export function runtimeLockReport(h,root,lock){
+  lock=lock||lockRead(h,root,true);
+  const report={schema:'dairn.runtime-lock.v1',status:'ok',root,read_only:true,
+    lock:{version:lock.version,runtime_sha256:lock.runtime_sha256},
+    runtime:{version:null,runtime_sha256:null},
+    launcher:{mode:null,version:null,binary_sha256:null,integrity_sha256:null},
+    drift:[],managed:{checked:0,drifted:0},next_actions:[]};
+  try{report.runtime.version=runtimeVersion(h);report.runtime.runtime_sha256=runtimeIdentity(h);}
+  catch(e){report.drift.push({code:'runtime.integrity',expected:null,actual:null,message:String(e?.message||e)});}
+  if(report.runtime.version!==null&&report.runtime.version!==lock.version)
+    report.drift.push({code:'runtime.version',expected:lock.version,actual:report.runtime.version});
+  if(report.runtime.runtime_sha256!==null&&report.runtime.runtime_sha256!==lock.runtime_sha256)
+    report.drift.push({code:'runtime.sha256',expected:lock.runtime_sha256,actual:report.runtime.runtime_sha256});
+  try{
+    const info=launcherInfo(h,root);report.launcher.mode=info.mode||null;
+    const runtime=info.runtime;
+    if(runtime){report.launcher.version=runtime.version||null;report.launcher.binary_sha256=runtime.sha256||null;report.launcher.integrity_sha256=runtime.integrity||null;}
+  }catch(_){/* launcher 信息只是观察字段；缺失不改变锁一致性判断 */}
+  for(const [rel,expected] of Object.entries(lock.managed||{})){
+    report.managed.checked++;
+    const path=j(root,rel);
+    if(!file(h,path)){report.managed.drifted++;report.drift.push({code:'managed.missing',path:rel,expected,actual:null});continue;}
+    const actual=managedDigest(h,rel,path);
+    if(actual!==expected){report.managed.drifted++;report.drift.push({code:'managed.edited',path:rel,expected,actual});}
+  }
+  report.status=report.drift.length?'drift':'ok';
+  report.next_actions=nextActionsFor(report.drift);
+  return report;
+}
+function lockDriftError(report){
+  const codes=report.drift.map(item=>item.code+(item.path?':'+item.path:'')).join(', ');
+  const err=new Error('Runtime Lock drift: '+codes);
+  err.exitCode=4;err.code='RUNTIME_LOCK_DRIFT';err.diagnostic=report;
+  return err;
+}
 export function verifyRuntimeLock(h,root,required=false){
   const lock=lockRead(h,root,required);if(!lock)return null;
-  invariant(lock.version===runtimeVersion(h),'Runtime version differs from project lock; run dairn upgrade --plan');
-  invariant(lock.runtime_sha256===runtimeIdentity(h),'Runtime assets differ from project lock; run dairn upgrade --plan');
-  for(const [rel,expected] of Object.entries(lock.managed||{})){
-    const path=j(root,rel);invariant(file(h,path),'Missing managed file: '+rel);
-    const original=read(h,path);const block=rel==='AGENTS.md'?managedBlock(original):null;
-    // 受管文本在 autocrlf=true 的 Windows checkout 上可能被转成 CRLF；
-    // 除有意使用 CRLF 的 .cmd 外，哈希前统一换行，避免“看起来被编辑”。
-    const normalize=text=>rel.endsWith('.cmd')?text:String(text).replace(/\r\n/g,'\n');
-    const actual=rel==='AGENTS.md'?(block?sha256(normalize(block.raw)):''):sha256(normalize(original));
-    invariant(actual===expected,'Managed resource was edited: '+rel+' (use upgrade plan; restore controlled content)');
-  }
+  const report=runtimeLockReport(h,root,lock);
+  if(report.status!=='ok')throw lockDriftError(report);
   return lock;
 }
 function nameValid(value){invariant(/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(value),'Project name must be letters, digits, - or _ and start with letter');return value;}
@@ -421,6 +464,7 @@ function provision(h,o){
 }
 function upgrade(h,o){
   const root=checkedRoot(h,o.root==='.'?h.cwd():o.root,false), lock=lockRead(h,root,true);
+  const lockReport=runtimeLockReport(h,root,lock);
   const config={...lock.config,sample:false};const plan=planFor(h,root,makeDesired(h,root,config,lock),lock);
   preflightLayout(h,root);
   const installed=runtimeVersion(h);
@@ -450,9 +494,9 @@ function upgrade(h,o){
     }
   }
   if(vendorConfig&&legacyLauncher)vendorConfig={...vendorConfig,launcher:LAUNCHER_POSIX,windows_launcher:LAUNCHER_WINDOWS};
-  h.log(fmt({mode:o.apply?'apply':'plan',installed:runtimeVersion(h),recorded:lock.version,actions:plan.actions.filter(x=>o.diff||x.status!=='unchanged'),launcher:launcherSummary(h,root,o,vendorConfig)}));
+  h.log(fmt({mode:o.apply?'apply':'plan',installed:runtimeVersion(h),recorded:lock.version,actions:plan.actions.filter(x=>o.diff||x.status!=='unchanged'),launcher:launcherSummary(h,root,o,vendorConfig),runtime_lock:lockReport,next_actions:lockReport.next_actions}));
   if(o.diff){for(const a of plan.actions.filter(x=>x.status==='update'))h.log('~ '+a.path+' (managed content changed; diff with git for exact lines)');}
-  if(!o.apply)return plan.actions.some(x=>x.status==='conflict')?2:0;
+  if(!o.apply)return plan.actions.some(x=>x.status==='conflict')?2:(lockReport.status!=='ok'?4:0);
   apply(h,root,plan,next);layout(h,root);ensureLauncher(h,root,o,vendorConfig);
   h.log('Upgrade applied; project-owned policy and Notes are preserved. Launcher: ./'+LAUNCHER_POSIX+' (Windows: '+LAUNCHER_WINDOWS+')'+
     (vendorConfig?' — vendored runtime registered':(legacyLauncher?' — launcher paths migrated':'')));
@@ -490,6 +534,83 @@ function specIndex(h){
   }
   return docs;
 }
+/* S3 检索精度：frontmatter 字段 + 词法打分，仍只做本地索引，不引入语义/向量依赖。
+ * 排序只影响候选顺序与解释；权威性仍由稳定 ID 与 docs show 的完整正文决定。 */
+const DOC_RANK={id:100,alias:80,keyword:60,title:40,summary:40,path:40,section:30,body:10};
+function parseYamlList(value){
+  if(!value)return null;
+  try{const parsed=JSON.parse(value);return Array.isArray(parsed)?parsed.map(String):null;}catch(_){/* 非 JSON 内联列表继续手工解析 */}
+  const inner=value.replace(/^\[|\]$/g,'');
+  if(inner===value&&!value.startsWith('['))return null;
+  return inner.split(',').map(item=>item.trim().replace(/^["']|["']$/g,'')).filter(Boolean);
+}
+function frontmatterFields(text){
+  const fields={title:'',summary:'',kind:'',module:'',aliases:[],keywords:[],symbols:[],headings:[]};
+  const lines=String(text).split(/\r?\n/);
+  for(const line of lines.slice(0,40)){
+    const match=/^([A-Za-z_][\w-]*):\s*(.*)$/.exec(line);
+    if(!match)continue;
+    const [,key,raw]=match,value=raw.trim();
+    if(key==='title'||key==='summary'||key==='kind'||key==='module'){
+      fields[key]=value.replace(/^["']|["']$/g,'');
+      continue;
+    }
+    if(key==='aliases'||key==='keywords'||key==='symbols'){
+      const list=parseYamlList(value);
+      if(list)fields[key]=list;
+    }
+  }
+  fields.headings=lines.filter(line=>/^#{1,6} /.test(line)).map(line=>line.replace(/^#{1,6} /,'').trim()).filter(Boolean);
+  return fields;
+}
+function docMatches(doc,terms){
+  const fields=doc.fields,id=String(doc.id||'').toLowerCase(),path=doc.path.toLowerCase();
+  const lowerList=list=>(list||[]).map(item=>String(item).toLowerCase());
+  const buckets={id,title:(fields.title||'').toLowerCase(),summary:(fields.summary||'').toLowerCase(),path,
+    aliases:lowerList(fields.aliases),keywords:lowerList(fields.keywords),symbols:lowerList(fields.symbols),
+    sections:lowerList(fields.headings),body:doc.text.toLowerCase()};
+  let score=0;const reasons=[];
+  for(const term of terms){
+    if(!term)continue;
+    if(buckets.id===term){score+=DOC_RANK.id;reasons.push('id');continue;}
+    if(buckets.aliases.some(value=>value===term||value.includes(term))){score+=DOC_RANK.alias;reasons.push('aliases');continue;}
+    if(buckets.keywords.some(value=>value===term||value.includes(term))||buckets.symbols.some(value=>value===term||value.includes(term))){score+=DOC_RANK.keyword;reasons.push('keywords');continue;}
+    if(buckets.title.includes(term)){score+=DOC_RANK.title;reasons.push('title');continue;}
+    if(buckets.summary.includes(term)){score+=DOC_RANK.summary;reasons.push('summary');continue;}
+    if(buckets.path.includes(term)){score+=DOC_RANK.path;reasons.push('path');continue;}
+    if(buckets.sections.some(value=>value.includes(term))){score+=DOC_RANK.section;reasons.push('sections');continue;}
+    if(buckets.body.includes(term)){score+=DOC_RANK.body;reasons.push('body');continue;}
+    return null; // 多词查询按 AND 语义：每个词都必须命中至少一个字段
+  }
+  return {score,reasons:[...new Set(reasons)]};
+}
+function docsShow(h,o,doc){
+  invariant(!(o.section!==undefined&&o.lines!==undefined),'--section and --lines are mutually exclusive');
+  const lines=doc.text.split(/\r?\n/);let selected=null,section=null;
+  if(o.section!==undefined&&o.section!==null){
+    const name=String(o.section).replace(/^#+\s*/,'').trim();
+    const headings=[];
+    lines.forEach((line,index)=>{const match=/^(#{1,6}) (.*)$/.exec(line);if(match)headings.push({index,level:match[1].length,title:match[2].trim()});});
+    const hit=headings.find(item=>item.title.toLowerCase()===name.toLowerCase());
+    invariant(!!hit,'Unknown section: '+name+(headings.length?' (available: '+headings.map(item=>item.title).join(', ')+')':''));
+    let end=lines.length;
+    for(const heading of headings)if(heading.index>hit.index&&heading.level<=hit.level){end=heading.index;break;}
+    selected={text:lines.slice(hit.index,end).join('\n'),range:[hit.index+1,end]};section=hit.title;
+  }else if(o.lines!==undefined&&o.lines!==null){
+    const match=/^(\d+)-(\d+)$/.exec(String(o.lines).trim());
+    invariant(!!match,'--lines must be <start>-<end> (1-based)');
+    const start=Number(match[1]),end=Number(match[2]);
+    invariant(start>=1&&start<=end&&end<=lines.length,'--lines out of range 1-'+lines.length);
+    selected={text:lines.slice(start-1,end).join('\n'),range:[start,end]};
+  }
+  if(o.json){
+    const payload={schema:'dairn.docs-show.v1',id:doc.id,path:doc.path,line_range:selected?selected.range:[1,lines.length],text:selected?selected.text:doc.text};
+    if(section)payload.section=section;
+    h.log(fmt(payload));return 0;
+  }
+  h.log(selected?selected.text:doc.text);
+  return 0;
+}
 function docCmd(h,o){
   const action=o.pos[0]||'find',q=(o.pos[1]||'').toLowerCase();
   if(action==='check'){
@@ -502,25 +623,51 @@ function docCmd(h,o){
     for(const error of report.errors)h.log('ERROR '+error.asset+': '+error.message);
     return report.errors.length?2:0;
   }
-  const docs=specIndex(h);
+  const docs=specIndex(h).map(doc=>({...doc,fields:frontmatterFields(doc.text)}));
   if(action==='find'){
     invariant(q,'docs find <query>');
-    const hits=docs.filter(x=>x.id&&(x.id.toLowerCase().includes(q)||x.path.toLowerCase().includes(q)||x.text.toLowerCase().includes(q)));
-    for(const hit of hits.slice(0,30))h.log(hit.id+'\t'+hit.path);
+    invariant(o.section===undefined&&o.lines===undefined,'--section/--lines are only valid for docs show');
+    const terms=o.pos.slice(1).map(term=>term.toLowerCase()).filter(Boolean);
+    const scored=[];
+    for(const doc of docs){
+      if(!doc.id)continue;
+      const match=docMatches(doc,terms);
+      if(match)scored.push({id:doc.id,path:doc.path,score:match.score,rank_reason:match.reasons});
+    }
+    scored.sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));
+    const hits=scored.slice(0,30);
+    if(o.json){
+      h.log(fmt({schema:'dairn.docs-find.v1',query:o.pos.slice(1).join(' '),terms,hits,
+        truncated:scored.length>hits.length,next:hits.length?'dairn docs show '+hits[0].id:null}));
+      return hits.length?0:1;
+    }
+    for(const hit of hits)h.log(hit.id+'\t'+hit.path);
+    if(hits.length)h.error('Next: dairn docs show '+hits[0].id);
     return hits.length?0:1;
   }
   if(action==='show'||action==='context'){
     invariant(q,'docs show <id>');
     const doc=docs.find(x=>x.id&&x.id.toLowerCase()===q);
     invariant(!!doc,'Unknown spec id: '+q);
-    const truncated=doc.text.length>8000;
-    h.log(action==='context'?(truncated?doc.text.slice(0,8000)+'\n\n[truncated at 8000 characters; use dairn docs show '+doc.id+' for the full authoritative text]':doc.text):doc.text);
+    if(action==='show')return docsShow(h,o,doc);
+    invariant(o.section===undefined&&o.lines===undefined,'--section/--lines are only valid for docs show');
+    const limit=8000;
+    const truncated=doc.text.length>limit;
+    let body=doc.text;
+    if(truncated){
+      let cut=doc.text.slice(0,limit);
+      const newline=cut.lastIndexOf('\n');
+      if(newline>0)cut=cut.slice(0,newline);
+      body=cut+'\n\n[truncated at 8000 characters; use dairn docs show '+doc.id+' for the full authoritative text]';
+    }
+    h.log(body);
     return 0;
   }
   throw Error('Usage: dairn docs find <topic> | docs show <spec-id> | docs context <spec-id> | docs check [--json]');
 }
 function doctor(h,root){
-  const lock=verifyRuntimeLock(h,root,true);const cfg=JSON.parse(read(h,j(root,'.dairn/governance/project.json')));
+  const lock=lockRead(h,root,true);const lockReport=runtimeLockReport(h,root,lock);
+  const cfg=JSON.parse(read(h,j(root,'.dairn/governance/project.json')));
   const problems=policyValidate(cfg),modules=cfg.modules.map(m=>({name:m.name,path:m.path,checks:Object.keys(m.checks)}));
   const launcherCheck=verifyLauncher(h,root);
   for(const problem of launcherCheck.problems)problems.push(problem);
@@ -551,15 +698,17 @@ function doctor(h,root){
     }
     catch(e){tools[argv[0]]='unavailable: '+e.message;problems.push('tool '+argv[0]+': '+tools[argv[0]]);}
   }
-  const status=problems.length?'unready':'ready';
+  const drift=lockReport.status!=='ok';
+  const status=drift?'drift':problems.length?'unready':'ready';
   // 运行时来源与源码陈旧度：只报告，不改变门禁语义；运行时身份仍以 runtime_sha256 为准。
   const runtime_source=runtimeSource(h);
   let freshness={status:'unknown',checked:0,stale_sources:[],stale_count:0,note:'runtime manifest unavailable'};
   try{freshness=runtimeFreshness(h,root,assetIndex(h).engine_sources);}catch(_){}
-  h.log(fmt({product:'Dairn',engine:'Cosmopolitan QuickJS',version:runtimeVersion(h),status,root,runtime_sha256:lock.runtime_sha256,
-    runtime:{version:lock.version,source:runtime_source,freshness},launcher,invocation:launcher.invocation+' doctor',modules,tools,problems}));
+  h.log(fmt({product:'Dairn',engine:'Cosmopolitan QuickJS',version:lockReport.runtime.version||lock.version,status,root,runtime_sha256:lock.runtime_sha256,
+    runtime_lock:lockReport,runtime:{version:lock.version,source:runtime_source,freshness},launcher,invocation:launcher.invocation+' doctor',modules,tools,problems}));
   for(const problem of problems)h.error('ERROR: '+problem);
-  return problems.length?1:0;
+  if(drift)h.error('Runtime Lock drift: '+lockReport.drift.map(item=>item.code+(item.path?':'+item.path:'')).join(', '));
+  return drift?4:(problems.length?1:0);
 }
 
 /* --- 独立证据/门禁命令：只读验证，不授予信任，不触网。 --- */
@@ -700,7 +849,9 @@ function attestCmd(h,o,root){  const op=o.pos[0];
 function handoffCmd(h,o,root){
   const view=captureHandoff(h,root,{base:o.base||null,task:o.task||null,note:o.note||null,timeout:30});
   const maxChars=Math.max(500,Number(o.max_chars)||12000);
-  if(o.json)h.log(fmt(view));
+  // JSON 输出显式标记信任边界：handoff 是派生视图，不是 Evidence，不改变门禁结论。
+  const report=o.json?{...view,advisory:true,evidence:false}:view;
+  if(o.json)h.log(fmt(report));
   else{
     const rendered=renderHandoff(view,{maxChars});
     h.log(rendered.text.replace(/\n$/,''));
@@ -712,7 +863,7 @@ function handoffCmd(h,o,root){
     invariant(!file(h,outPath),'refuse to overwrite existing file: '+rel);
     invariant(!rel.startsWith('.dairn/governance/evidence/'),'refuse to write handoff into the evidence tree: '+rel);
     h.mkdirs(outPath.slice(0,outPath.lastIndexOf('/')));
-    const content=o.json?fmt(view):renderHandoff(view,{maxChars}).text;
+    const content=o.json?fmt(report):renderHandoff(view,{maxChars}).text;
     h.writeExclusive(outPath,content);
     h.log('handoff written: '+rel+' (explicitly requested; advisory view, not evidence)');
   }
@@ -1066,6 +1217,9 @@ export function dispatch(h,args){
       throw Error('Usage: dairn skills catalog | skills list | skills add <name> [--apply]');
     }
     return doctor(h,checkedRoot(h,root,false));
-  }catch(e){h.error('Dairn ERROR: '+(e?.message||e));return 2;}
+  }catch(e){
+    if(e&&e.exitCode===4){h.error(String(e.message||e));return 4;}
+    h.error('Dairn ERROR: '+(e?.message||e));return 2;
+  }
 }
 export {doctor};

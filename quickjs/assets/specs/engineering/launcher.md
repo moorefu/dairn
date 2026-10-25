@@ -108,6 +108,7 @@ vendored 模式：
 5. **从旧版本升级**：老项目运行 `dairn upgrade --plan`，计划中会出现退役的受管 `.dairn/bin/dairn`、`.dairn/bin/dairn.cmd`（状态 `remove`）以及新建的项目根启动器；`--apply` 删除退役文件、写入根启动器、把 `launcher.json` 的路径迁移为 `dairn` / `dairn.cmd`，并在 `DAIRN_RUNTIME_DIR` 载荷版本匹配时复制运行时、刷新 vendored 配置。维护者必须审阅 Git diff 后再提交。
 6. **版本不一致**：项目已 vendored 旧版本运行时、而执行的 CLI 是更新版本时，`upgrade --apply` 会被拒绝并提示先替换 `.dairn/runtime` 再带 `--vendor-runtime` 注册，避免启动器与新 lock 版本不一致。
 7. **`dairn doctor` 复核**：两个根启动器文件存在、`launcher.json` 合法且路径等于受管路径；vendored 模式下还校验运行时与完整性文件存在、JSON 合法、清单摘要与配置摘要一致、实际二进制摘要与记录一致。任一项失败即报告问题并以 unready 退出（退出码 1）。
+8. **`dairn doctor` 的 Runtime Lock 诊断**：运行时版本或摘要与项目 lock 不一致时，`doctor` 不阻断自身，而是输出 `status=drift` 与 `runtime_lock`（`dairn.runtime-lock.v1`：`drift[]` 的 `code/expected/actual`、`next_actions`），以退出码 4 报告漂移。ADVISORY 命令（`version`、`help`、`docs find`、`handoff` 等）在漂移下仍可只读执行；GATE 命令（`validate`、`check`、`analyze plan` 等）保持 fail closed，同样退出码 4 且错误为单行、不含内部堆栈。诊断与计划均不得写入 lock，`upgrade --apply` 仍需人工审阅。
 
 `doctor` 同时探测 Git 与已声明技术栈的工具。Python 项目优先探测检查 argv 中实际配置的 Python 解释器；工具无法启动、退出码非零或探测超时都加入 `problems`。未显式设置 `TMPDIR` 且系统临时目录无法创建捕获文件时，已初始化项目自动回退到 `.dairn/tmp/`，拒绝符号链接或越界路径。显式 `TMPDIR` 不可用时直接失败；所有候选目录都失败时，错误给出路径和 `TMPDIR/TEMP` 提示，不得把探测失败当作环境就绪。
 
@@ -141,6 +142,7 @@ vendored 模式：
 | Windows 弹窗或退出码 `0xC0000142` | 子进程初始化失败，不等于工具未安装；核对进程权限、DLL 和执行环境。Windows 宿主通过 QuickJS Worker 同时排空 stdout/stderr 管道，避免 Cosmopolitan 文件句柄重定向问题；初始化失败仍以非零退出，不反复重试 |
 | Windows 下嵌套 APE 输出为空或退出码 `0xC0000005` | Cosmopolitan 用 `_COSMO_FDS_V2` 传递 fd 表；原生工具（Python/Node 等）再启动 APE 孙进程时该变量指向未继承句柄。在会派生 APE 的原生检查入口清除 `_COSMO_FDS_V2`/`_COSMO_FDS` 后再启动子进程；不要重试或把空日志当作通过 |
 | `Runtime assets differ from project lock` | 当前 CLI 内嵌资产与项目 lock 不一致；用已验证的对应运行时执行 `upgrade --plan`，审阅后 `upgrade --apply`。vendored 项目还须同步对应运行时并带 `--vendor-runtime .dairn/runtime`，不要手改 lock 摘要 |
+| `Runtime Lock drift: …` / 退出码 4 | 运行时不匹配项目 lock 时的可诊断失败：先跑 `dairn doctor --json` 查看 `runtime_lock.drift`（`code/expected/actual`）与 `next_actions`；只读诊断不写 lock，需人工审阅后执行 `upgrade --plan`/`upgrade --apply`；`validate`/`check` 等 GATE 不会因诊断能力放行 |
 | 运行时版本与执行的 Dairn 版本不一致 | 改用与当前 Dairn 版本匹配的官方发行版重新注册，不要手动改 `version` 字段 |
 | 离线 / 无网络环境 | 从离线发行包获取运行时与完整性清单；启动器不会联网补齐 |
 | Hook 脚本找不到命令 | 用 `dairn hooks install --launcher <绝对路径>` 重新生成 Hook |
