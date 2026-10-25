@@ -87,7 +87,7 @@ flowchart TD
 | **Capability-Aware Agent / Skill Participation** | **[Current · MVP]** | `capability plan`：确定性推导需要哪些专业能力与缺口，只给建议、从不启动模型；触发面扩展与成本预算为 [Planned] |
 | **Context Intelligence（Phase 1）** | **[Current · MVP]** | `context`：任务感知上下文包（路径/符号/Spec/测试/变更关系 + 精度与来源），未知项显式 `UNKNOWN` |
 
-> **测试与部署状态**：基线前一提交 `61d1db7` 的提交说明报告“容器 141 项回归通过，原生五组测试退出码 0”；基线提交 `0e62a11` 本身是 CI Windows 环境中 Git 2.56 升级引发的集成回归修复，未附带新的容器回归记录。以上均为提交作者的测试记录，**不是本文的独立复测结论**。本仓库当前 `main` 仍未开启分支保护，Rulesets 为空；提交 CI 模板、Signer/Publisher 代码本身不构成已经上线的受保护证据链。
+> **测试与部署状态**：基线前一提交 `61d1db7` 的提交说明报告“容器 141 项回归通过，原生五组测试退出码 0”；基线提交 `0e62a11` 本身是 CI Windows 环境中 Git 2.56 升级引发的集成回归修复，未附带新的容器回归记录。以上均为提交作者的测试记录，**不是本文的独立复测结论**。“main 未保护、Rulesets 为空”属于上述历史基线，不能代表当前平台状态。分支保护、Rulesets 和必需检查应按验收时的 GitHub 平台配置与当前提交的 Actions 结果核对，入口见 [受保护发布验收清单](PROTECTED_RELEASE_ACCEPTANCE.md)。提交 CI 模板、Signer/Publisher 代码本身不构成已经上线的受保护证据链。
 
 ## 5. 风险、治理深度与交互模式
 

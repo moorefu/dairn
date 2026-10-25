@@ -28,7 +28,7 @@ GOVERNANCE_SPEC_SHA = '75b2360a9d0ad208927cce68e2a217cda2a3662609d701b4e97782348
 CLAUDE_SHA = 'ccc1cc398135b0088923e576f40a3ad6bf0f8b3c7ce9a8be13b90fb4f7c7b55c'
 ROOT_GITATTRIBUTES_SHA = '445484c73a4566b7f91a0530c782cb2c710b95bfcf7373c4a06d46b49e586362'
 DAIRN_GITATTRIBUTES_SHA = 'f414e9951ccce8606c6d92cf9220e3a5a38af0c5d461f4ebd271704db15b0fa4'
-POSIX_LAUNCHER_SHA = '52bcd4db3c6bf0a697412ad34fd9bd892487260cb799340832a9bb3f327e2f7c'
+POSIX_LAUNCHER_SHA = 'ac8e9110ccbd6984eedf0ae2a2e14c821b33e2350165f233dba912b1c75267ee'
 WINDOWS_LAUNCHER_SHA = '23eba37f99b09dd6661a85b469780acebe8af8eaaae73481c1b4d4cea4e20ee9'
 ANALYZERS_JSON_SHA = '99c90041e112a712d4e5bad2a5924475fa8f53b945198ffeb6fe0fc5e63ae03b'
 GITIGNORE_SHA = '6f9b8820fe40a72759628fb19d763618476167bb10581036d7d7b275f24a7632'
@@ -75,7 +75,8 @@ def _run_init(project, args):
                DAIRN_RUNTIME_SOURCE='external',
                PYTHONDONTWRITEBYTECODE='1')
     result = subprocess.run(
-        [str(RUNTIME), '/zip/quickjs/main.mjs', 'init', '--name', 'parity_demo', '--apply'] + args,
+        [str(ROOT / ('dairn.cmd' if os.name == 'nt' else 'dairn')),
+         'init', '--name', 'parity_demo', '--apply'] + args,
         cwd=project, env=env, capture_output=True, text=True, encoding='utf-8', errors='replace',
         timeout=180)
     if result.returncode != 0:

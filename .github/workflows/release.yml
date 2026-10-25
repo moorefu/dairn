@@ -154,7 +154,9 @@ jobs:
         if: always()
         with:
           name: validation-ci
-          path: validation/ci/
+          path: |
+            validation/ci/
+            validation/source-checks/
           if-no-files-found: error
 
   test-python-windows:
@@ -205,7 +207,9 @@ jobs:
         if: always()
         with:
           name: validation-windows-integration
-          path: validation/windows/
+          path: |
+            validation/windows/
+            validation/source-checks/
           if-no-files-found: error
 
   accepted:

@@ -7,9 +7,13 @@ DAIRN_RUNTIME 显式交给构建/验证流程。启动器同时导出 DAIRN_RUNT
 本测试不假设调用者先构建过 runtime/：需要真实 APE 的分支会从 ROOT/runtime 复制。
 """
 import os
+import concurrent.futures
 from pathlib import Path
 import shutil
 import subprocess
+import signal
+import shlex
+import sys
 import tempfile
 import unittest
 
@@ -28,7 +32,7 @@ def run(argv, env=None, cwd=None):
 
 class RootLauncher(unittest.TestCase):
     def setUp(self):
-        self.temp = Path(tempfile.mkdtemp(prefix='dairn-root-launcher-'))
+        self.temp = Path(tempfile.mkdtemp(prefix='dairn-root-launcher-')).resolve()
         self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
 
     def _copy_launcher(self):
@@ -142,6 +146,95 @@ class RootLauncher(unittest.TestCase):
         result = run(cmd, env={'DAIRN_RUNTIME': 'missing/dairn-embedded.com'})
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn('DAIRN_RUNTIME', result.stderr)
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX APE 加载器自修改回归')
+    def test_runtime_self_modification_is_isolated_and_copies_are_cleaned(self):
+        launcher = self._copy_launcher()
+        scratch = self.temp / '临时 目录'
+        scratch.mkdir()
+        for external in (False, True):
+            with self.subTest(external=external):
+                runtime = self._vendored() if not external else self.temp / 'external.com'
+                runtime.write_text('#!/bin/sh\nprintf "# changed\\n" >> "$0"\n'
+                                   'printf "%s\\n" "$0" "$DAIRN_RUNTIME_DIR" "$PWD" "$@"\n'
+                                   'echo runtime-error >&2\nexit 37\n', encoding='utf-8')
+                runtime.chmod(0o444)
+                original = runtime.read_bytes()
+                env = {'TMPDIR': str(scratch)}
+                if external:
+                    env['DAIRN_RUNTIME'] = str(runtime)
+                def invoke(_):
+                    return run(['/bin/sh', str(launcher), '含 空格', '*', ''], env=env, cwd=self.temp)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+                    results = list(pool.map(invoke, range(3)))
+                paths = []
+                for result in results:
+                    self.assertEqual(result.returncode, 37, result.stderr)
+                    lines = result.stdout.splitlines()
+                    paths.append(lines[0])
+                    self.assertNotEqual(Path(lines[0]), runtime)
+                    self.assertEqual(lines[1:], [str(runtime.parent), str(self.temp),
+                                              '/zip/quickjs/main.mjs', '含 空格', '*', ''])
+                    self.assertEqual(result.stderr, 'runtime-error\n')
+                self.assertEqual(len(set(paths)), 3)
+                self.assertEqual(runtime.read_bytes(), original)
+                self.assertEqual(runtime.stat().st_mode & 0o777, 0o444)
+                self.assertEqual(list(scratch.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX 临时副本创建失败')
+    def test_unusable_tmpdir_fails_without_executing_original(self):
+        launcher = self._copy_launcher()
+        runtime = self._vendored()
+        runtime.write_text('#!/bin/sh\necho EXECUTED\n', encoding='utf-8')
+        result = run(['/bin/sh', str(launcher), 'version'],
+                     env={'TMPDIR': str(self.temp / 'missing')})
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertNotIn('EXECUTED', result.stdout)
+        self.assertIn('runtime copy', result.stderr)
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX 输入与终止信号')
+    def test_stdin_and_termination_clean_up_private_copy(self):
+        launcher = self._copy_launcher()
+        runtime = self._vendored()
+        scratch = self.temp / 'scratch'
+        scratch.mkdir()
+        runtime.write_text('#!/bin/sh\nread -r value\nprintf "%s\\n" "$value"\n')
+        env = {**os.environ, 'TMPDIR': str(scratch)}
+        env.pop('DAIRN_RUNTIME', None)
+        result = subprocess.run(['/bin/sh', str(launcher)], input='input with spaces\n',
+                                capture_output=True, text=True, env=env, timeout=10)
+        self.assertEqual((result.returncode, result.stdout), (0, 'input with spaces\n'))
+        for sig, code in ((signal.SIGINT, 130), (signal.SIGTERM, 143), (signal.SIGHUP, 129)):
+            with self.subTest(signal=sig):
+                program = "import time; print('ready',flush=True); time.sleep(60)"
+                runtime.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) +
+                                   ' -c ' + shlex.quote(program) + '\n')
+                process = subprocess.Popen(['/bin/sh', str(launcher)], stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE, text=True, env=env)
+                try:
+                    self.assertEqual(process.stdout.readline().strip(), 'ready')
+                    process.send_signal(sig)
+                    process.communicate(timeout=5)
+                    self.assertEqual(process.returncode, code)
+                    self.assertEqual(list(scratch.iterdir()), [])
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate(timeout=5)
+
+    @unittest.skipUnless(os.name == 'posix' and APE.is_file(), '需要真实 APE')
+    def test_real_ape_preserves_original_bytes_and_mode(self):
+        launcher = self._copy_launcher()
+        runtime = self._vendored()
+        shutil.copyfile(APE, runtime)
+        runtime.chmod(0o444)
+        original = runtime.read_bytes()
+        for _ in range(2):
+            result = run(['/bin/sh', str(launcher), 'version'])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('Dairn', result.stdout)
+            self.assertEqual(runtime.read_bytes(), original)
+            self.assertEqual(runtime.stat().st_mode & 0o777, 0o444)
 
     def test_missing_runtime_is_clear(self):
         launcher = self._copy_launcher()

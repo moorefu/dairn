@@ -61,6 +61,16 @@ export function runtimeIdentity(h){
 }
 const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--analyzer','--suite','--artifact','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars','--window','--file','--capability','--for','--limit','--section','--lines'];
 const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--discover':'discover','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--refresh':'refresh','--change':'change','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
+// Suite 与 Fitness 共用模式分派，导入错误保留来源并提供 UNKNOWN 所需的缺失观测。
+function runAnalysisTarget(h,root,def,base){
+  if((def.mode||'execute')!=='import')return executeAnalyzer(h,root,def.id,{base});
+  try{return importAnalysisReport(h,root,def.id);}
+  catch(e){return {schema:'dairn.analysis-run.v1',
+    run_id:'analysis-import-'+h.now()+'-'+Math.random().toString(16).slice(2,8),
+    analyzer_id:def.id,domain:def.domain,status:'report-error',
+    source:'local-import',assurance:'unverified-import',error:String(e&&e.message||e).slice(0,300),
+    note:'unverified import is never ci-verified and never a gate verdict'};}
+}
 function argsParse(args){
   const out={cmd:args[0]||'help',pos:[],root:'.',stack:'auto',ci:'none',timeout:120};
   for(let i=1;i<args.length;i++){
@@ -1086,7 +1096,7 @@ export function dispatch(h,args){
       for(const id of producers){
         const def=registry.analyzers.find(x=>x.id===id);
         if(!def){runs.push({analyzer_id:id,status:'not-run',error:'producer not configured'});continue;}
-        runs.push((def.mode||'execute')==='import'?importAnalysisReport(h,rr,id,{artifact:null}):executeAnalyzer(h,rr,id,{base:o.base||null}));
+        runs.push(runAnalysisTarget(h,rr,def,o.base||null));
       }
       const observations=runs.map(r=>r.observation).filter(x=>x&&x.schema==='dairn.quality-observation.v1');
       const verdict=evaluateFitness(goalsDoc,observations);
@@ -1166,7 +1176,7 @@ export function dispatch(h,args){
         targets=[def];
       }
       // 串行执行（默认只读，避免未声明写入冲突）；失败记录为对应 status，不中断其他 analyzer。
-      const runs=targets.map(def=>executeAnalyzer(h,rr,def.id,{base:o.base||null}));
+      const runs=targets.map(def=>runAnalysisTarget(h,rr,def,o.base||null));
       const summary={schema:1,command:'analyze run',analyzer_count:runs.length,
         completed:runs.filter(x=>x.status==='completed').length,
         statuses:runs.map(x=>({analyzer_id:x.analyzer_id,status:x.status}))};

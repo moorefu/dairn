@@ -28,6 +28,31 @@ else
   DAIRN_RUNTIME_SOURCE=vendored; export DAIRN_RUNTIME_SOURCE
 fi
 DAIRN_RUNTIME_DIR=${DAIRN_RUNTIME_FILE%/*}; export DAIRN_RUNTIME_DIR
-# The APE sh loader also needs the executable bit; restoring it is harmless.
-if [ ! -x "$DAIRN_RUNTIME_FILE" ]; then chmod u+x "$DAIRN_RUNTIME_FILE" 2>/dev/null || true; fi
-exec /bin/sh "$DAIRN_RUNTIME_FILE" /zip/quickjs/main.mjs "$@"
+# APE may rewrite its own header. Execute a private copy; never chmod the payload.
+DAIRN_EXEC_DIR=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/dairn-runtime.XXXXXXXXXX") || {
+  echo "dairn: cannot create runtime copy directory" >&2
+  exit 2
+}
+trap '/bin/rm -f -- "$DAIRN_EXEC_DIR/dairn-embedded.com"; /bin/rmdir -- "$DAIRN_EXEC_DIR"' 0
+if ! /bin/cp -- "$DAIRN_RUNTIME_FILE" "$DAIRN_EXEC_DIR/dairn-embedded.com" ||
+   ! /bin/chmod u+wx "$DAIRN_EXEC_DIR/dairn-embedded.com"; then
+  echo "dairn: cannot prepare runtime copy" >&2
+  exit 2
+fi
+# Retain stdin and forward termination while the parent owns copy cleanup.
+dairn_terminate() {
+  trap '' HUP INT TERM
+  # POSIX background children inherit ignored INT. Use TERM for cancellation,
+  # while preserving the launcher's conventional interrupt exit status (130).
+  kill -s "$1" "$DAIRN_CHILD" 2>/dev/null || true
+  wait "$DAIRN_CHILD" 2>/dev/null || true
+  exit "$2"
+}
+trap 'dairn_terminate HUP 129' HUP
+trap 'dairn_terminate TERM 130' INT
+trap 'dairn_terminate TERM 143' TERM
+/bin/sh "$DAIRN_EXEC_DIR/dairn-embedded.com" /zip/quickjs/main.mjs "$@" <&0 &
+DAIRN_CHILD=$!
+DAIRN_EXIT=0
+wait "$DAIRN_CHILD" || DAIRN_EXIT=$?
+exit "$DAIRN_EXIT"

@@ -5,13 +5,14 @@ quality fitness and participation plans. Official CLI, real subprocesses.
 advisory 机器观察，任何一层都不得自宣 CI 受信或 Gate 放行（负向断言覆盖）。
 """
 import json
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CLI = ROOT / 'dairn'
+CLI = ROOT / ('dairn.cmd' if os.name == 'nt' else 'dairn')
 
 SARIF = {
     "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
@@ -53,7 +54,7 @@ class AnalyzeQualityCapability(unittest.TestCase):
         cmd = [str(CLI), *[str(a) for a in args]]
         if root:
             cmd += ['--root', str(self.root)]
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        p = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=120)
         if ok:
             self.assertEqual(p.returncode, 0, p.stdout + '\n' + p.stderr)
         return p
@@ -114,6 +115,43 @@ class AnalyzeQualityCapability(unittest.TestCase):
         self.assertIn(out['runs'][0]['status'], ('tool-error', 'report-error', 'invalidated'))
 
     # ---- A-03: adapters + import ----
+    def test_import_doctor_and_mixed_suite_dispatch(self):
+        base = self.commit()
+        self.run_dairn('analyzers', 'init', '--template', 'python', '--id', 'py-api', '--apply')
+        (self.root / 'tests.xml').write_text(JUNIT)
+        doc = json.loads((self.root / '.dairn/analyzers.json').read_text())
+        doc['analyzers'].append({'id': 'ci-junit', 'domain': 'test', 'mode': 'import',
+                                 'report': {'path': 'tests.xml', 'format': 'junit-xml'}})
+        doc['suites'] = [{'id': 'mixed', 'analyzers': ['ci-junit', 'py-api']}]
+        self.registry(doc)
+        doctor = self.obj('analyzers', 'doctor')
+        imported = next(x for x in doctor['configured'] if x['id'] == 'ci-junit')
+        self.assertIsNone(imported['argv'])
+        self.assertIsNone(imported['cwd'])
+        out = self.obj('analyze', 'run', '--suite', 'mixed', '--base', base, '--json')
+        self.assertEqual(out['summary']['completed'], 2)
+        self.assertEqual(out['runs'][0]['assurance'], 'unverified-import')
+        (self.root / 'tests.xml').write_text('<broken>')
+        failed = self.run_dairn('analyze', 'run', '--suite', 'mixed', '--base', base, '--json', ok=False)
+        self.assertEqual(failed.returncode, 2)
+        runs = json.loads(failed.stdout)['runs']
+        self.assertEqual([r['status'] for r in runs], ['report-error', 'completed'])
+        self.assertEqual(runs[0]['assurance'], 'unverified-import')
+
+    def test_contradictory_junit_fitness_is_unknown(self):
+        (self.root / 'tests.xml').write_text(JUNIT.replace('failures="1"', 'failures="0"'))
+        self.registry({'schema': 'dairn.analyzers.v1', 'analyzers': [
+            {'id': 'ci-junit', 'domain': 'test', 'mode': 'import',
+             'report': {'path': 'tests.xml', 'format': 'junit-xml'}}]})
+        goal = {'schema': 'dairn.quality-goals.v1', 'objectives': [
+            {'id': 'no-failures', 'attribute': 'reliability', 'type': 'regression',
+             'metric': 'tests.failed', 'operator': '<=', 'threshold': 0,
+             'producer': 'ci-junit', 'enforcement': 'required'}]}
+        (self.root / '.dairn/governance/quality-goals.json').write_text(json.dumps(goal))
+        result = self.run_dairn('quality', 'fitness', '--json', ok=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)['results'][0]['status'], 'UNKNOWN')
+
     def test_import_sarif_and_junit(self):
         (self.root / 'reports').mkdir()
         (self.root / 'reports/security.sarif').write_text(json.dumps(SARIF))

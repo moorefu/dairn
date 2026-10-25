@@ -10,6 +10,7 @@ import sys
 import tempfile
 
 from release_config import build_instant, format_instant
+from check_catalog import NATIVE_UNIT, PYTHON_INTEGRATION, coverage, required_ids
 
 # Windows 上 Cosmopolitan 用 _COSMO_FDS_V2 向子进程传递 fd 表；原生工具
 # （Python/Node 等）再启动 APE 孙进程时，该变量指向未经继承的句柄，表现为
@@ -51,22 +52,13 @@ def main():
         commands = [[str(CLI), 'docs', 'check'],
                     PYTHON + ['-m', 'unittest', 'quickjs.tests.test_assets_lint', '-v']]
     elif args.stage == 'unit':
-        commands = [native + [str(ROOT / 'quickjs/tests' / name)] for name in
-                    ('test_core.mjs', 'test_native.mjs', 'test_governance_native.mjs',
-                     'test_handoff_native.mjs', 'test_gov_native.mjs',
-                     'test_analysis_plan_native.mjs', 'test_launcher_native.mjs')]
+        commands = [native + [str(ROOT / 'quickjs/tests' / name)] for name in NATIVE_UNIT]
         commands += [PYTHON + ['-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_*.py', '-v']]
     elif args.stage == 'integration':
         # 各模块互不依赖、各自在独立临时目录里启动 CLI 子进程，可以并行执行；
         # 串行时这一阶段约 340s，耗时集中在 Python 模块上，拆分后由最慢者决定。
         commands = [native + [str(ROOT / 'quickjs/tests/test_host_native.mjs')]]
-        commands += [PYTHON + ['-m', 'unittest', module, '-v'] for module in
-                     ('quickjs.tests.test_integration_light',
-                      'quickjs.tests.test_doctor',
-                      'quickjs.tests.test_context_command',
-                      'quickjs.tests.test_runtime_lock_diagnostic',
-                      'quickjs.tests.test_docs_retrieval',
-                      'quickjs.tests.test_root_launcher')]
+        commands += [PYTHON + ['-m', 'unittest', module, '-v'] for module in PYTHON_INTEGRATION]
     else:
         npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
         if not npm:
@@ -90,6 +82,13 @@ def main():
         command_temp = temp / (args.stage + '-' + str(index))
         command_temp.mkdir(parents=True, exist_ok=True)
         command_env.update(TMPDIR=str(command_temp), TEMP=str(command_temp), TMP=str(command_temp))
+        # 原生测试也只执行私有副本；构建产物可为 0644，APE 不得改写它。
+        native_copy = command_temp / 'dairn-embedded.com'
+        shutil.copyfile(runtime, native_copy)
+        shutil.copyfile(runtime.parent / 'runtime-integrity.json', command_temp / 'runtime-integrity.json')
+        native_copy.chmod(0o700)
+        command_env['DAIRN_QJS_BIN'] = str(native_copy)
+        command = [str(native_copy) if part == str(runtime) else part for part in command]
         if args.stage == 'integration':
             evidence = OUT / 'integration' / str(index)
             evidence.mkdir(parents=True, exist_ok=True)
@@ -102,7 +101,8 @@ def main():
             error = None
         except (OSError, subprocess.TimeoutExpired) as exc:
             code, error = 1, str(exc)
-        return {'argv': command, 'exit_code': code, 'log': str(log.relative_to(ROOT)), 'error': error}
+        return {'check_id': required_ids(args.stage)[index - 1],
+                'argv': command, 'exit_code': code, 'log': str(log.relative_to(ROOT)), 'error': error}
 
     if args.stage == 'integration':
         # 集成阶段并行执行；thread pool 只负责等待子进程，真正的负载在子进程里。
@@ -122,11 +122,12 @@ def main():
             if item['exit_code']:
                 print(item['error'] or (ROOT / item['log']).read_text(encoding='utf-8', errors='replace')[-6000:], flush=True)
                 break
-    passed = len(results) == len(commands) and all(item['exit_code'] == 0 for item in results)
+    check_coverage = coverage(args.stage, results)
+    passed = check_coverage['complete']
     (OUT / (args.stage + '.json')).write_text(json.dumps(
         {'schema': 1, 'stage': args.stage, 'passed': passed,
          'artifact_dir': str(artifact_dir.relative_to(ROOT)) if artifact_dir else None,
-         'results': results},
+         'coverage': check_coverage, 'results': results},
         ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     return 0 if passed else 1
 

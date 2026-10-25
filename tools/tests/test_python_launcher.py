@@ -110,11 +110,11 @@ class PythonLauncherTest(unittest.TestCase):
         self.assertEqual(cli.stdout, launcher.stdout)
 
     @unittest.skipUnless(POSIX, 'POSIX 共用启动器语义')
-    def test_posix_launcher_restores_executable_bit(self):
+    def test_posix_launcher_preserves_original_permissions(self):
         os.chmod(self.runtime, 0o644)
         result = self.run_cli('--version')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(os.stat(self.runtime).st_mode & 0o111)
+        self.assertEqual(os.stat(self.runtime).st_mode & 0o777, 0o644)
 
     @unittest.skipUnless(POSIX, 'POSIX 共用启动器语义')
     def test_posix_symlink_runtime_rejected(self):
