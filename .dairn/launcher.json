@@ -6,8 +6,8 @@
   "runtime": {
     "path": ".dairn/runtime/dairn-embedded.com",
     "integrity": ".dairn/runtime/runtime-integrity.json",
-    "version": "0.1.0-nightly.20261026010634",
-    "sha256": "1175ae0154497cbd8ae3925030a15c593b17e198e96eb3e7577471b0e6db57e1"
+    "version": "0.1.0-nightly.20261026012141",
+    "sha256": "252548bd67902da401db0b05e3c7aa29aaecb8d644ee4e1dcca5311a1dab2a41"
   },
-  "generated_by": "0.1.0-nightly.20261026010634"
+  "generated_by": "0.1.0-nightly.20261026012141"
 }

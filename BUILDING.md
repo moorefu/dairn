@@ -63,7 +63,7 @@ Windows 相关实现约束：
 - **临时目录**：系统 Temp 无法创建捕获文件时，已初始化项目自动回退 `.dairn/tmp/`。显式设置的 `TMPDIR` 失败仍报错；自动回退拒绝符号链接和越界路径，不修改全局环境。
 - **嵌套 APE**：Windows 上 Cosmopolitan 通过 `_COSMO_FDS_V2` 把父进程 fd 表传入子进程。原生工具（Python/Node 等）再启动 APE 孙进程时，该变量指向未继承的句柄，表现为 stdout 丢失或退出码 `0xC0000005`。`tools/check-source.py` 在 Windows 启动时清除该变量，使源码门禁内的嵌套 APE 正常工作；若项目自有检查也会在原生工具内再次调用 Dairn/APE，应在入口处做同样清理，而不是把空日志当成检查通过。
 - **二进制摘要**：vendored 运行时 SHA256 使用 `host.readBytes` + 内建 `sha256Bytes`，不依赖 `certutil`（其输出在部分 Windows 版本/重定向下不可捕获）；外部工具仅作回退。
-- **事务所有者存活**：Windows 使用系统 Windows PowerShell 的 .NET 进程查询，只在明确确认所有者已退出后允许恢复。固定 Cosmopolitan 版本的 `kill(pid, 0)` 不适合只读探测；PowerShell 不可用、查询失败或权限不足时返回未知并拒绝夺锁。POSIX 继续使用零信号探测。
+- **事务所有者存活**：Windows 使用系统 Windows PowerShell 的 .NET 进程查询，只在明确确认所有者已退出后允许恢复。查询前统一 `SYSTEMROOT` 的 `C:/...` 与 Cosmopolitan `/C/...` 盘符路径。固定 Cosmopolitan 版本的 `kill(pid, 0)` 不适合只读探测；PowerShell 不可用、查询失败或权限不足时输出底层诊断、返回未知并拒绝夺锁。POSIX 继续使用零信号探测。
 - **fresh clone**：`.dairn/cache/`、`.dairn/tmp/` 被忽略；空的 `operations/*` 目录不会被 Git 记录，校验按“暂无记录”处理；`dairn validate` / `dairn doctor` 在 fresh clone 中应通过。
 
 ## 获取 QuickJS

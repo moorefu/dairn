@@ -121,3 +121,7 @@ Linux 完整套件发现 `test_policy_change_invalidates_machine_evidence` 的�
 本地定向 16 项通过；隔离 ZIP 上单元与集成阶段均退出 0，工具单测 109 项通过。日志为 `focused-green.log`、`candidate-recheck.log`。最终构建再通过原生宿主、集成组件、存活查询回归与资产检查，日志 `candidate-v2-probes.log`。一次错误验证入口直接使用无执行位的构建输出，产生的失败保留在 `incorrect-entry/` 与 `candidate-verify.log`，不计为通过。
 
 项目 Pin 已显式提升到 `0.1.0-nightly.20261026010634`，APE SHA256 为 `1175ae0154497cbd8ae3925030a15c593b17e198e96eb3e7577471b0e6db57e1`，设计身份为 `34faccc970254701fb08e457dabb00c723c3cdc27a67719da4acd385030ea63a`。事务 `mvo2zzdv-atn3zun7` 已应用、可回滚、无受管资产迁移；Launcher 配置与 Lock 同步更新。提升后根启动器的 `version`、`doctor`、`validate`、`docs check` 均退出 0，证据 `pin-checks.log`。本节相对日志路径均位于 `validation/ci-failures-15258fc/`，不代表平台批准或签名。
+
+随后提交 `6ec0800` 的本地四项门禁全部通过，真实 Run 为 `run-mvo38t7m-8rvdwsu7f6`，`work verify --require-machine-gates` 退出 0；但 Windows 实跑仍因存活查询返回未知而失败，原始制品保留在 `validation/ci-failures-6ec0800/`。补充底层诊断并在查询前规范化 `SYSTEMROOT` 后，提交 `8fd8a0f` 的 [Windows 完整套件](https://github.com/moorefu/dairn/actions/runs/40216075174/job/121237465218)通过；工具单测运行 109 项，其中既有 POSIX 专用条件跳过 8 项，失败 0。真实进程存活、退出、映射盘符、工具缺失以及全部事务恢复用例均通过。六平台制品冒烟也已通过；当时 Linux 专项仍在运行，最终状态以对应提交的 CI 汇总为准。
+
+最终 Pin 选用上述 CI 的同一构建制品，版本 `0.1.0-nightly.20261026012141`，APE SHA256 `252548bd67902da401db0b05e3c7aa29aaecb8d644ee4e1dcca5311a1dab2a41`，设计身份 `0e7250f3170e8f862d04a7cd93ade2f04aee63a614ebb50bb3777aa0c84bdc66`。外层制品摘要与 GitHub 记录一致，三类包均与 CI 校验清单一致；本机原生宿主、集成组件、存活查询与资产补验退出 0。提升事务 `mvo3rydn-m61v3zxa` 已应用、可回滚、无受管资产迁移；Launcher 与 Lock 同步更新。证据位于 `validation/ci-failures-8fd8a0f/`，包括 `unit-10.log`、`pin-candidate-probes.log` 与 `promotion-apply.json`。
