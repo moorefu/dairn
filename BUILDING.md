@@ -43,7 +43,7 @@ POSIX 首次启动 APE 需要 `uname`、`mkdir`、`dd`、`gzip`、`chmod`、`mv`
 
 `dairn init` / `dairn adopt` 会在目标项目根生成受管启动器 `dairn`、`dairn.cmd` 与保持行尾的 `.dairn/.gitattributes`，以及项目自有的 `.dairn/launcher.json`；模板来自嵌入运行时。它们的模板源码位置是 `quickjs/assets/templates/project/launcher/`，源码仓库根的两个文件由 `tools/render-launchers.mjs` 生成，生成副本纳入 lock 受管资源。项目启动器按“`DAIRN_RUNTIME` → 同目录 `.dairn/runtime/dairn-embedded.com` → 报错退出 2”解析，实际执行项目内 `.dairn/runtime/` 的 vendored 运行时。旧版本生成的 `.dairn/bin/dairn` / `.dairn/bin/dairn.cmd` 是退役受管文件，由 `dairn upgrade --apply` 迁移删除。这些文件只影响目标项目，不改变发布制品的字节；发布构建与 6 平台矩阵安装 npm/Wheel/ZIP 后仍使用包内运行时，并执行 `docs check`，不依赖目标项目的启动器。
 
-本仓库的 `runtime/` 是构建产物（`.gitignore` 中 `/runtime/`）：日常运行根启动器使用已提交的 `.dairn/runtime/` 快照，因此 fresh checkout 可以直接 `./dairn version`；只有修改内核/资产或需要刷新治理运行时 / 打包时才先 `python tools/build.py` 或 `npm run build`。发布工作流的 `test-python` job 不重新下载 QuickJS，而是从已构建的发布 ZIP 中提取 `<prefix>/.dairn/runtime/dairn-embedded.com` 与 `<prefix>/.dairn/runtime/runtime-integrity.json` 到仓库 `runtime/`，再以 `DAIRN_RUNTIME` 指向它运行 `tools/verify-linux.py`（完整 Python 套件 + native 测试，需要 Go/git/openssl/jq）；本地等价做法是先构建，再运行同一脚本。
+本仓库的 `runtime/` 是构建产物（`.gitignore` 中 `/runtime/`）：日常运行根启动器使用已提交的 `.dairn/runtime/` 快照，因此 fresh checkout 可以直接 `./dairn version`；只有修改内核/资产或需要刷新治理运行时 / 打包时才先 `python tools/build.py` 或 `npm run build`。发布工作流的 `test-python` job 不重新下载 QuickJS，而是从已构建的发布 ZIP 中提取 `<prefix>/.dairn/runtime/dairn-embedded.com` 与 `<prefix>/.dairn/runtime/runtime-integrity.json` 到仓库 `runtime/`，再以 `DAIRN_RUNTIME` 指向它运行 `tools/verify-linux.py`（共享源码门禁 + 额外 Python/Go 回归，需要 Go/git/openssl/jq）；本地等价做法是先构建，再运行同一脚本。
 
 ### Windows 实机验收
 
@@ -92,7 +92,7 @@ Linux 可在 `python:3.12-bookworm` 容器中执行该脚本。Windows Podman �
 
 除矩阵外还有两个集成回归 job，均被 `accepted` 汇总门禁：
 
-- **test-python**（`ubuntu-24.04`）：从发布 ZIP 提取运行时，运行 `tools/verify-linux.py` 的共享源码门禁与额外 Python/Go/native 回归；工作流清空 CI 平台变量，模拟本地开发者环境。
+- **test-python**（`ubuntu-24.04`）：从发布 ZIP 提取运行时，运行 `tools/verify-linux.py` 的共享源码门禁与额外 Python/Go 回归；工作流清空 CI 平台变量，模拟本地开发者环境。
 - **test-python-windows**（`windows-2025`）：与 Linux 套件同源复用 build job 的 `dairn-packages` artifact——从发布 ZIP 提取运行时，并把 wheel/npm 制品复制到 `dist/`（`verify-windows.py --artifacts incoming --skip-go`），不在 Windows 重新构建任何制品；不下载 QuickJS、不跑 `python tools/build.py`，也不安装 MinGW。脚本同样清空 CI 平台变量；覆盖 launcher/vendored runtime、npm/Wheel 安装与 fresh-clone 受管哈希；产物写入 `validation/windows` 并上传 artifact。
 
 Linux 与 Windows 验收均调用 `tools/check-source.py lint|unit|integration`，必需测试唯一目录位于 `tools/check_catalog.py`，覆盖 Analyze Plan Native、Context CLI、Runtime Diagnostic、Docs Retrieval 及报告适配器回归。`validation/source-checks/<阶段>.json` 保存必需/已执行 Check-ID 与覆盖结果，并随日志上传；任一必需项缺失、重复或失败即拒绝聚合成功。这些本地覆盖记录不构成受信 CI 签名。
@@ -144,6 +144,6 @@ python -B -X utf8 tools/verify-packages.py --smoke --artifacts dist --package np
 python -B -X utf8 tools/verify-podman.py --image localhost/dairn-validation:2026-10-22 --smoke --artifacts dist --package zip --out validation/smoke/linux-zip
 ```
 
-`--package` 可选 `npm`、`wheel`、`zip` 或默认的 `all`。`--smoke` 与 Actions 保持一致；不加此参数可在本地运行完整制品验收。`tools/verify-linux.py` 的 Go 回归仅供本地按需执行。本地镜像由 `tools/Containerfile.validation` 组合，运行验收时断网。日志与 JSON 结果保存在已忽略的 `validation/`。
+`--package` 可选 `npm`、`wheel`、`zip` 或默认的 `all`。`--smoke` 与 Actions 保持一致；不加此参数可在本地运行完整制品验收。`tools/verify-linux.py` 在 Linux CI 执行，本地也可按需运行。共享 lint/unit/integration 门禁统一执行 native 和基础 Python 测试，Linux 补充集合只执行其余 16 个 Python 模块（含真实 Go 检查），同一检查不重复执行。原生测试结果见 `validation/source-checks/unit-*.log` 与 `integration-1.log`，专项日志和汇总写入脚本指定的输出目录。本地镜像由 `tools/Containerfile.validation` 组合，运行验收时断网。日志与 JSON 结果保存在已忽略的 `validation/`。
 
 本地覆盖 Windows x64 和 Linux x64；macOS/ARM64 以 [moorefu/dairn 的 Actions](https://github.com/moorefu/dairn/actions) 对应提交结果为准。

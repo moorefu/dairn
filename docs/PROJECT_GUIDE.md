@@ -23,7 +23,7 @@ Dairn 是确定性的工程治理内核，不调用模型，不代替 GitHub 的
 
 必需测试目录统一维护在 `tools/check_catalog.py`，本地与 Linux/Windows CI 共用 `tools/check-source.py`。每阶段生成同目录下的 `<阶段>.json`，记录真实 argv、退出码、日志位置与必需/已执行 Check-ID 覆盖；缺项、重复或失败拒绝聚合成功；构建记录中的 `artifact_dir` 指向本轮独立制品目录，避免与旧制品混杂。它们是本地执行记录，不是签名门禁证据；完整 Dairn Run 由 `check` 生成。
 
-默认集成只需要 Python 3.10+、Git 和已构建的 QuickJS；完整本地门禁的构建阶段还需要 Node 18+ 和 npm。普通 Go 检查属于专项兼容性验收，按需运行 `tools/verify-windows.py`，或运行需要 Go、jq、OpenSSL 和 sha256sum 的 `tools/verify-linux.py`。Go race/CGO 不属于默认或 CI 验收。缺失本次所选检查的依赖直接失败，不自动安装。
+默认集成只需要 Python 3.10+、Git 和已构建的 QuickJS；完整本地门禁的构建阶段还需要 Node 18+ 和 npm。普通 Go 检查属于专项兼容性验收，按需运行 `tools/verify-windows.py`，或运行需要 Go、jq、OpenSSL 和 sha256sum 的 `tools/verify-linux.py`。Go race/CGO 不属于默认或 CI 验收。Linux 脚本先执行共享 lint/unit/integration 门禁，再执行未被共享门禁覆盖的 16 个 Python 模块；native、资产和基础集成测试不重复运行，任何共享门禁失败仍使 Linux 验收失败。缺失本次所选检查的依赖直接失败，不自动安装。
 
 ```powershell
 python tools/build.py                                    # 仅在验证新源码/刷新运行时前
