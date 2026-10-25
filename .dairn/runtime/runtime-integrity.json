@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "binary": "dairn-embedded.com",
-  "sha256": "f9f11720bfb1a3e9a5a4b936e3680dc32c886a3e755de10e07591491d88bbeaa",
+  "sha256": "90b769c60167fc53953ae33e90ae05dc49a5b097f6ad4fb9d8ef6a85a78484a3",
   "engine_version": "0.1.0-nightly.20261024123943",
   "quickjs": {
     "version": "2026-06-04",

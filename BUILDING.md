@@ -33,7 +33,7 @@ python tools/checksums.py      # 校验发布目录仅有三类制品并写入�
 
 两种入口支持 `--out`。PEP 517 可用 `python -m build --wheel` 或 `python -m pip wheel --no-deps .`。根目录直接 `npm pack` 会通过 `prepack` 生成 `runtime/`（这条本地路径按 `package.json` 的版本构建）；正式 npm 包没有安装脚本。
 
-在仓库中，Windows 执行 `build.cmd`，POSIX 执行 `sh build.sh`，先获取现成 QuickJS，再由它生成运行 ZIP。三种入口共用下载锁和缓存，重复构建字节一致；每次把当前 JS/资源嵌入新 APE，并更新 `runtime/`。ZIP 解压即可运行，不携带源码或构建脚本；源码自举需使用仓库。Python/npm 使用内部暂存区构建。
+在仓库中，`python tools/build.py`（Python 3.10+）与 `npm run build`（Node 18+）都会先获取现成 QuickJS，再由它把当前 JS/资源嵌入新 APE 并更新 `runtime/`。各入口共用下载锁和缓存，重复构建字节一致；ZIP 解压即可运行，不携带源码或构建脚本；源码自举需使用仓库。Python/npm 使用内部暂存区构建。
 
 根目录的 `dairn`、`dairn.cmd` 是唯一启动器来源，由 `tools/render-launchers.mjs` 从 `quickjs/core/launcher-scripts.mjs` 生成；ZIP、npm/Wheel 与 `dairn init`/`dairn adopt` 生成的项目启动器都与它们同源。源码仓库中，根启动器执行 `.dairn/runtime/` 的治理运行时快照（日常命令不需要先构建）；仓库根 `runtime/` 只是构建/打包/显式验证的产物，使用时必须用 `DAIRN_RUNTIME` 显式指定。启动器按“显式 `DAIRN_RUNTIME` → 同目录 `.dairn/runtime/dairn-embedded.com` → 报错并以 2 退出”的顺序解析运行时，不隐式回退到 `runtime/`、不联网下载。npm 与 Wheel 原样收录启动器与包内运行时，安装适配层把 `DAIRN_RUNTIME_DIR` 指向包内运行时；在 POSIX 调用启动器，在 Windows 直接执行包内 APE，参数、工作目录和退出码透传。发布制品在 POSIX 构建时保留运行时的执行位；若安装或复制后丢失该位，POSIX 启动器只补执行位、不改写文件内容，因为 APE 的 sh 加载器用 `command -v "$0"` 定位自身，而 bash（macOS 的 `/bin/sh`）对不可执行路径会返回失败。旧根启动器的 `DAIRN_FAST_RUNTIME` / `DAIRN_CACHE_HOME` 快速缓存已随之移除，当前启动器没有缓存或转换开关。Python 不再单独复制或转换运行时。
 

@@ -20,7 +20,7 @@ try {
   if(!/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:alpha|beta|rc)\.(?:0|[1-9][0-9]*)|nightly\.[1-9][0-9]{13}))?$/.test(version))throw Error('发布版本格式无效：'+version);
   const absolute=p=>/^(?:[A-Za-z]:[\\/]|\/)/.test(p)?p:host.cwd()+'/'+p;
   const out=absolute(options.out||root+'/dist');host.mkdirs(out);
-  if(!options.qjs)throw Error('缺少 --qjs，请通过 build.cmd、build.sh、Python 或 npm 入口获取 QuickJS');
+  if(!options.qjs)throw Error('缺少 --qjs，请通过 python tools/build.py 或 npm run build 获取 QuickJS');
   const quickjs=JSON.parse(host.read(root+'/quickjs.lock.json'));
   const input=readBytes(absolute(options.qjs));
   if(sha256Bytes(input)!==quickjs.binary_sha256)throw Error('QuickJS SHA256 与下载锁不一致');

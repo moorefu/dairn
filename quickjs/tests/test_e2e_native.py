@@ -137,7 +137,7 @@ class PreviewCases(unittest.TestCase):
         critical=('ci/protected/build-protected.sh','ci/templates/github-protected.yml','tools/bootstrap.sh',
                   'tools/bootstrap.ps1','tools/build.py','tools/build.cjs','tools/build-npm.sh','tools/build-zip.mjs',
                   'tools/zip.mjs','tools/dairn_build_backend.py','tools/release_config.py','tools/release.json',
-                  'tools/publish-release.py','bin/dairn.cjs','dairn','dairn.cmd','build.sh','build.cmd','install.sh',
+                  'tools/publish-release.py','bin/dairn.cjs','dairn','dairn.cmd',
                   'package.json','pyproject.toml','src/dairn/cli.py','src/dairn/__init__.py','quickjs.lock.json',
                   'AGENTS.md','Makefile','.gitlab-ci.yml','.github/rulesets/main-branch.json')
         ordinary=('tools/verify-linux.py','tools/verify-packages.py','tools/checksums.py',

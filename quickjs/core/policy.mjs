@@ -69,8 +69,6 @@ const criticalFiles = new Set([
   'tools/zip.mjs', 'tools/dairn_build_backend.py', 'tools/release_config.py', 'tools/release.json', 'tools/publish-release.py',
   // 各语言安装元数据：决定安装入口、版本解析与发布内容。
   'package.json', 'pyproject.toml',
-  // 根构建/安装脚本：构建或安装时直接执行。
-  'build.sh', 'build.cmd', 'install.sh',
 ]);
 const criticalPatterns = [/^tools\/bootstrap\.[^/]+$/, /^tools\/build(?:[.-][^/]+)?$/];
 const dataPaths = ['.dairn/governance/changes/', '.dairn/governance/operations/', '.dairn/governance/evidence/', '.dairn/work/', '.dairn/facts/', '.dairn/cache/'];
