@@ -14,7 +14,7 @@
  *   - DAIRN_RUNTIME_SOURCE：vendored | external（启动器解析）或 packaged（安装包包装层）；
  *   - DAIRN_RUNTIME_DIR：运行时所在目录，init/adopt/upgrade 据此复制运行时载荷。
  *
- * 两份脚本文本必须保持 ASCII/最小依赖：POSIX 版使用 /bin/sh 与 mktemp/cp/chmod/rm/rmdir 基础工具；
+ * 两份脚本文本必须保持 ASCII/最小依赖：POSIX 版使用 /bin/sh 与 SHA256/stat/mktemp/cp/chmod/mkdir/mv/rm 基础工具；
  * Windows 版不得包含非 ASCII 注释（cmd.exe 代码页会误解析），并使用
  * goto 标签而不是括号块（`%ERRORLEVEL%` 在括号内会被提前展开）。
  */

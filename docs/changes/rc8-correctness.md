@@ -1,6 +1,6 @@
-# RC.8 正确性修补与运行时副本启动
+# RC.8 正确性修补与运行时缓存镜像启动
 
-本轮以 `689e43c107b278bb254d5b46802d36cf5fc1525e` 为基线，落实 2026-10-25 发布后综合审查报告的批次 A，并加入用户要求的 POSIX 运行时副本启动。风险为 L2，治理深度为 G2；独立人工审批由 PR 平台完成。本文件记录变更范围与验收条件，不构成审批或 CI 证明。
+本轮以 `689e43c107b278bb254d5b46802d36cf5fc1525e` 为基线，落实 2026-10-25 发布后综合审查报告的批次 A，并加入用户要求的 POSIX 运行时缓存镜像启动。风险为 L2，治理深度为 G2；独立人工审批由 PR 平台完成。本文件记录变更范围与验收条件，不构成审批或 CI 证明。
 
 ## 范围与验收
 
@@ -12,9 +12,9 @@
 | T-09 Import Analyzer | Doctor 的 argv/cwd 为 null；混合 Suite 按模式导入或执行，导入失败记录 report-error 后继续其他项 | `quickjs/tests/test_analyze_quality.py` |
 | T-11 SHA256 | QuickJS、Node 实现与 Python hashlib、Node crypto 独立结果相同 | `tools/tests/test_sha256.py` |
 | T-12 文档状态 | 版本由标签确定；历史平台状态不写成当前事实 | 治理与架构文档审阅 |
-| 运行时副本 | 每次 POSIX 调用执行独立临时副本，保留原文件字节和权限；参数、stdin、cwd、退出码透传，结束后清理；复制失败退出 2 | `quickjs/tests/test_root_launcher.py`、Python 包适配层测试 |
+| 运行时镜像 | 首次按源摘要创建并原子发布私有镜像，后续校验后复用，不重复复制/删除；保留原文件字节和权限，参数、stdin、cwd、退出码及信号透传；缓存异常退出 2 | `quickjs/tests/test_root_launcher.py`、Python 包适配层测试 |
 
-启动器模板位于 `quickjs/assets/templates/project/launcher/`；根脚本由 `node tools/render-launchers.mjs` 生成。`DAIRN_RUNTIME_DIR` 始终指向原载荷目录。Windows 启动器继续使用原生 PE 入口；POSIX APE 的加载与权限问题通过副本隔离。POSIX 的 SIGINT 取消向后台进程发送 TERM，启动器返回 130，避免后台进程继承忽略 INT 后持续等待。SIGKILL、断电等不可捕获终止可能留下系统临时副本，由系统临时目录回收。
+启动器模板位于 `quickjs/assets/templates/project/launcher/`；根脚本由 `node tools/render-launchers.mjs` 生成。`DAIRN_RUNTIME_DIR` 始终指向原载荷目录。Windows 启动器继续使用原生 PE 入口；POSIX APE 的加载与权限问题通过内容寻址镜像隔离。镜像缓存默认为用户缓存目录，可用 `DAIRN_CACHE_HOME` 指定绝对路径。缓存命中只校验并 exec，不进行复制、chmod 或删除，不保留后台监护进程；目录与镜像须由当前用户拥有且权限 0700，镜像须与源摘要一致，父路径不可被其他用户替换。旧版本镜像由维护者在没有相关命令运行时清理。
 
 JUnit 继续只支持受限的扁平 testsuites/testsuite 子树和 testcase 结果节点；每个 testsuite 必须显式给出 tests/failures/errors/skipped，且与子节点一致。未知结构和不支持的 XML 构造按报告错误处理。此兼容边界须在使用者文档中说明。
 

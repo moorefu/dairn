@@ -47,7 +47,7 @@ try {
   assert.equal(nonAscii.length, 0, 'Windows launcher 不含非 ASCII 字符');
   assert.ok(registry.posix.split('\n').length > 10 && registry.windows.split('\r\n').length > 10, '脚本行数非空');
   // 模板是启动器的唯一源码；哈希固定用于发现任何意外改动（仓库根/分发/项目内共用）。
-  assert.equal(sha256(registry.posix), 'ac8e9110ccbd6984eedf0ae2a2e14c821b33e2350165f233dba912b1c75267ee', 'POSIX launcher 模板哈希稳定');
+  assert.equal(sha256(registry.posix), 'a8c3d89fbc9243ff89ab9685976c555a86ef3c41aafe642308beae7cf03fd610', 'POSIX launcher 模板哈希稳定');
   assert.equal(sha256(registry.windows), '23eba37f99b09dd6661a85b469780acebe8af8eaaae73481c1b4d4cea4e20ee9', 'Windows launcher 模板哈希稳定');
 
   const source = runtimeSource(h);
