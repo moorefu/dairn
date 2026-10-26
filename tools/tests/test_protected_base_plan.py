@@ -117,6 +117,8 @@ class ProtectedBasePlan(unittest.TestCase):
             self.assertEqual(run['status'], 'passed')
             self.assertEqual(run['declared_assurance'], 'local-observed')
             self.assertEqual(len(run['checks']), 4)
+            # 普通 check 的已有 Run 应能离线重核，不因两个入口的解释元数据不同而重跑。
+            passed('gate', 'evaluate', '--base', base, '--check', run_path.relative_to(project).as_posix(), '--json')
             passed('work', 'verify', 'base-policy', '--require-machine-gates')
 
             # Head 提议的排除项不能隐藏 Base Run 完成后才出现的未知输入。
