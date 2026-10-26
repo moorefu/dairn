@@ -39,7 +39,8 @@ class ProtectedBasePlan(unittest.TestCase):
             for name, config in policy['modules'][0]['checks'].items():
                 if name == 'lint':
                     self.assertEqual(config['argv'], ['dairn', 'stack-check', 'python', 'lint'])
-                    config['timeout'] = 1
+                    # 正常分派不依赖宿主在 1 秒内启动 Python；超时场景单独限时。
+                    config['timeout'] = 10
                 else:
                     config['argv'] = [sys.executable, '-B', '-c', 'print("真实检查")']
             policy_path.write_text(json.dumps(policy), encoding='utf-8')
@@ -64,7 +65,7 @@ class ProtectedBasePlan(unittest.TestCase):
             self.assertEqual(lint['exit_code'], 7)
             env.pop('RUFF_FIXTURE_EXIT')
             env['RUFF_FIXTURE_DELAY'] = '3'
-            timed = call('governance', 'execute', '--base', base, '--timeout', '10')
+            timed = call('governance', 'execute', '--base', base, '--timeout', '1')
             self.assertEqual(timed.returncode, 1, timed.stdout + timed.stderr)
             lint = next(check for check in json.loads(timed.stdout)['checks'] if check['id'] == 'lint')
             self.assertEqual(lint['status'], 'timeout')
