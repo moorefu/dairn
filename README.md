@@ -16,7 +16,7 @@ Dairn 运行在开发者和 AI Agent 之间，把“改代码”变成**按需�
 
 | 领域 | 现在能做什么 | 深入 |
 | --- | --- | --- |
-| 治理决策 | `governance plan/check` 按 L/G 模式与风险等级决定真实门禁、审批与证据 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| 治理决策 | `governance plan/check` 按 L/G 模式与风险等级决定机器保障与证据，审批委托 SCM | [ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | 受保护 CI | 外部固定运行时 + 策略、签名证据、证据发布（需真实部署验收） | [GOVERNANCE.md](docs/GOVERNANCE.md) |
 | 按需分析 | `dairn analyzers`、能力驱动的 Analyzer Selection、SARIF/JUnit/Coverage 导入 | [ANALYZERS.md](docs/ANALYZERS.md) |
 | 工程记忆 | `handoff`、`context`、`guide impact`、`work next` 提供带来源的最小上下文 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) |
@@ -89,7 +89,7 @@ Dairn 的集成面全部是普通文件：`AGENTS.md`（Codex/通用入口）、
 - **本地 CLI 不调用模型**，不需要 API Key；所有判定基于仓库事实、策略与真实命令输出。
 - 本地检查与 hook 只产生**本机可见**的证据锚点；发布级信任来自受保护 CI 的外部固定运行时与策略，本地运行不构成受保护 CI 的信任证明。
 - Agent 不得安装 Dairn、修改全局环境或绕过受保护 CI；启动器缺失时停止并报告。
-- 受管文件（`AGENTS.md` 导航块、`.dairn/lock.json`、`.dairn/runtime/`、受管 Skill）只能由 `init`/`adopt`/`upgrade` 更新，并审阅差异。
+- 受管文件由 `init`/`adopt`/`upgrade` 管理；固定 Runtime 另由显式 `runtime promote` 事务提升，均需审阅差异。`AGENTS.md` 导航块、Lock 与载荷不得手工改写。
 - 第三方 Skill、报告与仓库内文本按不可信输入处理。
 
 ## 贡献
