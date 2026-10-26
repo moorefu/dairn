@@ -30,10 +30,19 @@ export function validateCheckRun(run, {policy = null} = {}) {
   if (run?.status === 'passed' && Array.isArray(run?.checks) && Array.isArray(run?.required_checks))
     for (const required of run.required_checks)
       check(run.checks.some(x => x.id === required && x.status === 'passed'), 'passed run lacks a passing required check: ' + required);
+  const cells=new Set();
+  if(run?.status==='passed'&&Array.isArray(run?.checks))check(run.checks.length>0&&run.checks.every(item=>item.status==='passed'&&(item.exit_code??item.returncode)===0),'passed run contains failed, missing or nonzero checks');
   if (Array.isArray(run?.checks)) for (const item of run.checks) {
+    const cell=item?.requirement_id||JSON.stringify([item?.module||null,item?.id]);
+    check(!cells.has(cell),'duplicate check cell: '+cell);cells.add(cell);
     check(item && typeof item.id === 'string' && item.id.length > 0, 'check id required');
     check(['passed','failed','missing','timeout','error'].includes(item?.status), 'check status invalid');
     if (item?.status === 'passed') check(item.exit_code === 0 || item.returncode === 0, 'passed check must have zero exit');
+  }
+  if(run?.execution?.requirements!==undefined)check(Array.isArray(run.execution.requirements),'execution.requirements must be array');
+  if(Array.isArray(run?.execution?.requirements)&&run.status==='passed')for(const requirement of run.execution.requirements.filter(r=>r&&r.required)){
+    const matches=run.checks.filter(c=>c.requirement_id===requirement.id&&c.module===requirement.module_id&&c.id===requirement.check_id);
+    check(matches.length===1&&matches[0].status==='passed','required assurance missing: '+requirement.id);
   }
   if (policy && Array.isArray(run.required_checks)) for (const required of policy) {
     const matches = run.checks.filter(x => x.id === required);

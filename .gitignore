@@ -17,3 +17,7 @@ __pycache__/
 /.dairn/governance/evidence/
 /.dairn/governance/operations/
 /.dairn/governance/changes/
+
+/.dairn/observe/
+/.dairn/runtime-transactions/
+/.dairn/runtime-promotion.lock

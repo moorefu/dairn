@@ -1,4 +1,4 @@
-"""在含 Python、Git 和 Go 的 Linux 容器中运行核心及 Go 集成回归。"""
+"""在 Linux 容器中运行核心、治理流程和语言集成回归。"""
 import hashlib
 import json
 import os
@@ -6,9 +6,9 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 from check_catalog import CI_SOURCE_STAGES
+from runtime_context import test_runtime
 
 root = Path(__file__).resolve().parent.parent
 out = Path(sys.argv[1]).resolve()
@@ -20,12 +20,12 @@ for _key in ('GITHUB_ACTIONS','GITHUB_EVENT_NAME','GITHUB_EVENT_PATH','GITHUB_RE
              'GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB','GITHUB_REPOSITORY','GITHUB_WORKFLOW',
              'GITLAB_CI','CI_PIPELINE_SOURCE','CI_MERGE_REQUEST_DIFF_BASE_SHA','CI_MERGE_REQUEST_LABELS'):
     os.environ.pop(_key, None)
-binary = root / 'runtime/dairn-embedded.com'
+binary = test_runtime()
 # 验收本次构建，而不是 .dairn/runtime 中可能较旧的 vendored 快照。
 os.environ['DAIRN_RUNTIME'] = str(binary)
 before = hashlib.sha256(binary.read_bytes()).hexdigest()
 results = {}
-# 与本地执行同一必需目录，额外 Linux/Go 回归不能替代这些 Check-ID。
+# 与本地执行同一必需目录，额外 Linux 回归不能替代这些 Check-ID。
 for stage in CI_SOURCE_STAGES:
     result = subprocess.run([sys.executable, '-B', 'tools/check-source.py', stage],
                             cwd=root, capture_output=True, timeout=3000)
@@ -43,64 +43,35 @@ go_env = subprocess.run(['go', 'env', '-json', 'GOVERSION', 'GOOS', 'GOARCH',
                         capture_output=True, check=True, timeout=30)
 (out / 'linux-go-env.json').write_bytes(go_env.stdout)
 results['go_environment'] = json.loads(go_env.stdout)
-with tempfile.TemporaryDirectory(prefix='dairn-linux-native-') as tmp:
-    native = Path(tmp) / 'qjs'
-    shutil.copyfile(binary, native)
-    native.chmod(0o755)
-    subprocess.run(['/bin/sh', str(native), '--assimilate'], check=True)
-    env = {**os.environ, 'DAIRN_QJS_BIN': str(native)}
-    for name, script in [('core', 'test_core.mjs'), ('policy', 'test_native.mjs'), ('host', 'test_host_native.mjs'),
-                         ('governance', 'test_governance_native.mjs'),
-                         ('handoff', 'test_handoff_native.mjs'),
-                         ('gov', 'test_gov_native.mjs'),
-                         ('launcher', 'test_launcher_native.mjs')]:
-        result = subprocess.run([str(native), str(root / 'quickjs/tests' / script)],
-                                env=env, capture_output=True, timeout=40)
-        (out / ('linux-' + name + '.log')).write_bytes(result.stdout + result.stderr)
-        results[name] = result.returncode
-        print(name, result.returncode, flush=True)
-    suites = unittest.defaultTestLoader.loadTestsFromNames([
-        'quickjs.tests.test_project_guidance',
-        'quickjs.tests.test_workflow_facts',
-        'quickjs.tests.test_work_intelligence',
-        'quickjs.tests.test_assets_lint',
-        'quickjs.tests.test_grill_workflow',
-        'quickjs.tests.test_tasks_command',
-        'quickjs.tests.test_hooks',
-        'quickjs.tests.test_notes_seal',
-        'quickjs.tests.test_launcher',
-        'quickjs.tests.test_root_launcher',
-        'quickjs.tests.test_doctor',
-        'quickjs.tests.test_audit_logs',
-        'quickjs.tests.test_review_identity',
-        'quickjs.tests.test_agent_protocol',
-        'quickjs.tests.test_analyzer_ci_review',
-        'quickjs.tests.test_analyze_quality',
-        'quickjs.tests.test_trusted_ci_analyzers',
-        'quickjs.tests.test_project_lifecycle',
-        'quickjs.tests.test_handoff',
-        'quickjs.tests.test_governance_cli',
-        'quickjs.tests.test_runtime_lock_diagnostic',
-        'quickjs.tests.test_docs_retrieval',
-    ])
-    def flatten(suite):
-        for case in suite:
-            if isinstance(case, unittest.TestSuite):
-                yield from flatten(case)
-            else:
-                yield case
-    cases = list(flatten(suites))
-    selected = unittest.TestSuite(cases)
-    with (out / 'linux-regression.log').open('w', encoding='utf-8') as stream:
-        regression = unittest.TextTestRunner(stream=stream, verbosity=2).run(selected)
-    # 控制台同步输出失败详情，避免 CI 仅展示失败总数而必须下载制品定位。
-    for _, traceback in regression.failures + regression.errors:
-        print(traceback, flush=True)
-    results.update(tests_run=regression.testsRun, failures=len(regression.failures),
-                   errors=len(regression.errors), skipped=len(regression.skipped), excluded=[])
-evidence = out / 'linux-go-checks.json'
+# 共享门禁已执行全部 native 和基础 Python 回归；这里只运行额外治理与语言场景。
+suites = unittest.defaultTestLoader.loadTestsFromNames([
+    'quickjs.tests.test_project_guidance',
+    'quickjs.tests.test_workflow_facts',
+    'quickjs.tests.test_work_intelligence',
+    'quickjs.tests.test_grill_workflow',
+    'quickjs.tests.test_tasks_command',
+    'quickjs.tests.test_hooks',
+    'quickjs.tests.test_notes_seal',
+    'quickjs.tests.test_launcher',
+    'quickjs.tests.test_audit_logs',
+    'quickjs.tests.test_review_identity',
+    'quickjs.tests.test_agent_protocol',
+    'quickjs.tests.test_analyzer_ci_review',
+    'quickjs.tests.test_trusted_ci_analyzers',
+    'quickjs.tests.test_project_lifecycle',
+    'quickjs.tests.test_handoff',
+    'quickjs.tests.test_governance_cli',
+])
+with (out / 'linux-regression.log').open('w', encoding='utf-8') as stream:
+    regression = unittest.TextTestRunner(stream=stream, verbosity=2).run(suites)
+# 控制台同步输出失败详情，避免 CI 仅展示失败总数而必须下载制品定位。
+for _, traceback in regression.failures + regression.errors:
+    print(traceback, flush=True)
+results.update(tests_run=regression.testsRun, failures=len(regression.failures),
+               errors=len(regression.errors), skipped=len(regression.skipped), excluded=[])
+evidence = out / 'linux-python-checks.json'
 if evidence.exists():
-    results['go_checks'] = [{k: c.get(k) for k in ['id', 'module', 'status', 'exit_code', 'argv']}
+    results['python_checks'] = [{k: c.get(k) for k in ['id', 'module', 'status', 'exit_code', 'argv']}
                             for c in json.loads(evidence.read_text(encoding='utf-8'))['checks']]
 results['ape_sha256'] = before
 results['original_unchanged'] = hashlib.sha256(binary.read_bytes()).hexdigest() == before
@@ -108,5 +79,4 @@ results['original_unchanged'] = hashlib.sha256(binary.read_bytes()).hexdigest() 
 print(json.dumps(results, indent=2), flush=True)
 sys.exit(0 if all(results['source-' + stage] == 0 for stage in CI_SOURCE_STAGES)
          and regression.wasSuccessful() and not regression.skipped and evidence.exists()
-         and results['core'] == results['host'] == results['policy'] == results['governance'] == results['handoff'] == results['gov'] == 0
          and results['original_unchanged'] else 1)

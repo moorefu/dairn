@@ -6,8 +6,9 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=go /usr/local/go /usr/local/go
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends jq openssl \
+    && apt-get install -y --no-install-recommends jq openssl util-linux passwd \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+RUN useradd --create-home --uid 1000 --shell /bin/sh dairn-test
 ENV PATH="/usr/local/go/bin:${PATH}"

@@ -1,3 +1,5 @@
+import {executeCheck} from './stack-check.mjs';
+import {toolchainIdentity} from './toolchain.mjs';
 /* 基于 QuickJS 的治理编排。 */
 import { classify, moduleSelection, manifestValidate, policyValidate, invariant, relative, requiresManifest } from './policy.mjs';
 import {sha256} from './sha256.mjs';
@@ -13,12 +15,11 @@ import {readRelations} from './relations.mjs';
 import {configuredAnalyzers} from './analyzers.mjs';
 import {captureWorktree,taskExclusions} from './worktree.mjs';
 import {createCheckRun,writeRunEvidence} from './evidence.mjs';
+import {planGovernance} from './governance-plan.mjs';
+import {readRefactorContracts,projectContextOf,validateRefactorContract} from './project-context.mjs';
 const slash = x => x.replace(/\\/g, '/');
 const join = (a,b) => b === '.' ? a : a.replace(/\/$/,'') + '/' + b;
 const within = (root, path) => path === root || path.startsWith(root.replace(/\/$/,'') + '/');
-// Git 输出的相对路径不能含盘符/反斜杠/..；host 会把反斜杠归一化为分隔符。
-const safeRelative = p => typeof p === 'string' && p.length > 0 && !p.startsWith('/') &&
-  !p.includes('\\') && !/^[A-Za-z]:/.test(p) && !p.split('/').some(x => x === '..' || x === '' || x === '.');
 const COMMANDS = ['doctor','validate','validate-core','scope','check','help','hook'];
 const HOOKS = ['pre-push','turn-end'];
 const VALUE_FLAGS = new Map([['--root','root'],['--base','base'],['--head','head'],['--timeout','timeout'],['--task','task'],
@@ -147,75 +148,6 @@ function checkCwd(h,root,m,cfg) {
   invariant(within(root,absolute), 'Check cwd escapes repository: '+p);
   return absolute;
 }
-function runStackCheck(h,stack,step,cwd,timeout) {
-  if(stack==='go' && step==='lint') {
-    const repo=h.run(['git','rev-parse','--is-inside-work-tree'],cwd,timeout);
-    // `git rev-parse --is-inside-work-tree` 在仓库外也会以 0 退出并打印 false，
-    // 必须看输出；只有 Git 明确回答“不是仓库”时才允许文件系统回退。权限、
-    // dubious ownership、超时等其它错误必须 fail closed，不能静默退化为扫描。
-    invariant(!repo.timedOut,'Go lint Git worktree probe timed out');
-    const probe=String(repo.output||'').trim();
-    const inRepo=repo.code===0 && /^true$/i.test(probe);
-    const notRepo=repo.code!==0 && /not a git repository/i.test(String(repo.output||''));
-    invariant(inRepo||notRepo,'Cannot determine Git worktree for Go lint: '+(probe||'git exit '+repo.code));
-    let goFiles=[];
-    if(inRepo) {
-      // Git 工程必须尊重 .gitignore；空列表不能退化成文件系统扫描，否则
-      // 会把被忽略的文件或工程外链接目标带入门禁。
-      goFiles=command(h,['git','ls-files','-z','--cached','--others','--exclude-standard','--','*.go'],cwd,timeout).split('\0').filter(Boolean);
-      invariant(goFiles.length>0,'No Go files available in Git for gofmt');
-      invariant(goFiles.length<=20000,'Go lint file list exceeds limit');
-      for(const file of goFiles) {
-        invariant(safeRelative(file),'Unsafe Go file path from Git: '+JSON.stringify(file));
-        invariant(!h.isSymlink(join(cwd,file)),'Go lint refuses symlink path: '+file);
-      }
-    } else {
-      const repoRoot=h.realpath(cwd);
-      const maxDepth=8,maxFiles=20000,maxDirs=5000,deadline=Date.now()+timeout*1000;
-      let dirs=0;
-      const walk=(d,prefix,depth)=>{
-        invariant(Date.now()<=deadline,'Go lint file discovery timed out');
-        invariant(depth<=maxDepth,'Go lint directory depth exceeded '+maxDepth);
-        invariant(!h.isSymlink(d),'Go lint refuses symlink directory: '+prefix);
-        const canonical=h.realpath(d);
-        invariant(within(repoRoot,canonical),'Go lint path escapes repository: '+prefix);
-        invariant(++dirs<=maxDirs,'Go lint directory limit exceeded');
-        for(const name of h.list(d)){
-          if(name.startsWith('.')||['vendor','node_modules','target','dist'].includes(name))continue;
-          const abs=join(d,name),rel=prefix+name;
-          invariant(!h.isSymlink(abs),'Go lint refuses symlink path: '+rel);
-          const resolved=h.realpath(abs);
-          invariant(within(repoRoot,resolved),'Go lint path escapes repository: '+rel);
-          if(h.isDirectory(abs)) walk(abs,rel+'/',depth+1);
-          else if(name.endsWith('.go')) { invariant(goFiles.length<maxFiles,'Go lint file limit exceeded'); goFiles.push(rel); }
-        }
-      };
-      walk(cwd,'',0);
-    }
-    invariant(goFiles.length>0,'No Go files available for gofmt');
-    // 拆分批次，避免参数列表超过平台命令行长度上限；`--` 防止文件名被当作
-    // gofmt 选项（例如被跟踪的 `-e.go`）。
-    const invalid=[];
-    for(let i=0;i<goFiles.length;i+=500){
-      const output=command(h,['gofmt','-l','--',...goFiles.slice(i,i+500)],cwd,timeout).trim();
-      if(output)invalid.push(output);
-    }
-    invariant(!invalid.length,'gofmt found unformatted files: '+invalid.join('\n'));
-    command(h,['go','vet','./...'],cwd,timeout);
-    return {code:0,output:'gofmt and go vet passed',duration_sec:0};
-  }
-  if(stack==='rust'&&step==='lint') {
-    command(h,['cargo','fmt','--all','--','--check'],cwd,timeout);
-    command(h,['cargo','clippy','--all-targets','--','-D','warnings'],cwd,timeout);
-    return {code:0,output:'cargo fmt and clippy passed',duration_sec:0};
-  }
-  if(stack==='python'&&step==='lint') {
-    command(h,['ruff','check','.'],cwd,timeout);
-    command(h,['ruff','format','--check','.'],cwd,timeout);
-    return {code:0,output:'ruff check and format passed',duration_sec:0};
-  }
-  throw new Error('Unsupported internal stack-check: '+stack+' '+step+' (fail closed)');
-}
 /* --- 审计日志：每个 gate 的原始输出落盘，截断上限按 UTF-8 字节计算。 --- */
 const LOG_LIMIT = 65536;
 const LOG_TRUNCATION_MARKER = '\n[... truncated at 65536 bytes]';
@@ -281,10 +213,18 @@ function checks(h,root,opts,st,raw,validation,stats) {
   const captureExclusions=opts.taskPreflight?taskExclusions(opts.taskPreflight.task):[];
   // 生成物边界来自受信项目策略；同一 Run 的 before/after 必须使用同一闭包。
   const captureOptions={snapshot_exclusions:Array.isArray(st.policy?.snapshot_exclusions)?st.policy.snapshot_exclusions:[]};
-  if(opts.task||opts.hook||opts.all){
+  if(opts.task||opts.hook||opts.all||opts.base){
     try{worktree=captureWorktree(h,root,opts.timeout,captureExclusions,captureOptions);}
     catch(e){worktreeError=String(e&&e.message||e);}
   }
+  let contracts=[];
+  if(opts.base){
+    const baseCommit=command(h,['git','rev-parse','--verify',opts.base+'^{commit}'],root,opts.timeout).trim();
+    const names=command(h,['git','ls-tree','-r','--name-only',baseCommit,'--','.dairn/governance/refactors'],root,opts.timeout).split(/\r?\n/).filter(p=>p.endsWith('.json'));
+    contracts=names.map(name=>{relative(name);return validateRefactorContract(JSON.parse(command(h,['git','show',baseCommit+':'+name],root,opts.timeout)),name);});
+  }else contracts=readRefactorContracts(h,root);
+  const planEnvelope=planGovernance({trustedPolicy:st.policy,projectContext:projectContextOf(st.policy),change:{paths:st.paths||[],modules:mods,risk,risk_floor:risk,governance_mode:st.governance_mode,triggers:st.triggers||[],all:!!opts.all,runtime_sha256:opts.runtimeHash||null,policy_sha256:sha256(raw),authority_source:opts.base?'git-base-unverified':'local-project',subject:worktree?.source_commit?{schema:'dairn.subject.v1',repository:repositoryOf(h,root,opts.timeout),kind:'git-commit',source_commit:worktree.source_commit,tree_sha:worktree.tree_sha,base_commit:opts.all?null:st.base,comparison:'base-to-source'}:null},refactorContracts:contracts});
+  let tools;try{tools=toolchainIdentity(h,root,planEnvelope.plan.executors,opts.runtimeHash||null);}catch(_){tools={sha256:null,status:'unknown'};}
   const records=[];
   let failed=!!worktreeError;
   if(worktreeError)h.error('ERROR: worktree snapshot failed: '+worktreeError);
@@ -296,9 +236,12 @@ function checks(h,root,opts,st,raw,validation,stats) {
   const logsAbs=join(join(evidenceDir,'logs'),logRunKey);
   h.mkdirs(logsAbs);
   const seenLogs=new Set();
-  for(const m of mods) for(const gate of required) {
-    const cfg=m.checks[gate];const record={module:m.name,gate,status:'missing',returncode:null};
-    const logName=m.name+'-'+gate;
+  for(const requirement of planEnvelope.plan.requirements){
+    const executor=planEnvelope.plan.executors.find(e=>e.requirement_id===requirement.id);
+    const m=mods.find(x=>x.name===requirement.module_id)||{name:null,path:'.'};
+    const gate=requirement.check_id,cfg=executor?{argv:executor.argv,cwd:executor.cwd,timeout:executor.timeout}:null;
+    const record={requirement_id:requirement.id,scope:requirement.scope,module:m.name,gate,status:'missing',returncode:null};
+    const logName=(m.name||'repository')+'-'+requirement.id;
     if(!cfg) {
       failed=true;
       Object.assign(record,writeGateLog(h,logsAbs,logsRel,seenLogs,logName,'Check configuration missing for '+m.name+':'+gate+'\n'));
@@ -309,12 +252,11 @@ function checks(h,root,opts,st,raw,validation,stats) {
     try {
       const cwd=checkCwd(h,root,m,cfg); record.cwd=cwd.slice(root.length).replace(/^\//,'')||'.';
       h.log('[run] '+m.name+':'+gate+' '+cfg.argv.join(' '));
-      let result;
-      if(cfg.argv[0]==='dairn' && cfg.argv[1]==='stack-check') result=runStackCheck(h,cfg.argv[2],cfg.argv[3],cwd,opts.timeout);
-      else result=h.run(cfg.argv,cwd,opts.timeout);
+      const executorTimeout=Math.min(cfg.timeout||opts.timeout,opts.timeout);
+      const result=executeCheck(h,cfg.argv,cwd,executorTimeout);
       record.returncode=result.code;record.duration_sec=result.duration_sec;record.timed_out=!!result.timedOut;
       record.output_sha256=sha256(result.output||'');record.output_truncated=false;
-      record.status=result.timedOut?'error':result.code===0?'passed':'failed';
+      record.status=result.timedOut||result.error?'error':result.code===0?'passed':'failed';
       gateOutput=result.output||'';
       if(record.status!=='passed') {record.reason=(result.timedOut?'timeout: ':'failed: ')+(result.output||'').slice(0,1024);if(!gateOutput)gateOutput=record.reason;}
     }catch(e){
@@ -332,7 +274,7 @@ function checks(h,root,opts,st,raw,validation,stats) {
    * never be attested, bundled or gated); audit logs still land under
    * evidence/logs/ with content digests bound in each check record. */
   const toProtocolChecks = rs => rs.map(c=>({id:c.gate,module:c.module,status:c.timed_out?'timeout':c.status,
-    exit_code:c.returncode,argv:c.argv??null,cwd:c.cwd??null,duration_sec:c.duration_sec??null,
+    requirement_id:c.requirement_id,scope:c.scope,exit_code:c.returncode,argv:c.argv??null,cwd:c.cwd??null,duration_sec:c.duration_sec??null,
     timed_out:!!c.timed_out,reason:c.reason??null,log:c.log??null,log_sha256:c.output_sha256??null,
     log_truncated:c.output_truncated??null}));
   const headProbe=h.run(['git','rev-parse','HEAD^{tree}'],root,opts.timeout);
@@ -344,7 +286,7 @@ function checks(h,root,opts,st,raw,validation,stats) {
     // mid-check can never be attested (fail closed instead of writing a lie).
     if(!opts.all && headCommit!==st.head) throw Error('Git HEAD changed during check; evidence cannot be written');
     let snapAfter=null,snapAfterFailed=false;
-    if(opts.task&&worktree&&!worktreeError){
+    if(worktree&&!worktreeError){
       try{snapAfter=captureWorktree(h,root,opts.timeout,captureExclusions,captureOptions);}
       catch(e){snapAfterFailed=true;}
     }
@@ -364,7 +306,7 @@ function checks(h,root,opts,st,raw,validation,stats) {
         source_commit:headCommit,tree_sha:treeSha,
         base_commit:opts.all?null:st.base,comparison:'base-to-source'},
       execution:{environment,runtime_sha256:opts.runtimeHash??null,policy_sha256:sha256(raw),
-        check_plan_sha256:null,logs_dir:logsRel,
+        toolchain_sha256:tools.sha256,toolchain_observation:tools,check_plan_sha256:planEnvelope.plan_sha256,requirements:planEnvelope.plan.requirements,executors:planEnvelope.plan.executors,logs_dir:logsRel,
         mode:opts.all?'baseline-all':opts.hook?'pre-push-gate':'risk-gate-preview',
         risk,governance_validators:Object.keys(validation.detail).sort(),
         changed_paths:opts.all?[]:[...st.paths],
@@ -375,7 +317,9 @@ function checks(h,root,opts,st,raw,validation,stats) {
       checks:toProtocolChecks(records),
       status:(snapAfterFailed||(snapAfter&&worktree&&snapAfter.snapshot_sha256!==worktree.snapshot_sha256)||coverageIncomplete)?'invalidated':(failed?'failed':'passed'),
       declared_assurance:'local-observed',related_tasks:opts.task?[opts.task]:[],now:h.now()});
+    failed=failed||created.status!=='passed';
     v1Run=created;v1Ref=writeRunEvidence(h,root,v1Run);
+    if(typeof h.observationContext==='function')h.observationContext({run_id:created.run_id,subject_commit:created.subject.source_commit,worktree_snapshot_sha256:created.execution.snapshot_before_sha256,policy_sha256:created.execution.policy_sha256,plan_sha256:created.execution.check_plan_sha256,toolchain_sha256:created.execution.toolchain_sha256});
     if(coverageIncomplete)h.error('ERROR: snapshot input coverage incomplete ('+worktree.uncovered_inputs.length+' uncovered ignored inputs); run evidence invalidated');
   } else {
     h.mkdirs(evidenceDir);
@@ -423,10 +367,16 @@ function prePush(h,root,st,opts) {
 export function main(h,args) {
   try {
     const opts=parseArgs(args);
-    if(opts.cmd==='help') {h.log('Dairn '+runtimeVersion(h)+' — AI-Native Software Engineering Toolkit\n  dairn init|adopt [--root PATH] [--stack go|python|rust|vue|java|spring-boot|openresty] [--ci none|github|gitlab|both] [--sample] [--plan]\n  dairn detect|doctor|validate [--root PATH]\n  dairn scope|check --base SHA [--root PATH]\n  dairn check --all (baseline L2 checks)\n  dairn handoff [--json] [--base origin/main] [--task ID] [--note TEXT] [--max-chars 12000] [--out .dairn/tmp/handoff.md]   (read-only agent handoff; no .dairn required)\n  dairn governance plan|explain --base <ref> [--json]   (deterministic minimum-sufficient assurance plan; advisory, never a gate verdict)\n  dairn governance assess [--json]   (capability discovery: declared vs detected; never self-certifies CI)\n  dairn governance recommend [--window 90d] [--json]   (evidence-backed tuning suggestions; never auto-applied)\n  dairn refactor plan|compare|verify|status --id <id>   (optional cross-PR refactor contracts and debt baselines)\n  dairn evidence verify --bundle <path>|--run <run-id> [--json]   (independent evidence verification)\n  dairn evidence inspect --run <run-id> [--json]\n  dairn gate evaluate --subject <s.json> --policy <p.json> [--check <run.json>] [--approval <v.json>] [--attestation <st.json> --signature <sig> --key <pub>] [--modules m1,m2] [--risk L0|L1|L2] [--stage pre-merge|post-merge|release] [--json]\n  dairn attest prepare --bundle <path> --context <c.json> [--out <statement.json>]\n  dairn attest verify --statement <s.json> --signature <s.sig> --key <absolute-trusted-pubkey> [--context <c.json>]\n  dairn hook pre-push|turn-end [--task ID] [--no-check] [--provider P --session S] [--allow-unattributed]\n  dairn hooks install [--apply] [--git] [--force] [--launcher PATH]\n  dairn tasks check|ready [--strict]\n  dairn notes seal [--apply]\n  dairn docs check [--json]\n  dairn upgrade --plan|--apply [--root PATH]\n  dairn work start|list|status|next|record|advance|skip|verify|finish|cancel|reopen [--require-machine-gates|--require-session-anchor|--require-review-actor]\n  dairn work link-check <task-id> --run <run-id> (advisory reference to an existing run)\n  dairn guide impact --base SHA [--analyzer PROJECT-ANALYZER-ID]\n  dairn analyzers [list|templates|doctor|init --template LANGUAGE --id NAME [--apply]] [--root PATH]   (legacy "stubs" command is rejected: breaking rename, no alias)\n  dairn analyze run <analyzer-id> | --suite <suite-id> [--base <ref>] [--refresh] [--json] [--out PATH]   (advisory analysis runs; never a gate verdict)\n  dairn analyze import <analyzer-id> [--artifact PATH] [--json] [--out PATH]   (read-only report import; unverified-import, never ci-verified)\n  dairn quality fitness [--json]   (compare quality goals with local observations; PASS never approves)\n  dairn capability plan [--base <ref>] [--json]   (advisory agent/skill participation; never starts models)\n  dairn skills catalog|list|add NAME [--apply]\n  dairn docs find QUERY|show|context SPEC-ID|check [--json]');return 0;}
+    if(opts.cmd==='help') {h.log('Dairn '+runtimeVersion(h)+' — AI-Native Software Engineering Toolkit\n  dairn init|adopt [--root PATH] [--stack go|python|rust|vue|java|spring-boot|openresty] [--ci none|github|gitlab|both] [--sample] [--plan]\n  dairn detect|doctor|validate [--root PATH]\n  dairn scope|check --base SHA [--root PATH]\n  dairn check --all (baseline L2 checks)\n  dairn handoff [--json] [--base origin/main] [--task ID] [--note TEXT] [--max-chars 12000] [--out .dairn/tmp/handoff.md]   (read-only agent handoff; no .dairn required)\n  dairn observe status|report|trace|compare|suggest [--json]   (本地观测，不授予 Gate 权限)\n  dairn runtime inspect|promote --source installed --plan [--json]\n  dairn runtime promote --source installed --apply --plan-sha256 <hash>\n  dairn runtime rollback --to <identity> --plan\n  dairn governance execute --base <ref> [--assurance] [--requirements app.unit] [--context <local.json>] [--plan-sha256 <hash>]   (离线执行与机器保障，审批委托 SCM)\n  dairn governance plan|explain --base <ref> [--json]   (deterministic minimum-sufficient assurance plan; advisory, never a gate verdict)\n  dairn governance assess [--json]   (capability discovery: declared vs detected; never self-certifies CI)\n  dairn governance recommend [--window 90d] [--json]   (evidence-backed tuning suggestions; never auto-applied)\n  dairn refactor plan|compare|verify|status --id <id>   (optional cross-PR refactor contracts and debt baselines)\n  dairn evidence verify --bundle <path>|--run <run-id> [--json]   (independent evidence verification)\n  dairn evidence inspect --run <run-id> [--json]\n  dairn gate evaluate --base <ref> --check <run.json> [--context <c.json>] | --runs <manifest.json> --jobs <expected.json> --needs <needs.json> [--attestation <st.json> --signature <sig> --key <pub>] [--modules m1,m2] [--risk L0|L1|L2] [--stage pre-merge|post-merge|release] [--json]\n  dairn attest prepare --bundle <path> --context <c.json> [--out <statement.json>]\n  dairn attest verify --statement <s.json> --signature <s.sig> --key <absolute-trusted-pubkey> [--context <c.json>]\n  dairn hook pre-push|turn-end [--task ID] [--no-check] [--provider P --session S] [--allow-unattributed]\n  dairn hooks install [--apply] [--git] [--force] [--launcher PATH]\n  dairn tasks check|ready [--strict]\n  dairn notes seal [--apply]\n  dairn docs check [--json]\n  dairn upgrade --plan|--apply [--root PATH]\n  dairn work start|list|status|next|record|advance|skip|verify|finish|cancel|reopen [--require-machine-gates|--require-session-anchor|--require-review-actor]\n  dairn work revise <task-id> --stage <stage>|--kind <kind> --reason <reason>   (归档旧证据并重新执行后续阶段)\n  dairn work link-check <task-id> --run <run-id> (advisory reference to an existing run)\n  dairn guide impact --base SHA [--analyzer PROJECT-ANALYZER-ID]\n  dairn analyzers [list|templates|doctor|init --template LANGUAGE --id NAME [--apply]] [--root PATH]   (legacy "stubs" command is rejected: breaking rename, no alias)\n  dairn analyze run <analyzer-id> | --suite <suite-id> [--base <ref>] [--refresh] [--json] [--out PATH]   (advisory analysis runs; never a gate verdict)\n  dairn analyze import <analyzer-id> [--artifact PATH] [--json] [--out PATH]   (read-only report import; unverified-import, never ci-verified)\n  dairn quality fitness [--json]   (compare quality goals with local observations; PASS never approves)\n  dairn capability plan [--base <ref>] [--json]   (advisory agent/skill participation; never starts models)\n  dairn skills catalog|list|add NAME [--apply]\n  dairn docs find QUERY|show|context SPEC-ID|check [--json]');return 0;}
     const root=h.realpath(opts.root??h.cwd());
-    verifyRuntimeLock(h,root,false);
+    const runtimeLock=verifyRuntimeLock(h,root,false);opts.runtimeHash=runtimeLock?.runtime_sha256||null;
     const st=staticChecks(h,root);
+    if(opts.base&&opts.cmd==='check'&&!opts.all){
+      const baseCommit=command(h,['git','rev-parse','--verify',opts.base+'^{commit}'],root,opts.timeout).trim();
+      const trustedRaw=command(h,['git','show',baseCommit+':.dairn/governance/project.json'],root,opts.timeout);
+      const trusted=JSON.parse(trustedRaw);invariant(policyValidate(trusted).length===0,'Base policy invalid');
+      st.policy=trusted;st.policy_raw=trustedRaw;
+    }
     const actualPolicyHash=sha256(st.policy_raw);
     const expected=h.env('DAIRN_EXPECTED_POLICY_SHA256');
     if (expected) invariant(/^[0-9a-f]{64}$/.test(expected) && expected===actualPolicyHash,'Policy hash differs from externally trusted policy');

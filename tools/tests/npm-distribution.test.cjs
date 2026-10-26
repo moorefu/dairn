@@ -12,8 +12,8 @@ const ROOT = path.resolve(__dirname, '..', '..');
 // CI 用 DAIRN_NPM_PACKAGE 指向构建脚本产出的未打包目录；本地直接用仓库根。
 const SOURCE = path.resolve(process.env.DAIRN_NPM_PACKAGE || ROOT);
 const POSIX = process.platform !== 'win32';
-const SOURCE_RUNTIME = path.join(SOURCE, '.dairn', 'runtime', 'dairn-embedded.com');
-const SOURCE_INTEGRITY = path.join(SOURCE, '.dairn', 'runtime', 'runtime-integrity.json');
+const SOURCE_RUNTIME = (!process.env.DAIRN_NPM_PACKAGE && process.env.DAIRN_TEST_RUNTIME) || path.join(SOURCE, '.dairn', 'runtime', 'dairn-embedded.com');
+const SOURCE_INTEGRITY = path.join(path.dirname(SOURCE_RUNTIME), 'runtime-integrity.json');
 const SOURCE_LAUNCHER = path.join(SOURCE, 'dairn');
 const metadata = JSON.parse(fs.readFileSync(SOURCE_INTEGRITY, 'utf8'));
 const engineVersion = metadata.engine_version;
@@ -48,9 +48,9 @@ function fixture(prefix = 'dairn-npm-') {
   return target;
 }
 
-function runWrapper(target, args) {
+function runWrapper(target, args, extra = {}) {
   return spawnSync(process.execPath, [path.join(target, 'bin', 'dairn.cjs'), ...args], {
-    encoding: 'utf8', cwd: target, env: cleanEnv(), timeout: 180000,
+    encoding: 'utf8', cwd: target, env: cleanEnv(extra), timeout: 180000,
   });
 }
 
@@ -132,13 +132,14 @@ test('POSIX：包装层与根启动器执行同一运行时', {skip: !POSIX}, ()
   assert.equal(wrapper.stdout, launcher.stdout);
 });
 
-test('POSIX：根启动器恢复运行时执行位', {skip: !POSIX}, () => {
+test('POSIX：根启动器保持原载荷权限与字节', {skip: !POSIX}, () => {
   const target = fixture();
   const runtime = path.join(target, '.dairn', 'runtime', 'dairn-embedded.com');
   fs.chmodSync(runtime, 0o644);
   const result = runLauncher(target, ['--version']);
   assert.equal(result.status, 0, result.stderr);
-  assert.ok(fs.statSync(runtime).mode & 0o111);
+  assert.equal(fs.statSync(runtime).mode & 0o777,0o644);
+  assert.equal(sha(runtime),sha(SOURCE_RUNTIME));
 });
 
 test('POSIX：符号链接运行时被拒绝执行', {skip: !POSIX}, () => {
@@ -149,4 +150,10 @@ test('POSIX：符号链接运行时被拒绝执行', {skip: !POSIX}, () => {
   const result = runWrapper(target, ['--version']);
   assert.equal(result.status, 2);
   assert.match(result.stderr, /regular file|invalid runtime/);
+});
+
+test('安装入口隔离继承的候选覆盖', () => {
+  const target=fixture();
+  const result=runWrapper(target,['version'],{DAIRN_RUNTIME:path.join(target,'missing-candidate.com')});
+  assert.equal(result.status,0,result.stdout+result.stderr);
 });

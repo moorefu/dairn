@@ -17,7 +17,7 @@ dairn:pr-quality:
     - export DAIRN_EXPECTED_POLICY_SHA256="$(cat /etc/dairn/trusted-policy.sha256)"
     - test -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
     - /opt/dairn/dairn validate --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - /opt/dairn/dairn check --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - /opt/dairn/dairn governance execute --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --assurance --json
 
 # No signing key on this runner, despite operating on a protected commit.
 dairn:protected-build:

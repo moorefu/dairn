@@ -5,6 +5,7 @@ on:
     branches: [main, master]
     tags: ['v*']
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -47,13 +48,8 @@ jobs:
           python tools/build.py
           npm run build
           python tools/checksums.py
-      - name: 分发资产一致性（Skill/Spec 命令）
-        env:
-          # 构建任务刚生成 runtime/；按构建产物的语义显式指定，避免走 vendored 快照。
-          DAIRN_RUNTIME: ${{ github.workspace }}/runtime/dairn-embedded.com
-        run: ./dairn docs check
-      - name: 分发资产与 docs find 回归
-        run: python -B -X utf8 -m unittest quickjs.tests.test_assets_lint -v
+      - name: 分发资产与检索回归（隔离候选）
+        run: python tools/with-built-runtime.py --from-zip dist -- python -B tools/check-source.py lint
       - uses: actions/upload-artifact@v4
         with:
           name: dairn-packages
@@ -62,6 +58,14 @@ jobs:
             dist/*.whl
             dist/*.zip
             dist/checksums.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: 保存锁定的 QuickJS 测试引导工具
+        uses: actions/upload-artifact@v4
+        with:
+          name: dairn-quickjs-bootstrap
+          path: .build/quickjs/qjs-*.com
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
 
@@ -124,32 +128,8 @@ jobs:
         with:
           name: dairn-packages
           path: incoming
-      - name: 从发布 ZIP 提取运行时
-        run: |
-          python - <<'PY'
-          import glob
-          import pathlib
-          import zipfile
-
-          candidates = glob.glob('incoming/*.zip')
-          assert len(candidates) == 1, candidates
-          with zipfile.ZipFile(candidates[0]) as zipped:
-              runtime = [name for name in zipped.namelist()
-                         if name.endswith('/.dairn/runtime/dairn-embedded.com')]
-              integrity = [name for name in zipped.namelist()
-                           if name.endswith('/.dairn/runtime/runtime-integrity.json')]
-              assert len(runtime) == 1 and len(integrity) == 1, (runtime, integrity)
-              target = pathlib.Path('runtime')
-              target.mkdir(parents=True, exist_ok=True)
-              (target / 'dairn-embedded.com').write_bytes(zipped.read(runtime[0]))
-              (target / 'runtime-integrity.json').write_bytes(zipped.read(integrity[0]))
-          PY
-          chmod +x runtime/dairn-embedded.com dairn ci/protected/*.sh
-          jq --version >/dev/null && openssl version >/dev/null && sha256sum --version >/dev/null
-      - name: Python 集成回归（Linux 套件）
-        # verify-linux.py 会清除 CI 平台变量，模拟本地开发者环境；
-        # 这里不再覆盖 GITHUB_*（GitHub 默认变量不可覆盖，且脚本已内建清洗）。
-        run: python -B -X utf8 tools/verify-linux.py validation/ci
+      - name: Python 集成回归（Linux 隔离候选）
+        run: python -B -X utf8 tools/with-built-runtime.py --from-zip incoming -- python -B -X utf8 tools/verify-linux.py validation/ci
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -157,6 +137,7 @@ jobs:
           path: |
             validation/ci/
             validation/source-checks/
+            validation/runtime-builds/
           if-no-files-found: error
 
   test-python-windows:
@@ -176,33 +157,15 @@ jobs:
         with:
           name: dairn-packages
           path: incoming
-      - name: 从发布 ZIP 提取运行时
-        shell: pwsh
-        run: |
-          $code = @'
-          import glob
-          import pathlib
-          import zipfile
-
-          candidates = glob.glob('incoming/*.zip')
-          assert len(candidates) == 1, candidates
-          with zipfile.ZipFile(candidates[0]) as zipped:
-              runtime = [name for name in zipped.namelist()
-                         if name.endswith('/.dairn/runtime/dairn-embedded.com')]
-              integrity = [name for name in zipped.namelist()
-                           if name.endswith('/.dairn/runtime/runtime-integrity.json')]
-              assert len(runtime) == 1 and len(integrity) == 1, (runtime, integrity)
-              target = pathlib.Path('runtime')
-              target.mkdir(parents=True, exist_ok=True)
-              (target / 'dairn-embedded.com').write_bytes(zipped.read(runtime[0]))
-              (target / 'runtime-integrity.json').write_bytes(zipped.read(integrity[0]))
-          print('extracted runtime from release ZIP')
-          '@
-          $code | python -
-      - name: Python 集成回归（Windows 套件）
+      - name: 预置离线源码测试需要的锁定 QuickJS
+        uses: actions/download-artifact@v4
+        with:
+          name: dairn-quickjs-bootstrap
+          path: .build/quickjs
+      - name: Python 集成回归（Windows 隔离候选）
         env:
           DAIRN_OFFLINE: '1'
-        run: python -B -X utf8 tools/verify-windows.py --artifacts incoming --skip-go
+        run: python -B -X utf8 tools/with-built-runtime.py --from-zip incoming -- python -B -X utf8 tools/verify-windows.py --artifacts incoming --skip-go
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -210,6 +173,7 @@ jobs:
           path: |
             validation/windows/
             validation/source-checks/
+            validation/runtime-builds/
           if-no-files-found: error
 
   accepted:

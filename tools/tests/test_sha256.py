@@ -38,7 +38,7 @@ class Sha256CrossRuntime(unittest.TestCase):
         base = f"import {{sha256,sha256Bytes}} from {json.dumps(module)};\nconst actual=[];\n"
         with tempfile.TemporaryDirectory(prefix='dairn-sha256-') as tmp:
             temp = Path(tmp)
-            qjs_source = Path(os.environ.get('DAIRN_QJS_BIN', ROOT / 'runtime/dairn-embedded.com'))
+            qjs_source = Path(os.environ.get('DAIRN_QJS_BIN', Path(os.environ['DAIRN_TEST_RUNTIME'])))
             qjs = temp / 'qjs.com'
             shutil.copyfile(qjs_source, qjs)
             qjs.chmod(0o755)

@@ -24,7 +24,7 @@ def main():
         return 2
 
     # 让内核拿到分发包自带的运行时载荷目录（init/adopt/upgrade 据此复制运行时）。
-    env = {**os.environ, 'DAIRN_RUNTIME_DIR': str(runtime_dir), 'DAIRN_RUNTIME_SOURCE': 'packaged'}
+    env = {**os.environ, 'DAIRN_RUNTIME':str(binary),'DAIRN_RUNTIME_DIR': str(runtime_dir), 'DAIRN_RUNTIME_SOURCE': 'packaged', 'DAIRN_RUNTIME_ROLE':'installed-source', 'DAIRN_INSTALLED_ENTRY_SHA256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
     try:
         if sys.platform == 'win32':
             # 直接传递 argv，保持调用方工作目录和包内运行时原样。

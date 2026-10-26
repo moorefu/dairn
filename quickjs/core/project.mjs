@@ -7,10 +7,11 @@ import {sealArchive} from './notes.mjs';
 import {verifyBundle,verifyRunBytes} from './evidence.mjs';
 import {evaluate as gateEvaluate} from './gate.mjs';
 import {prepareAttestation,verifyAttestation} from './attestation.mjs';
-import {platformVerdict as approvalPlatformVerdict} from './approval.mjs';
+import {platformVerdict as approvalPlatformVerdict,validateApprovalVerdict} from './approval.mjs';
 import {captureHandoff} from './handoff.mjs';
 import {renderHandoff} from './handoff-render.mjs';
 import {planForChange} from './governance-plan.mjs';
+import {runChecks} from './checks.mjs';
 import {assessCapabilities, discoverRepository} from './capabilities.mjs';
 import {locateContract, locateRun, compareDebt, verifyExitConditions, writeContract} from './refactor.mjs';
 import {validateRefactorContract} from './project-context.mjs';
@@ -30,6 +31,9 @@ import {buildContextPack,renderContextPack,MAX_LIMIT} from './context.mjs';
 /* 旧版本生成的受管 Makefile；本版本不再生成，upgrade 时随旧启动器一起退役。 */
 const LEGACY_MAKEFILE='.dairn/Makefile';
 import {sha256} from './sha256.mjs';
+import {observeCommand} from './observe.mjs';
+import {promotionPlan,applyPromotion,rollbackRuntime,recoverRuntime} from './runtime-promotion.mjs';
+import {captureWorktree} from './worktree.mjs';
 import {guidance} from './guidance.mjs';
 import {minimumChecks, policyValidate, invariant, relative} from './policy.mjs';
 const ASSETS='/zip/quickjs/assets/';
@@ -59,8 +63,8 @@ export function runtimeIdentity(h){
   for(const x of m.assets||[]) invariant(sha256(read(h,ASSETS+x.type+'/'+x.path))===x.sha256,'Embedded asset checksum mismatch: '+x.path);
   return sha256(raw);
 }
-const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--analyzer','--suite','--artifact','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars','--window','--file','--capability','--for','--limit','--section','--lines'];
-const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--discover':'discover','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--refresh':'refresh','--change':'change','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
+const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--analyzer','--suite','--artifact','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars','--window','--file','--capability','--for','--limit','--section','--lines','--mode','--invocation','--baseline','--experiment','--source','--plan-sha256','--to','--transaction','--organization-policy','--runs','--jobs','--needs','--requirements'];
+const FLAG_OPTIONS={'--assurance':'assurance','--plan':'plan','--dry-run':'plan','--discover':'discover','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--refresh':'refresh','--change':'change','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
 // Suite 与 Fitness 共用模式分派，导入错误保留来源并提供 UNKNOWN 所需的缺失观测。
 function runAnalysisTarget(h,root,def,base){
   if((def.mode||'execute')!=='import')return executeAnalyzer(h,root,def.id,{base});
@@ -150,7 +154,7 @@ function makeDesired(h,root,config,prior){
     invariant(policyValidate(policy).length===0,'Generated project policy is invalid');
     entries['.dairn/governance/project.json']=fmt(policy);
     entries['.agents/notes/archived/sha256.json']='{}\n';
-    if(!file(h,j(root,'.gitignore')))entries['.gitignore']='# Dairn transient analyzer and runtime cache\n.dairn/cache/\n.dairn/tmp/\n';
+    if(!file(h,j(root,'.gitignore')))entries['.gitignore']='# Dairn transient analyzer and runtime cache\n.dairn/cache/\n.dairn/tmp/\n.dairn/observe/\n';
     entries['.dairn/analyzers.json']=fmt({schema:'dairn.analyzers.v1',analyzers:[]});
     if(!file(h,j(root,'CLAUDE.md'))||wasManaged('CLAUDE.md'))entries['CLAUDE.md']=claudeMd(tpl);
     if(config.sample){
@@ -249,8 +253,7 @@ function launcherSummary(h,root,o,vendorConfig=null){
     const payload=inspectRuntimePayload(h);
     const legacy=config.launcher!==LAUNCHER_POSIX||config.windows_launcher!==LAUNCHER_WINDOWS;
     if(payload&&(config.mode!=='vendored'||!config.runtime||config.runtime.version!==payload.version||config.runtime.sha256!==payload.sha256)){
-      return {mode:'vendored',pending:true,payload:payload.dir,legacy,
-        note:'apply will copy the bundled runtime into '+RUNTIME_DIR+' and migrate the launcher to ./'+LAUNCHER_POSIX};
+      return {mode:config.mode,runtime:config.runtime,promotion_required:true,legacy,note:'普通 upgrade 保持 Pin；显式 runtime promote 才能替换载荷'};
     }
     return {mode:config.mode,legacy,runtime:config.runtime};
   }
@@ -481,7 +484,10 @@ function upgrade(h,o){
   let existingLauncher=null;
   try{existingLauncher=readLauncherConfig(h,root);}catch(_){existingLauncher=null;}
   const payload=inspectRuntimePayload(h);
-  const payloadFix=!!(payload&&!o.vendor_runtime&&payload.version===installed);
+  const payloadFix=!!o._promotion;
+  if(o.apply&&!o._promotion&&existingLauncher?.mode==='vendored')invariant(payload&&payload.sha256===existingLauncher.runtime?.sha256,'RUNTIME_PROMOTION_REQUIRED: 普通 upgrade 只能使用当前 Pin 的同一二进制');
+  if(o.apply&&!o._promotion)invariant(lock.runtime_sha256===runtimeIdentity(h),'RUNTIME_PROMOTION_REQUIRED: 当前 CLI 身份与项目 Pin 不同；请显式 runtime promote --source installed --plan');
+  if(o.apply&&o.vendor_runtime&&!o._promotion){const vendor=launcherConfigFor(h,root,o);invariant(!existingLauncher?.runtime||existingLauncher.runtime.sha256===vendor.runtime.sha256,'RUNTIME_PROMOTION_REQUIRED: vendor-runtime 不能绕过提升计划');}
   const legacyLauncher=!!(existingLauncher&&(existingLauncher.launcher!==LAUNCHER_POSIX||existingLauncher.windows_launcher!==LAUNCHER_WINDOWS));
   const staleVendored=!!(existingLauncher&&existingLauncher.mode==='vendored'&&!o.vendor_runtime&&!payloadFix&&
     existingLauncher.runtime&&existingLauncher.runtime.version&&existingLauncher.runtime.version!==installed);
@@ -496,12 +502,7 @@ function upgrade(h,o){
   let vendorConfig=null;
   if(o.apply){
     if(o.vendor_runtime)vendorConfig=launcherConfigFor(h,root,o);
-    else if(payloadFix){
-      // 版本相同不代表二进制相同（同版本号重建）；用载荷摘要判断是否仍需刷新。
-      const current=!!(existingLauncher&&existingLauncher.mode==='vendored'&&existingLauncher.runtime&&
-        existingLauncher.runtime.version===installed&&existingLauncher.runtime.sha256===payload.sha256);
-      if(!current)vendorConfig=payloadLauncherConfig(h,root);
-    }
+    else if(payloadFix)vendorConfig=payloadLauncherConfig(h,root);
   }
   if(vendorConfig&&legacyLauncher)vendorConfig={...vendorConfig,launcher:LAUNCHER_POSIX,windows_launcher:LAUNCHER_WINDOWS};
   h.log(fmt({mode:o.apply?'apply':'plan',installed:runtimeVersion(h),recorded:lock.version,actions:plan.actions.filter(x=>o.diff||x.status!=='unchanged'),launcher:launcherSummary(h,root,o,vendorConfig),runtime_lock:lockReport,next_actions:lockReport.next_actions}));
@@ -648,11 +649,13 @@ function docCmd(h,o){
     const hits=scored.slice(0,30);
     if(o.json){
       h.log(fmt({schema:'dairn.docs-find.v1',query:o.pos.slice(1).join(' '),terms,hits,
-        truncated:scored.length>hits.length,next:hits.length?'dairn docs show '+hits[0].id:null}));
+        truncated:scored.length>hits.length,next:hits.length?'dairn docs show '+hits[0].id:null,
+        ...(!hits.length?{hint:'多个参数按 AND 匹配，单个引号参数按短语匹配；请减少条件，或分别搜索单个主题。'}:{})}));
       return hits.length?0:1;
     }
     for(const hit of hits)h.log(hit.id+'\t'+hit.path);
     if(hits.length)h.error('Next: dairn docs show '+hits[0].id);
+    else h.error('没有匹配规范；多个参数按 AND 匹配，单个引号参数按短语匹配。请减少条件或分别搜索单个主题。');
     return hits.length?0:1;
   }
   if(action==='show'||action==='context'){
@@ -769,7 +772,7 @@ function evidenceCmd(h,o,root){
     return 0;
   }
   if(op==='bundle'){
-    invariant(o.run&&o.out,'Usage: dairn evidence bundle --run <run-id> [--evidence <run.json>] [--origin <origin.json>] --out <bundle.json>');
+    invariant(o.run&&o.out,'Usage: dairn evidence bundle --run <run-id> [--evidence <run.json>] [--origin <origin.json>] [--approval <approval.json>] --out <bundle.json>');
     const located=locateRunEvidence(h,root,o.run,o.evidence);
     const checked=verifyRunBytes(h,root,located.path);
     const files={run_json:{path:located.path,sha256:checked.sha256}};
@@ -777,6 +780,14 @@ function evidenceCmd(h,o,root){
       const originPath=safeRelInside(h,root,o.origin);
       invariant(file(h,originPath),'origin not found: '+o.origin);
       files.origin_json={path:o.origin,sha256:sha256(read(h,originPath))};
+    }
+    if(o.approval){
+      const approvalPath=safeRelInside(h,root,o.approval);
+      invariant(file(h,approvalPath),'approval not found: '+o.approval);
+      const raw=read(h,approvalPath),approval=JSON.parse(raw);
+      invariant(!validateApprovalVerdict(approval).length,'Invalid approval verdict');
+      // 显式审计归档只绑定快照文件字节，不认证 SCM 来源或当前审批状态。
+      files.approval_snapshot={path:o.approval,sha256:sha256(raw)};
     }
     const bundle={schema:'dairn.evidence-bundle.v1',run:checked.run,files};
     bundle.bundle_sha256=sha256(JSON.stringify(bundle));
@@ -791,36 +802,66 @@ function evidenceCmd(h,o,root){
 function gateCmd(h,o,root){
   const op=o.pos[0]||'evaluate';
   invariant(op==='evaluate','Usage: dairn gate evaluate --subject <s.json> --policy <p.json> [...]');
-  invariant(o.subject&&o.policy,'gate evaluate requires --subject and --policy');
+  invariant(o.base||(o.subject&&o.policy),'gate evaluate requires --base or --subject and --policy');
   // P0: the gate consumes the RESULT of real Ed25519 verification, never a
   // bare statement JSON (consolidated plan §2.2). A statement without its
   // signature and CI-controlled public key cannot gate anything.
   if(o.attestation)invariant(o.signature&&o.key,
     'gate evaluate --attestation requires --signature <sig> and --key <absolute trusted pubkey> (real Ed25519 verification)');
-  const subject=readJsonRel(h,root,o.subject,'subject');
-  const policy=readJsonRel(h,root,o.policy,'policy');
-  const check=o.check?readJsonRel(h,root,o.check,'check run') : null;
-  const approval=o.approval?readJsonRel(h,root,o.approval,'approval verdict') : null;
-  const context=o.context?readJsonRel(h,root,o.context,'context') : {};
+  const context=o.context?readJsonRel(h,root,o.context,'context'):{};
+  const plan=o.base?planForChange(h,root,{base:o.base,organizationPolicy:o.organization_policy?readJsonRel(h,root,o.organization_policy,'organization policy'):null,subjectContext:context.subject||null,authorityContext:context.authority||null}):null;
+  let policyRaw;
+  if(plan){const found=h.run(['git','show',plan.plan.subject.base_commit+':.dairn/governance/project.json'],root,30);invariant(found.code===0&&!found.timedOut,'POLICY_UNTRUSTED');policyRaw=found.output;}
+  else policyRaw=h.read(o.policy.startsWith('/')?o.policy:j(root,o.policy));
+  const subject=plan?plan.plan.subject:readJsonRel(h,root,o.subject,'subject');
+  const policy=JSON.parse(policyRaw);
+  invariant(!(o.check&&o.runs),'gate evaluate accepts --check or --runs, not both');
+  const check=o.check?readJsonRel(h,root,o.check,'check run'):null;
+  const expectedJobs=o.jobs?readJsonRel(h,root,o.jobs,'expected jobs'):undefined;
+  const needs=o.needs?readJsonRel(h,root,o.needs,'direct needs'):undefined;
+  if(o.jobs||o.needs)invariant(o.runs&&o.jobs&&o.needs,'直接作业聚合需要 --runs、--jobs 和 --needs，不能以单个 --check 代替逐作业证据');
+  let runs;
+  if(o.runs){
+    const manifest=readJsonRel(h,root,o.runs,'run manifest');
+    invariant(Array.isArray(manifest)&&manifest.length>0,'Run manifest must be a nonempty array');
+    runs=manifest.map(item=>{
+      invariant(typeof item.path==='string'&&/^[0-9a-f]{64}$/.test(item.sha256||''),'Run manifest entry invalid');
+      const path=safeRelInside(h,root,item.path);
+      const raw=h.read(path);
+      invariant(sha256(raw)===item.sha256,'RUN_DIGEST_MISMATCH');
+      if(expectedJobs){invariant(expectedJobs.includes(item.job_id)&&needs?.[item.job_id]?.outputs?.run_sha256===item.sha256,'JOB_EVIDENCE_MISMATCH');}
+      return JSON.parse(raw);
+    });
+    if(expectedJobs)invariant(manifest.length===expectedJobs.length&&new Set(manifest.map(x=>x.job_id)).size===expectedJobs.length,'JOB_EVIDENCE_MISSING_OR_DUPLICATED');
+  }
   let verifiedAttestation=null;
   if(o.attestation){
     const statement=readJsonRel(h,root,o.attestation,'attestation statement');
     let verified;
     try { verified=verifyAttestation(h,root,o.attestation,o.signature,o.key,context); }
     catch(e){
-      const failed={schema:'dairn.gate-verdict.v1',status:'FAIL',
+      const failed={schema:'dairn.gate-verdict.v1',scope:'machine-assurance',status:'FAIL',
+        machine_assurance:'FAIL',human_approval:'delegated-to-scm',merge_eligibility:'not-evaluated',assurance:'local-observed',
         reasons:['attestation verification failed: '+String(e&&e.message||e)]};
       if(o.json)h.log(fmt(failed));
       else h.error('ERROR gate: FAIL — '+failed.reasons[0]);
       return 1;
     }
-    verifiedAttestation={...verified,schema:'dairn.verified-attestation.v1',statement};
+    verifiedAttestation=verified;
   }
   const modules=o.modules?String(o.modules).split(',').map(x=>x.trim()).filter(Boolean):null;
-  const verdict=gateEvaluate({subject,policy,check,approval,context,verifiedAttestation,modules,
-    risk:o.risk||null,requiredStage:o.stage||'pre-merge',trustedPolicy:policy});
+  const checkRaw=o.check?h.read(o.check.startsWith('/')?o.check:j(root,o.check)):null;
+  const verdict=gateEvaluate({subject,policy,policyRaw,check,checkRaw,runs,plan,expectedJobs,needs,
+    approval:o.approval?{unsupported:true}:null,context,verifiedAttestation,modules,
+    risk:plan?plan.plan.classification.effective_risk:o.risk||null,requiredStage:o.stage||'pre-merge',trustedPolicy:policy});
+  if(plan&&verdict.status==='PASS'){
+    const current=captureWorktree(h,root,30,[],{snapshot_exclusions:policy.snapshot_exclusions||[]});
+    const records=runs||[check];
+    const mismatch=current.input_coverage!=='declared-complete'||(records.length===1?current.snapshot_sha256!==records[0]?.execution?.snapshot_after_sha256:current.status!=='clean'||records.some(r=>r.execution?.worktree_status!=='clean'));
+    if(mismatch){verdict.status=verdict.machine_assurance='FAIL';verdict.reasons.push('CURRENT_INPUT_SNAPSHOT_MISMATCH');}
+  }
   if(o.json)h.log(fmt(verdict));
-  else h.log('gate: '+verdict.status+(verdict.reasons.length?' — '+verdict.reasons.join('; '):''));
+  else {h.log('Machine assurance: '+verdict.status+(verdict.reasons.length?' — '+verdict.reasons.join('; '):''));h.log('Human approval: delegated to SCM');h.log('Merge eligibility: not evaluated locally');}
   return verdict.status==='PASS'?0:verdict.status==='INDETERMINATE'?3:1;
 }
 /* 平台审批快照裁决：消费 ci/providers 抓取的规范化快照，不触网、不信 PR 自带 JSON。 */
@@ -831,7 +872,7 @@ function approvalCmd(h,o,root){
   invariant(o.snapshot,'approval evaluate requires --snapshot <platform snapshot json>');
   const snapshot=readJsonRel(h,root,o.snapshot,'approval snapshot');
   const policy=o.policy?readJsonRel(h,root,o.policy,'policy'):{};
-  const verdict=approvalPlatformVerdict(snapshot,policy.approvals||policy);
+  const verdict={...approvalPlatformVerdict(snapshot,policy.approvals||policy),scope:'approval-snapshot-audit',assurance:'unverified-import',merge_eligibility:'not-evaluated'};
   if(o.json)h.log(fmt(verdict));
   else h.log('approval: '+verdict.status+' provider='+verdict.provider+
     ' eligible=['+verdict.eligible_reviewer_ids.join(',')+']'+
@@ -883,11 +924,29 @@ function handoffCmd(h,o,root){
 /* 治理计划（§5/§7）：确定性解释计划。Plan 描述待执行工作，不宣告门禁通过。 */
 function governanceCmd(h,o,root){
   const op=o.pos[0]||'plan';
+  if(op==='execute'){
+    invariant(o.base,'governance execute 需要不可变 Base');
+    const context=o.context?readJsonRel(h,root,o.context,'local execution context'):null;
+    const envelope=planForChange(h,root,{base:o.base,organizationPolicy:o.organization_policy?JSON.parse(h.read(o.organization_policy)):null,subjectContext:context?.subject||null,authorityContext:context?.authority||null});
+    invariant(!o.plan_sha256||o.plan_sha256===envelope.plan_sha256,'PLAN_OR_POLICY_MISMATCH');
+    invariant(envelope.plan.gaps.length===0,'REQUIRED_EXECUTOR_MISSING');
+    const result=h.run(['git','show',envelope.plan.subject.base_commit+':.dairn/governance/project.json'],root,30);
+    invariant(result.code===0&&!result.timedOut,'POLICY_UNTRUSTED');
+    const policy=JSON.parse(result.output);
+    const run=runChecks(h,root,{policy,base:envelope.plan.subject.base_commit,risk:envelope.plan.classification.effective_risk,timeout:Number(o.timeout),governancePlan:envelope,subjectOverride:envelope.plan.subject,runtimeSha:runtimeIdentity(h),requirementIds:o.requirements?String(o.requirements).split(','):null});
+    if(o.assurance){
+      const verdict=gateEvaluate({trustedPolicy:policy,subject:run.subject,check:run,plan:envelope,risk:envelope.plan.classification.effective_risk});
+      h.log(fmt({...verdict,run_id:run.run_id,evidence_ref:run.evidence_ref}));
+      return verdict.status==='PASS'?0:verdict.status==='INDETERMINATE'?3:1;
+    }
+    h.log(fmt(run));return run.status==='passed'?0:1;
+  }
   if(op==='plan'||op==='explain'){
     invariant(o.base,'governance '+op+' requires --base <trusted-ref>');
-    const {plan,plan_sha256}=planForChange(h,root,{base:o.base});
+    const context=o.context?readJsonRel(h,root,o.context,'local plan context'):null;
+    const {plan,plan_sha256,advisory}=planForChange(h,root,{base:o.base,organizationPolicy:o.organization_policy?JSON.parse(h.read(o.organization_policy)):null,subjectContext:context?.subject||null,authorityContext:context?.authority||null});
     if(op==='plan'){
-      if(o.json)h.log(fmt({plan,plan_sha256}));
+      if(o.json)h.log(fmt({plan,plan_sha256,advisory}));
       else{
         h.log('governance plan: risk='+plan.classification.effective_risk+' mode='+(plan.classification.governance_mode||'?')+
           ' status='+plan.status);
@@ -895,7 +954,7 @@ function governanceCmd(h,o,root){
         for(const r of plan.requirements)h.log('  require '+r.id+' ['+r.origin+']');
         for(const e of plan.executors)h.log('  executor '+e.module_id+':'+e.check_id+' phase='+e.phase);
         h.log('  local-fast: '+(plan.execution.local_fast.join(', ')||'none')+'; ci-required: '+plan.execution.ci_required.length);
-        h.log('  approvals: '+(plan.approvals.length?'scm-native natural person':'none'));
+        h.log('  human approval: delegated to SCM; merge eligibility: not evaluated locally');
         h.log('  advisory: '+(plan.advisory_workflow.join(' > ')||'none')+'; work required: '+plan.work_required);
         for(const g of plan.gaps)h.error('GAP '+g.kind+' '+g.module_id+':'+g.check_id+' — '+g.reason);
         h.log('  plan_sha256: '+plan_sha256);
@@ -914,10 +973,10 @@ function governanceCmd(h,o,root){
     for(const r of plan.requirements)lines.push('  - '+r.id+' required by '+r.origin);
     for(const g of plan.gaps)lines.push('  - MISSING capability '+g.module_id+':'+g.check_id+' — CI must fail until an executor exists');
     lines.push('Local fast feedback ('+(plan.execution.local_fast.join(', ')||'none')+') is speed advice; CI required set is complete: '+plan.execution.ci_required.length+' items.');
-    lines.push('Approvals: '+(plan.approvals.length?'SCM-native, natural person — granted by the platform, never by this plan':'not required at this risk level'));
+    lines.push('Human approval: delegated to SCM; merge eligibility: not evaluated locally.');
     lines.push('No work ledger is required for any of this (work_required=false).');
     for(const line of lines)h.log(line);
-    if(o.json)h.log(fmt({plan,plan_sha256}));
+    if(o.json)h.log(fmt({plan,plan_sha256,advisory}));
     return plan.gaps.length?1:0;
   }
   if(op==='assess'){
@@ -1012,7 +1071,24 @@ function refactorCmd(h,o,root){
   throw Error('Usage: dairn refactor plan --id <id> --file <contract.json> [--apply] | refactor compare|verify|status --id <id> [--run <run-id>] [--json]');
 }
 
-export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','analyzers','analyze','context','quality','capability','stubs','doctor','version','--version','tasks','hooks','notes','evidence','gate','attest','approval','handoff','governance','refactor'].includes(args[0]);}
+function runtimeCmd(h,root,o){
+  const op=o.pos[0]||'inspect';
+  if(op==='rollback'){const result=rollbackRuntime(h,root,{to:o.to,apply:!!o.apply,reviewedHash:o.plan_sha256});h.log(fmt(result));return 0;}
+  if(op==='recover'){const result=recoverRuntime(h,root,{transaction:o.transaction,apply:!!o.apply});h.log(fmt(result));return 0;}
+  invariant(['inspect','promote'].includes(op),'runtime inspect|promote|rollback|recover');
+  invariant(o.source==='installed','显式指定 --source installed 并从已审阅的安装入口运行');
+  const lock=lockRead(h,root,true),desired=makeDesired(h,root,{...lock.config,sample:false},lock),managedPlan=planFor(h,root,desired,lock);
+  const worktree=captureWorktree(h,root,30,[],{snapshot_exclusions:JSON.parse(h.read(j(root,'.dairn/governance/project.json'))).snapshot_exclusions||[]});
+  const plan=promotionPlan(h,root,{version:runtimeVersion(h),identity:runtimeIdentity(h),managedPlan,worktreeSha:worktree.snapshot_sha256,source:o.source});
+  if(!o.apply){h.log(fmt(plan));return plan.asset_compatibility==='incompatible'?3:0;}
+  invariant(op==='promote','inspect 是只读命令');
+  const result=applyPromotion(h,root,plan,{reviewedHash:o.plan_sha256,
+    activate:()=>{upgrade({...h,log(){}},{...o,cmd:'upgrade',vendor_runtime:null,_promotion:true,apply:true});},
+    verify:()=>{const info=verifyLauncher(h,root);return info.ok&&runtimeLockReport(h,root,lockRead(h,root,true)).status==='ok';}});
+  h.log(fmt(result));return 0;
+}
+
+export function isProjectCommand(args){return ['init','adopt','detect','upgrade','docs','skills','guide','workflow','work','analyzers','analyze','context','quality','capability','stubs','doctor','version','--version','tasks','hooks','notes','evidence','gate','attest','approval','handoff','governance','refactor','observe','runtime'].includes(args[0]);}
 export function dispatch(h,args){
   try{
     if(args[0]==='stubs'){h.error('Dairn ERROR: unsupported legacy command "stubs"; it was replaced by "dairn analyzers" (breaking rename, no alias)');return 2;}
@@ -1020,6 +1096,8 @@ export function dispatch(h,args){
     if(o.cmd==='version'||o.cmd==='--version'){h.log('Dairn '+runtimeVersion(h)+' — Cosmopolitan QuickJS');return 0;}
     if(o.cmd==='init'||o.cmd==='adopt')return provision(h,o);
     if(o.cmd==='detect'){const r=checkedRoot(h,root,false);h.log(fmt(detect(h,r)));return 0;}
+    if(o.cmd==='runtime')return runtimeCmd(h,checkedRoot(h,root,false),o);
+    if(o.cmd==='observe')return observeCommand(h,checkedRoot(h,root,false),o);
     if(o.cmd==='upgrade')return upgrade(h,o);
     if(o.cmd==='doctor')return doctor(h,checkedRoot(h,root,false));
     if(o.cmd==='docs')return docCmd(h,o);

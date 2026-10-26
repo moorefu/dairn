@@ -219,3 +219,16 @@ gh api --method PUT "repos/$GITHUB_REPOSITORY/rulesets/$MAIN_RULESET_ID" --input
 - [ ] 为 npm/PyPI Environment 配置 reviewers、分支限制与 secrets，停用长期令牌前重新演练失败与重跑路径。
 - [x] 选定许可证（MIT）并在源码中同步 `LICENSE`、`package.json`、`pyproject.toml`、Wheel METADATA/`dist-info/licenses`、ZIP 与 npm tarball、README、源码白名单与制品验收断言（2026-10-23，本地构建/制品验收已覆盖）。
 - [ ] 合并后核对 GitHub `license.spdx_id == MIT`、下一版本 Release 制品携带 MIT `LICENSE`、npm/PyPI 页面元数据同步；历史 Release 不得作为 MIT 证据。
+
+## PCC v1 离线收敛后的验收边界
+
+本仓库制品 CI 的必需汇总名称继续是 `全部矩阵通过`，不自动改写既有线上 Ruleset。目标项目的 PCC 单一机器保障上下文为 `Dairn / Required Assurance`；人工审批、Code Owner 和过期审批由 SCM 原生规则执行。当前默认内核不再枚举平台 Check/Review/权限 API。
+
+- [ ] 组织具备 Required Workflow 时固定来源仓库、工作流、Runtime 和执行定义；个人仓库不得假定具备该能力。
+- [ ] 使用独立 Publisher 时，固定外部配置、Python 适配器、启动器和 APE，凭据只在隔离发布域持有；测试域不能写聚合域的 needs 输入。
+- [ ] 直接 needs 与 Run 原始摘要、固定预期作业和 Requirement 完整性均核对；缺项、重复、取消、skipped/neutral 必须拒绝。
+- [ ] 用实际平台证明同名伪造状态不能满足可信入口，PR 普通可修改 Workflow 不冒充不可绕过治理。
+- [ ] 统一原生审批底线、敏感路径 Code Owner、严格 Base 更新与 merge_group 重验按团队实际能力部署；Dairn 不判断当前可否合并。
+- [ ] 发布要求签名时仍拒绝缺失、错误密钥与 Run/策略/Plan 篡改；可选审批审计快照只证明所归档字节，机器声明不替代平台审批。
+
+上述部署项未实际执行前保持未验收；组件单测或模拟 needs 不能勾选这些平台事实。

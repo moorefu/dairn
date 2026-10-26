@@ -24,7 +24,7 @@ def get_requires_for_build_wheel(config_settings=None):
 def get_requires_for_build_sdist(config_settings=None):
     return []
 
-def native_zip(destination, stage=None):
+def native_zip(destination, stage=None, runtime_out=None):
     destination = Path(destination).resolve()
     fetch = (['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
               str(ROOT / 'tools/bootstrap.ps1'), '-FetchOnly'] if sys.platform == 'win32'
@@ -32,6 +32,8 @@ def native_zip(destination, stage=None):
     binary = subprocess.check_output(fetch, cwd=ROOT, text=True, encoding='utf-8').strip()
     args = [str(ROOT / 'tools/build-zip.mjs'), '--root', str(ROOT), '--qjs', binary,
             '--out', str(destination), '--version', RELEASE['version']]
+    if runtime_out is not None:
+        args.extend(['--runtime-out', str(Path(runtime_out).absolute())])
     if stage is not None:
         args.extend(['--stage', str(Path(stage).resolve())])
     if sys.platform == 'win32':
@@ -102,13 +104,15 @@ def sdist_from_files(files, destination):
     return name
 
 def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
-    with tempfile.TemporaryDirectory(prefix='dairn-wheel-') as temp:
+    (ROOT / '.build/runs').mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='package-wheel-',dir=ROOT / '.build/runs') as temp:
         stage = Path(temp) / 'source'
         native_zip(temp, stage)
         return wheel_from_files(source_files(stage), wheel_directory)
 
 def build_sdist(sdist_directory, config_settings=None):
-    with tempfile.TemporaryDirectory(prefix='dairn-sdist-') as temp:
+    (ROOT / '.build/runs').mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='package-sdist-',dir=ROOT / '.build/runs') as temp:
         stage = Path(temp) / 'source'
         native_zip(temp, stage)
         return sdist_from_files(source_files(stage), sdist_directory)

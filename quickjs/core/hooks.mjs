@@ -147,6 +147,15 @@ function hookReadme(launcher) {
     '',
     '或直接调用 `dairn hook pre-push`。',
     '',
+    '## 可选过程观测',
+    '',
+    '`observe-codex.sh`、`observe-dsh.sh`、`observe-claude.sh` 调用独立 Python 事件桥，不要求活跃 Work。',
+    '宿主需自行接线；脚本只记录回合末，不能证明启动尝试覆盖完整。',
+    '完整尝试采集须在 CLI 外用同一 invocation 调用 observe-adapter.py 的 started/failed/succeeded 阶段，',
+    '并提供 session-start 与 turn-end --coverage complete；缺失覆盖时首次成功率保持 UNKNOWN。',
+    '事件目录保留 30 天，不保存 Prompt 或工具参数；关闭配置为 `.dairn/observe/config.json` 的 mode: disabled。',
+    'Python 不可用或采集失败不改变业务退出码，不自动修改宿主全局设置。',
+    '',
     '## 失败策略',
     '',
     '- `dairn hook turn-end` 在找不到唯一活跃任务、Git HEAD 或 provider/session 时默认失败（退出码 2）；',
@@ -156,7 +165,16 @@ function hookReadme(launcher) {
     ''
   ].join('\n');
 }
-const hookFiles = launcher => [
+const hookFiles = (h,launcher) => [
+  {path:HOOK_DIR+'/observe-adapter.py',mode:0o700,body:h.read('/zip/quickjs/assets/templates/project/hooks/observe-adapter.py')},
+  ...['codex','dsh','claude'].map(provider=>({path:HOOK_DIR+'/observe-'+provider+'.sh',mode:0o700,
+    body:`#!/bin/sh
+set -eu
+if command -v python3 >/dev/null 2>&1; then DAIRN_OBSERVE_PYTHON=python3
+elif command -v python >/dev/null 2>&1; then DAIRN_OBSERVE_PYTHON=python
+else exit 0; fi
+${provider==='codex'?`printf '%s\\n' "\${1-}" | `:''}"$DAIRN_OBSERVE_PYTHON" "$(dirname "$0")/observe-adapter.py" --root "$(dirname "$0")/../.." --provider ${provider} --phase turn-end --stdin
+`})),
   {path: HOOK_DIR + '/pre-push', mode: 0o755, body: '#!/bin/sh\nset -eu\nexec "' + launcher + '" hook pre-push\n'},
   {path: HOOK_DIR + '/turn-end.sh', mode: 0o755, body: '#!/bin/sh\nset -eu\nexec "' + launcher + '" hook turn-end --stdin\n'},
   {path: HOOK_DIR + '/turn-end-codex.sh', mode: 0o755, body: '#!/bin/sh\nset -eu\nexec "' + launcher + '" hook turn-end --payload "${1:-}"\n'},
@@ -187,7 +205,7 @@ export function installHooks(h, root, o) {
   invariant(/^[^"'\n\r`$;&|<>\\]+$/.test(launcher), 'Invalid --launcher path (use a POSIX absolute path; no quotes, backslashes, newlines or shell metacharacters): ' + launcher);
   const actions = [];
   const warnings = [];
-  const desired = hookFiles(launcher);
+  const desired = hookFiles(h,launcher);
   if (opts.git) {
     const dotGit = join(root, '.git');
     invariant(h.exists(dotGit), 'Not a Git repository (missing .git): ' + root);

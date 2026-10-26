@@ -37,7 +37,7 @@ class Doctor(unittest.TestCase):
             "std.exit(dispatch(host," + json.dumps(['doctor', '--root', str(self.root)]) + "));\n",
             encoding='utf-8')
         copy = Path(self.temp.name) / 'qjs.com'
-        shutil.copyfile(ROOT / 'runtime/dairn-embedded.com', copy)
+        shutil.copyfile(Path(os.environ['DAIRN_TEST_RUNTIME']), copy)
         copy.chmod(0o700)
         command = [str(copy)] if os.name == 'nt' else ['/bin/sh', str(copy)]
         return subprocess.run([*command, str(probe)], capture_output=True,

@@ -159,10 +159,12 @@ function run(argv, cwd, timeout = 120, capture = true) {
       // Windows 已在 executable() 中按 PATHEXT 解析为绝对路径，不能再次搜索
       // PATH；POSIX 保留 execvp 的 PATH 解析（git/go/python3 等是裸命令名）。
       const opts = {cwd, block:false, usePath: os.platform !== 'win32'};
-      if (capture) { opts.stdout = fd; opts.stderr = fd; }
+      if(capture&&!mergeStderr){const opened=openCapture(cwd);errorTemp=opened.path;errorFd=opened.fd;}
+      if (capture) { opts.stdout = fd; opts.stderr = errorFd>=0?errorFd:fd; }
       const pid = os.exec(command, opts);
       if (pid <= 0) throw new Error('Cannot start process: ' + argv[0] + ' (' + pid + ')');
       if (fd >= 0) { os.close(fd); fd = -1; }
+      if (errorFd >= 0) { os.close(errorFd); errorFd = -1; }
       while (exitCode === null) {
         const [got, status] = os.waitpid(pid, os.WNOHANG);
         if (got < 0) throw new Error('waitpid failed: ' + got);
@@ -191,6 +193,7 @@ function run(argv, cwd, timeout = 120, capture = true) {
       const [info, err] = os.stat(temp);
       if (err !== 0) throw new Error('Cannot stat command output: '+err);
       if (info.size > 1048576) throw new Error('Command output exceeded 1 MiB');
+      if(errorTemp){const [errorInfo,errorCode]=os.stat(errorTemp);if(errorCode!==0)throw Error('Cannot stat command stderr: '+errorCode);if(errorInfo.size>1048576)throw Error('Command output exceeded 1 MiB');}
       output = std.loadFile(temp) ?? '';
       if (errorTemp && (mergeStderr || timedOut || exitCode !== 0)) output += std.loadFile(errorTemp) ?? '';
       if (output.length > 1048576) throw new Error('Command output exceeded 1 MiB');
@@ -251,6 +254,40 @@ function realpath(path) {
   }
   return result;
 }
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0 || pid > 2147483647) return null;
+  if (pid === os.getpid()) return true;
+  try {
+    if (os.platform === 'win32') {
+      // 固定的 Cosmo 4.0.2 在 Windows 上可能把 kill(pid, 0) 当作终止操作，
+      // 或把不存在的 PID 报为 EPERM；不得把权限错误降级成“已退出”。
+      const configuredRoot = std.getenv('SYSTEMROOT') || std.getenv('SystemRoot');
+      const systemRoot = configuredRoot ? normalize(configuredRoot) : null;
+      if (!systemRoot || !/^[A-Za-z]:[\\/]/.test(systemRoot)) {
+        host.error('Windows 进程状态查询缺少绝对 SYSTEMROOT：' + JSON.stringify(systemRoot));
+        return null;
+      }
+      const powershell = systemRoot + '/System32/WindowsPowerShell/v1.0/powershell.exe';
+      const script = 'try {$p = [System.Diagnostics.Process]::GetProcessById(' + pid + ')} ' +
+        'catch [System.ArgumentException] {[Console]::Out.Write("exited"); exit 0} catch {exit 3}; ' +
+        'try {if ($p.HasExited) {[Console]::Out.Write("exited")} else {[Console]::Out.Write("alive")}} ' +
+        'catch {exit 3} finally {$p.Dispose()}';
+      const result = run([powershell, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], host.cwd(), 10);
+      if (result.timedOut || result.code !== 0) {
+        host.error('Windows 进程状态查询失败：' + JSON.stringify(result).slice(0, 1200));
+        return null;
+      }
+      const state = result.output.trim();
+      if (state !== 'alive' && state !== 'exited') host.error('Windows 进程状态查询响应未知：' + state.slice(0, 1200));
+      return state === 'alive' ? true : state === 'exited' ? false : null;
+    }
+    const code = os.kill(pid, 0);
+    return code === 0 ? true : code === -3 ? false : null;
+  } catch (error) {
+    if (os.platform === 'win32') host.error('Windows 进程状态查询不可用：' + String(error).slice(0, 1200));
+    return null;
+  }
+}
 export const host = {
   read, readBytes, write, writeBytes, exists, mkdirs, realpath, run,
   writeExclusive(path,content){
@@ -291,6 +328,9 @@ export const host = {
     const result = this.run(['chmod', mode.toString(8), absolute], cwd, 15);
     if (result.timedOut || result.code !== 0) throw new Error('chmod failed: ' + path);
   },
+  pid(){return os.getpid();},
+  processAlive,
+  fileMode(path){const [entry,error]=os.stat(path);if(error!==0)throw Error('stat failed');return entry.mode&0o777;},
   now() { return new Date().toISOString(); },
   log(s) { print(s); },
   error(s) { std.err.puts(s + '\n'); std.err.flush(); },

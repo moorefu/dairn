@@ -337,6 +337,16 @@ test('ATST-03 non-passing runs and incomplete CI context cannot be attested', ()
   throws(() => statementForRun(failedRun, {}, trustedContext()), 'non-passing');
   throws(() => statementForRun(sampleRun(), {}, {provider: 'github'}), 'incomplete');
 });
+test('机器签名拒绝旧混合范围声明，审批摘要仅能在显式审计域', () => {
+  const statement = statementForRun(sampleRun(), {}, trustedContext());
+  const legacy = JSON.parse(JSON.stringify(statement)); delete legacy.scope;
+  assert(validateStatement(legacy).length > 0, '无范围的旧声明被接受');
+  statement.digests.approval_snapshot_sha256 = 'a'.repeat(64);
+  assert(validateStatement(statement).length > 0, '旧混合审批摘要被接受');
+  delete statement.digests.approval_snapshot_sha256;
+  statement.audit = {scope:'snapshot-bytes-only',approval_snapshot_sha256:'a'.repeat(64)};
+  assert(validateStatement(statement).length === 0, '显式审计域被拒绝');
+});
 
 /* ---------- Approval（APR-01/02/05/06/07） ---------- */
 function verdict(overrides = {}) {
@@ -427,58 +437,58 @@ const TRUSTED_POLICY = {schema: 'dairn.policy.v1', risk: {levels: ['L0', 'L1', '
   checks: {L0: ['lint'], L1: ['lint', 'unit'], L2: ['lint', 'unit', 'integration']},
   approvals: {L2: {provider: 'scm-native', natural_person: true, independent: true, min_count: 1}, required: true},
   work: {required_for_ci: false}, evidence: {store: 'git-ref', ref: 'refs/heads/dairn-evidence', immutable_records: true}};
-test('GATE-01 passing check + approval verdict evaluates PASS without any work ledger', () => {
+test('GATE-01 local PASS 只表示机器保障且不授予平台权限', () => {
   const r = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: sampleRun(),
-    approval: verdict(), requiredStage: 'pre-merge', risk: 'L1', modules: ['app']});
-  assert(r.status === 'PASS', JSON.stringify(r.reasons));
+    requiredStage: 'pre-merge', risk: 'L1', modules: ['app']});
+  assert(r.status==='PASS'&&r.scope==='machine-assurance'&&r.assurance==='local-observed'&&r.merge_eligibility==='not-evaluated',JSON.stringify(r));
 });
-test('GATE-02 missing approval evidence is INDETERMINATE, not PASS and not silent FAIL', () => {
+test('GATE-02 人工审批由 SCM 独立执行，不阻塞本地机器核对', () => {
   const r = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: sampleRun(), requiredStage: 'pre-merge', risk: 'L1', modules: ['app']});
-  assert(r.status === 'INDETERMINATE' && r.reasons.join().includes('approval'), JSON.stringify(r));
+  assert(r.status==='PASS'&&r.human_approval==='delegated-to-scm',JSON.stringify(r));
 });
 test('GATE-03 failed or missing checks are deterministic FAIL', () => {
   const failedRun = sampleRun(); failedRun.status = 'failed';
-  assert(gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: failedRun, approval: verdict(), risk: 'L1', modules: ['app']}).status === 'FAIL', 'failed run passed gate');
-  assert(gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), approval: verdict(), risk: 'L1', modules: ['app']}).status === 'FAIL', 'missing check passed gate');
+  assert(gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: failedRun, risk: 'L1', modules: ['app']}).status === 'FAIL', 'failed run passed gate');
+  assert(gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), risk: 'L1', modules: ['app']}).status === 'FAIL', 'missing check passed gate');
 });
 test('GATE-04 subject mismatch fails; post-merge without attestation stays INDETERMINATE', () => {
   const otherSubject = {...goodSubject(), source_commit: '9'.repeat(40)};
-  const r = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: otherSubject, check: sampleRun(), approval: verdict(), risk: 'L1', modules: ['app']});
+  const r = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: otherSubject, check: sampleRun(), risk: 'L1', modules: ['app']});
   assert(r.status === 'FAIL' && r.reasons.join().includes('mismatch'), 'subject mismatch accepted');
-  const post = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: sampleRun(), approval: verdict(), requiredStage: 'post-merge', risk: 'L1', modules: ['app']});
+  const post = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: sampleRun(), requiredStage: 'post-merge', risk: 'L1', modules: ['app']});
   assert(post.status === 'INDETERMINATE' && post.reasons.join().includes('attestation'), JSON.stringify(post));
 });
 test('GATE-05/T34 one module passing a check never covers another module', () => {
   const both = l2Run(['app', 'lib']);
   const full = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: both,
-    approval: verdict({eligible_reviewer_ids: ['alice', 'bob']}), requiredStage: 'pre-merge', risk: 'L2', modules: ['app', 'lib']});
-  assert(full.status === 'PASS', JSON.stringify(full.reasons));
+    requiredStage: 'pre-merge', risk: 'L2', modules: ['app', 'lib']});
+  assert(full.status==='PASS',JSON.stringify(full.reasons));
   // Only app's checks executed: lib's unit/integration/build are missing (T34).
   const partial = {...both, checks: both.checks.filter(x => x.module === 'app'), run_id: both.run_id};
   const r = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: partial,
-    approval: verdict({eligible_reviewer_ids: ['alice', 'bob']}), requiredStage: 'pre-merge', risk: 'L2', modules: ['app', 'lib']});
+    requiredStage: 'pre-merge', risk: 'L2', modules: ['app', 'lib']});
   assert(r.status === 'FAIL' && r.reasons.some(x => x.includes('lib lacks a passing required check')), 'partial module coverage accepted: ' + JSON.stringify(r.reasons));
 });
 test('GATE-06/T36 an approval verdict copied from another change never authorizes this one', () => {
   const foreignHead = verdict({subject: {repository: 'org/service', number: 42, reviewed_head_sha: '9'.repeat(40)}});
   const r = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: sampleRun(),
     approval: foreignHead, requiredStage: 'pre-merge', risk: 'L1', modules: ['app']});
-  assert(r.status === 'FAIL' && r.reasons.some(x => x.includes('reviewed_head_sha')), 'foreign head approval accepted');
+  assert(r.status === 'FAIL' && r.reasons.some(x => x.includes('APPROVAL_INPUT_NOT_SUPPORTED')), 'foreign head approval accepted');
   const foreignRepo = verdict({subject: {repository: 'evil/project', number: 42, reviewed_head_sha: GOOD_SHA}});
   const r2 = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: sampleRun(),
     approval: foreignRepo, requiredStage: 'pre-merge', risk: 'L1', modules: ['app']});
-  assert(r2.status === 'FAIL' && r2.reasons.some(x => x.includes('repository')), 'foreign repository approval accepted');
+  assert(r2.status === 'FAIL' && r2.reasons.some(x => x.includes('APPROVAL_INPUT_NOT_SUPPORTED')), 'foreign repository approval accepted');
 });
 test('GATE-07/T35 only a real verified attestation result can satisfy post-merge', () => {
   const run = l2Run();
   const statement = statementForRun(run, {run_json_sha256: 'd'.repeat(64)}, trustedContext());
   const verified = {schema: 'dairn.verified-attestation.v1', statement, statement_sha256: 'e'.repeat(64), key_sha256: 'a'.repeat(64)};
   const post = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: run,
-    approval: verdict({eligible_reviewer_ids: ['alice', 'bob']}), verifiedAttestation: verified, requiredStage: 'post-merge', risk: 'L2', modules: ['app']});
-  assert(post.status === 'PASS', JSON.stringify(post.reasons));
+    verifiedAttestation: verified, requiredStage: 'post-merge', risk: 'L2', modules: ['app']});
+  assert(post.status === 'FAIL'&&post.reasons.some(x=>x.includes('real Ed25519')),JSON.stringify(post.reasons));
   // Bare statement JSON (pre-hardening input shape) is rejected outright.
   const bare = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: run,
-    approval: verdict({eligible_reviewer_ids: ['alice', 'bob']}), attestation: statement, requiredStage: 'post-merge', risk: 'L2', modules: ['app']});
+    attestation: statement, requiredStage: 'post-merge', risk: 'L2', modules: ['app']});
   assert(bare.status === 'FAIL' && bare.reasons.some(x => x.includes('bare attestation')), 'bare statement accepted');
   // Forged verified wrapper around a statement for a different subject (T36's
   // post-merge twin: a foreign repo/commit statement must not gate this one).
@@ -486,11 +496,11 @@ test('GATE-07/T35 only a real verified attestation result can satisfy post-merge
   const foreignSubject = {...goodSubject(), repository: 'evil/project', source_commit: '9'.repeat(40)};
   const stolen = statementForRun({...otherRun, subject: foreignSubject}, {}, trustedContext());
   const forged = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: run,
-    approval: verdict({eligible_reviewer_ids: ['alice', 'bob']}), verifiedAttestation: {schema: 'dairn.verified-attestation.v1', statement: stolen, statement_sha256: 'e'.repeat(64)}, requiredStage: 'post-merge', risk: 'L2', modules: ['app']});
-  assert(forged.status === 'FAIL' && forged.reasons.some(x => x.includes('does not match')), 'forged verified attestation accepted');
+    verifiedAttestation: {schema: 'dairn.verified-attestation.v1', statement: stolen, statement_sha256: 'e'.repeat(64)}, requiredStage: 'post-merge', risk: 'L2', modules: ['app']});
+  assert(forged.status === 'FAIL' && forged.reasons.some(x => x.includes('real Ed25519')), 'forged verified attestation accepted');
   const foreignRun = gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: run,
-    approval: verdict({eligible_reviewer_ids: ['alice', 'bob']}), verifiedAttestation: {schema: 'dairn.verified-attestation.v1', statement: statementForRun(otherRun, {}, trustedContext()), statement_sha256: 'e'.repeat(64)}, requiredStage: 'post-merge', risk: 'L2', modules: ['app']});
-  assert(foreignRun.status === 'FAIL' && foreignRun.reasons.some(x => x.includes('not the evaluated run')), 'attestation for a different run accepted');
+    verifiedAttestation: {schema: 'dairn.verified-attestation.v1', statement: statementForRun(otherRun, {}, trustedContext()), statement_sha256: 'e'.repeat(64)}, requiredStage: 'post-merge', risk: 'L2', modules: ['app']});
+  assert(foreignRun.status === 'FAIL' && foreignRun.reasons.some(x => x.includes('real Ed25519')), 'attestation for a different run accepted');
 });
 
 /* ---------- Workflow Adapter（FLOW-01..03） ---------- */
@@ -505,7 +515,7 @@ test('FLOW-01/02 declarative mapping maps states only; missing mapping is fine',
   assert(adaptWorkflow(mapping, 'Doing') === 'implement', 'state mapping broken');
   assert(adaptWorkflow(mapping, 'Unknown Column') === null, 'unknown state must map to null, not error');
   assert(gateEvaluate({trustedPolicy: TRUSTED_POLICY, subject: goodSubject(), check: sampleRun(),
-    approval: verdict(), requiredStage: 'pre-merge', risk: 'L1', modules: ['app'], workflowMapping: mapping}).status === 'PASS', 'gate must ignore workflow mapping');
+    requiredStage: 'pre-merge', risk: 'L1', modules: ['app'], workflowMapping: mapping}).status === 'PASS', '状态映射不改变机器保障判定');
 });
 
 /* ---------- Policy v1 schema 与 resolver（POL 系列） ---------- */
@@ -543,16 +553,16 @@ test('POL-03 approval rules resolve per-risk with flat fallback', () => {
   assert(flat.required === true && flat.min_count === 1, 'flat fallback broken');
   assert(approvalPolicyFor(V1_POLICY, 'L0').min_count === undefined, 'L0 must have no approval rule');
 });
-test('POL-04 gate consumes the resolved v1 view (L2 min_count and full matrix enforced)', () => {
-  const one = gateEvaluate({trustedPolicy: V1_POLICY, subject: goodSubject(), check: l2Run(),
-    approval: verdict(), requiredStage:'pre-merge', risk:'L2', modules:['app']});
-  assert(one.status === 'FAIL' && one.reasons.join().includes('insufficient'), 'min_count=2 not enforced with one approver');
-  const two = gateEvaluate({trustedPolicy: V1_POLICY, subject: goodSubject(), check: l2Run(),
+test('POL-04 v1 机器检查矩阵仍强制执行，审批人数由 SCM 执行', () => {
+  const complete = gateEvaluate({trustedPolicy: V1_POLICY, subject: goodSubject(), check: l2Run(),
+    requiredStage:'pre-merge', risk:'L2', modules:['app']});
+  assert(complete.status === 'PASS' && complete.human_approval === 'delegated-to-scm' && complete.merge_eligibility === 'not-evaluated', JSON.stringify(complete));
+  const mixed = gateEvaluate({trustedPolicy: V1_POLICY, subject: goodSubject(), check: l2Run(),
     approval: verdict({eligible_reviewer_ids:['alice','bob']}), requiredStage:'pre-merge', risk:'L2', modules:['app']});
-  assert(two.status === 'PASS', JSON.stringify(two.reasons));
+  assert(mixed.status === 'FAIL' && mixed.reasons.some(x => x.startsWith('APPROVAL_INPUT_NOT_SUPPORTED')), '旧审批输入必须显式拒绝');
   // An L1-only run cannot satisfy the L2 policy floor: integration/build are missing.
   const floor = gateEvaluate({trustedPolicy: V1_POLICY, subject: goodSubject(), check: sampleRun(),
-    approval: verdict({eligible_reviewer_ids:['alice','bob']}), requiredStage:'pre-merge', risk:'L2', modules:['app']});
+    requiredStage:'pre-merge', risk:'L2', modules:['app']});
   assert(floor.status === 'FAIL' && floor.reasons.some(x => x.includes('lacks a passing required check')), 'L2 floor bypassed with an L1 run');
 });
 

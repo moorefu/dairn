@@ -7,8 +7,8 @@
  * to be done, never claims that gates passed (§4.2). */
 import {sha256} from './sha256.mjs';
 import {classify, moduleSelection, manifestValidate, relative} from './policy.mjs';
-import {resolvePolicy, requiredChecksFor, approvalPolicyFor} from './policy-resolver.mjs';
-import {projectContextOf, readRefactorContracts, contractAppliesTo} from './project-context.mjs';
+import {resolvePolicy, requiredChecksFor} from './policy-resolver.mjs';
+import {projectContextOf, readRefactorContracts, contractAppliesTo, validateRefactorContract} from './project-context.mjs';
 
 const RISK_ORDER = ['L0', 'L1', 'L2'];
 /* Cheap-by-convention checks are offered for local fast feedback; everything
@@ -29,10 +29,10 @@ function git(h, root, args, timeout) {
 /* Deterministic canonical serialization for plan identity: sorted keys, no
  * whitespace, LF — the hash lives OUTSIDE the plan (envelope), so it never
  * references itself (§5.5). */
-function canonical(value) {
-  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
+export function canonical(value) {
+  if (Array.isArray(value)) return '[' + value.map(item=>item===undefined?'null':canonical(item)).join(',') + ']';
   if (value && typeof value === 'object')
-    return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + canonical(value[k])).join(',') + '}';
+    return '{' + Object.keys(value).filter(k=>value[k]!==undefined).sort().map(k => JSON.stringify(k) + ':' + canonical(value[k])).join(',') + '}';
   return JSON.stringify(value);
 }
 
@@ -59,7 +59,7 @@ export function scopeFor(h, root, policyJson, {base, head = 'HEAD', timeout = 30
     record_source: meta.source, base: baseSha, head: headSha, tree: treeSha};
 }
 
-export function planGovernance({trustedPolicy, projectContext, change, refactorContracts = []}) {
+export function planGovernance({trustedPolicy, projectContext, change, refactorContracts = [], organizationPolicy = null}) {
   ok(trustedPolicy && typeof trustedPolicy === 'object', 'trustedPolicy required');
   ok(change && Array.isArray(change.paths), 'change with paths required');
   const policy = resolvePolicy(trustedPolicy);
@@ -87,48 +87,47 @@ export function planGovernance({trustedPolicy, projectContext, change, refactorC
   }
   /* 3. Approved refactor contracts covering this change append their required
    *    contract checks; a refactor intent never downgrades risk (§13.4). */
-  const appliedContracts = (refactorContracts || []).filter(c => contractAppliesTo(c, change.paths));
+  const appliedContracts = (refactorContracts || []).filter(c => change.all||contractAppliesTo(c, change.paths));
   /* 4. Requirements: (module × required check) for the effective risk, plus
    *    contract requirements — exact pairing, no cross-module coverage (T34). */
-  const requiredIds = requiredChecksFor(policy, effectiveRisk);
+  const requiredIds = [...new Set([...requiredChecksFor(policy, effectiveRisk), ...(organizationPolicy?requiredChecksFor(organizationPolicy,effectiveRisk):[])])].sort();
   const requirements = [];
   for (const module of change.modules || []) for (const id of requiredIds)
     requirements.push({id: module.name + '.' + id, module_id: module.name, check_id: id, required: true,
-      origin: 'risk-' + effectiveRisk});
+      origin: 'risk-' + effectiveRisk,scope:{kind:'module',module_id:module.name},authority:{kind:change.authority_source||'unverified-input',ref:change.subject?.base_commit||null},subject_binding:sha256(canonical(change.subject||null))});
   for (const contract of appliedContracts)
     for (const id of contract.baseline.contracts)
       requirements.push({id: contract.id + '.' + id, module_id: null, check_id: id, required: true,
-        origin: 'approved-refactor-contract:' + contract.id, refactor: contract.id});
+        origin: 'approved-refactor-contract:' + contract.id, refactor: contract.id,scope:{kind:'contract',module_id:null,contract_id:contract.id},authority:{kind:change.authority_source==='protected-base+admin-pin'?'effective-protected-contract':'base-contract-unverified',ref:change.subject?.base_commit||null},subject_binding:sha256(canonical(change.subject||null))});
+  const requirementIds=new Set();
+  for(const requirement of requirements){
+    ok(!requirementIds.has(requirement.id),'REQUIREMENT_ID_CONFLICT: '+requirement.id);
+    requirementIds.add(requirement.id);
+  }
   /* 5. Executors from the module's own check configurations; a missing argv is
    *    a capability GAP, never a silently dropped requirement (T08). */
   const executors = [];
   const gaps = [];
   const configured = (module, id) => module?.checks?.[id] && Array.isArray(module.checks[id].argv) ? module.checks[id] : null;
   for (const req of requirements) {
-    if (req.module_id === null) continue;
-    const module = (change.modules || []).find(m => m.name === req.module_id);
-    const cfg = configured(module, req.check_id);
-    if (!cfg) {
-      gaps.push({kind: 'MISSING_CAPABILITY', module_id: req.module_id, check_id: req.check_id,
+    const module = req.module_id===null?null:(change.modules || []).find(m => m.name === req.module_id);
+    const contract=(refactorContracts||[]).find(c=>c.id===req.refactor);
+    const cfg = req.module_id===null?(trustedPolicy.repository_checks?.[req.check_id]||contract?.executors?.[req.check_id]):configured(module, req.check_id);
+    if (!cfg||!Array.isArray(cfg.argv)||!cfg.argv.length) {
+      gaps.push({kind: req.module_id===null?'REQUIRED_EXECUTOR_MISSING':'MISSING_CAPABILITY',requirement_id:req.id, module_id: req.module_id, check_id: req.check_id,
         reason: 'no executor configured in project.json for ' + req.module_id + ':' + req.check_id});
       continue;
     }
     const phase = typeof cfg.phase === 'string' && ['local-and-ci', 'ci-required', 'local-only'].includes(cfg.phase)
       ? cfg.phase : null;
     const fast = phase ? phase.includes('local') : LOCAL_FAST_HINTS.includes(req.check_id);
-    executors.push({module_id: req.module_id, check_id: req.check_id,
-      implementation_digest: sha256(canonical(cfg.argv)), phase: phase || (fast ? 'local-and-ci' : 'ci-required')});
+    executors.push({requirement_id:req.id,scope:req.scope,module_id: req.module_id, check_id: req.check_id,argv:cfg.argv,cwd:cfg.cwd||module?.path||'.',timeout:cfg.timeout||null,
+      implementation_digest: sha256(canonical(cfg)), phase: phase || (fast ? 'local-and-ci' : 'ci-required')});
   }
   /* 6. Execution split: local fast feedback is advisory speed; CI required is
    *    the complete assurance set — deferred-to-ci is never "passed". */
   const localFast = executors.filter(x => x.phase.includes('local')).map(x => x.module_id + '.' + x.check_id);
   const ciRequired = [...requirements.filter(x => x.required).map(x => x.id)];
-  const approvals = [];
-  const approvalPolicy = approvalPolicyFor(policy, effectiveRisk);
-  const approvalNeeded = approvalPolicy.required !== false || Number(approvalPolicy.min_count || 0) > 0;
-  if (approvalNeeded)
-    approvals.push({authority: 'scm-native', natural_person: true, required: true,
-      origin: 'risk-' + effectiveRisk});
   /* 7. Advisory workflow: suggestions only, zero items is valid (§0 principle 1). */
   const advisory = effectiveRisk === 'L2' ? ['specify', 'implement', 'review']
     : effectiveRisk === 'L1' ? ['implement', 'review'] : [];
@@ -138,13 +137,13 @@ export function planGovernance({trustedPolicy, projectContext, change, refactorC
     subject: change.subject || null,
     /* The plan binds the change scope it was computed for (§5.5): the same
      * requirement set is never reusable for a different set of paths. */
-    change_paths: [...change.paths].sort(),
+    change_paths: [...change.paths].sort(),scope_mode:change.all?'all':'changed',
     authority: {policy_sha256: change.policy_sha256 || null, runtime_sha256: change.runtime_sha256 || null,
-      source: change.authority_source || 'protected-base'},
+      source: change.authority_source || 'unverified-input',organization_policy_sha256:organizationPolicy?sha256(canonical(organizationPolicy)):null},
     classification: {intent: change.intent || null, risk_floor: floor, effective_risk: effectiveRisk,
       governance_mode: change.governance_mode || null, impact_confidence: change.impact_confidence || 'partial',
       reasons: [...new Map(reasons.map(r => [r.rule + '|' + r.source, r])).values()]},
-    requirements, executors, approvals,
+    requirements, executors, human_approval:'delegated-to-scm',merge_eligibility:'not-evaluated',
     execution: {local_fast: [...new Set(localFast)], ci_required: ciRequired},
     advisory_workflow: [...new Set(advisory)],
     work_required: false,
@@ -156,22 +155,28 @@ export function planGovernance({trustedPolicy, projectContext, change, refactorC
 }
 
 /* Host-bound entry: read the trusted policy, scope the change and plan. */
-export function planForChange(h, root, {base, head = 'HEAD', timeout = 30, policyJson = null, policyRaw = null} = {}) {
-  const raw = policyRaw ?? h.read(join(root, '.dairn/governance/project.json'));
-  const policyJsonValue = policyJson ?? JSON.parse(raw);
-  const scope = scopeFor(h, root, policyJsonValue, {base, head, timeout});
+export function planForChange(h, root, {base, head = 'HEAD', timeout = 30, organizationPolicy = null, subjectContext = null, authorityContext = null} = {}) {
+  ok(base,'POLICY_UNTRUSTED: 缺少 Base，不能回退 Head 策略');
+  const baseSha=git(h,root,['rev-parse','--verify',base+'^{commit}'],timeout).trim();
+  const raw = git(h,root,['show',baseSha+':.dairn/governance/project.json'],timeout);
+  const policyJsonValue = JSON.parse(raw);
+  const scope = scopeFor(h, root, policyJsonValue, {base:baseSha, head, timeout});
   const context = projectContextOf(policyJsonValue);
-  const contracts = readRefactorContracts(h, root);
-  const subject = {schema: 'dairn.subject.v1', repository: change_repository(h, root, timeout), kind: 'git-commit',
+  const contracts=[];
+  const names=git(h,root,['ls-tree','-r','--name-only',baseSha,'--','.dairn/governance/refactors'],timeout).split(/\r?\n/).filter(p=>p.endsWith('.json'));
+  for(const name of names){relative(name);contracts.push(validateRefactorContract(JSON.parse(git(h,root,['show',baseSha+':'+name],timeout)),name));}
+  const subject = {schema: 'dairn.subject.v1', repository: subjectContext?.repository||h.env?.('DAIRN_CI_REPOSITORY')||change_repository(h, root, timeout), kind: 'git-commit',
     source_commit: scope.head, tree_sha: scope.tree, base_commit: scope.base, comparison: 'base-to-source'};
+  if(subjectContext){for(const k of ['repository','source_commit','tree_sha','base_commit'])ok(subjectContext[k]===subject[k],'SUBJECT_MISMATCH: '+k);for(const k of ['stage','change'])if(subjectContext[k]!==undefined)subject[k]=subjectContext[k];}
   const result = planGovernance({trustedPolicy: policyJsonValue, projectContext: context,
     change: {paths: scope.paths, modules: scope.modules, risk: scope.risk, risk_floor: scope.risk,
       governance_mode: scope.governance_mode, triggers: scope.triggers, subject,
-      policy_sha256: sha256(raw), authority_source: 'project-config'},
-    refactorContracts: contracts});
+      runtime_sha256:sha256(h.read('/zip/quickjs/assets/manifest.json')),policy_sha256: sha256(raw), authority_source: 'git-base-unverified'},
+    refactorContracts: contracts,organizationPolicy});
   /* I-01: 附加质量目标概览（advisory 摘要，不进 requirements 矩阵，
    * 也不参与 plan_sha256——计划层永不获得放行语义）。 */
-  result.plan.quality_goals = qualityGoalsSummary(h, root);
+  if(authorityContext){for(const k of ['source','protected_base_commit','verifier_sha256','admin_policy_sha256'])if(authorityContext[k]!==undefined)result.plan.authority[k]=authorityContext[k];if(authorityContext.source==='protected-base+admin-pin')for(const requirement of result.plan.requirements)requirement.authority={kind:requirement.scope?.kind==='contract'?'effective-protected-contract':'protected-base+organization-floor',ref:scope.base};result.plan_sha256=sha256('dairn.governance-plan.v1\n'+canonical(result.plan));}
+  result.advisory={quality_goals:qualityGoalsSummary(h,root),policy_provenance:'本地 Git Base 是不可变身份，但未认证为平台受保护 Base，计划不构成 PCC PASS'};
   return result;
 }
 

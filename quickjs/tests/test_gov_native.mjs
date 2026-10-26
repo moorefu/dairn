@@ -41,7 +41,7 @@ test('GOV-01 an L0 docs change plans the minimum with zero ceremony', () => {
   assert(plan.work_required === false, 'work must never be required');
   /* Approval defaults conservative (same formula as the gate): a policy that
    * is silent on approvals still gets scm-native listed, never dropped. */
-  assert(plan.approvals.length === 1 && plan.approvals[0].authority === 'scm-native', 'conservative approval missing');
+  assert(plan.human_approval==='delegated-to-scm'&&plan.approvals===undefined,'审批委托缺失');
 });
 
 test('GOV-02 an L2 critical change plans the full matrix and scm-native approval', () => {
@@ -49,7 +49,7 @@ test('GOV-02 an L2 critical change plans the full matrix and scm-native approval
     change: change(['quickjs/core/engine.mjs'], POLICY.modules, 'L2', {triggers: ['governance-critical:quickjs/core/engine.mjs']})});
   assert(plan.classification.effective_risk === 'L2', 'risk wrong');
   assert(plan.requirements.length === 8, 'full matrix over 2 modules: ' + plan.requirements.length);
-  assert(plan.approvals.length === 1 && plan.approvals[0].authority === 'scm-native' && plan.approvals[0].natural_person === true, 'approval wrong');
+  assert(plan.human_approval==='delegated-to-scm'&&plan.merge_eligibility==='not-evaluated','审批委托或范围错误');
   assert(JSON.stringify(plan.advisory_workflow) === JSON.stringify(['specify', 'implement', 'review']), 'advisory wrong');
 });
 
@@ -247,14 +247,14 @@ test('FBK-03 healthy history recommends no action', () => {
   assert(report.recommendations.length === 0, 'healthy history produced recommendations');
 });
 
-test('FBK-04 flaky failures surface as POLICY_NOISE with preserved requirements', () => {
+test('FBK-04 high failure frequency without equivalent inputs is not flaky', () => {
   const flaky = Array.from({length: 12}, (_, i) => ({run_id: 'run-f-' + i, subject_commit: 'd'.repeat(40),
     status: i % 4 === 0 ? 'failed' : 'passed',
     checks: [{id: 'unit', module: 'app', status: i % 4 === 0 ? 'failed' : 'passed', duration_sec: 3}]}));
   const report = recommendAdaptations({runs: flaky, minSamples: 10});
-  const noise = report.recommendations.find(r => r.kind === 'POLICY_NOISE');
+  const noise = report.recommendations.find(r => r.kind === 'FREQUENT_FAILURE');
   assert(noise, 'flaky check not flagged');
-  assert(noise.proposed_action.includes('narrow') && noise.requirements_preserved.includes('app:unit'), 'noise advice drops assurance');
+  assert(noise.proposed_action.includes('不得自动删除') && noise.requirements_preserved.includes('app:unit'), 'noise advice drops assurance');
 });
 
 print('DAIRN_NATIVE_GOV_RESULT ' + JSON.stringify({engine: 'native-qjs', platform: os.platform, passed: tests.length - failures, failed: failures, tests}));

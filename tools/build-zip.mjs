@@ -4,6 +4,7 @@ import * as os from 'os';
 import {host} from '../quickjs/host/qjs.mjs';
 import {sha256Bytes} from '../quickjs/core/sha256.mjs';
 import {utf8,readBytes,writeBytes,zip,readZip} from './zip.mjs';
+import {absoluteBuildPath} from './build-paths.mjs';
 
 // 未显式给出版本时按构建时间生成 nightly，算法与 tools/release_config.py 一致：
 // DAIRN_BUILD_TIME 可为 ISO 8601 或 epoch 秒，按北京时间（UTC+8）格式化为 YYYYMMDDHHMMSS。
@@ -29,7 +30,7 @@ function nightlyVersion(version){
 try {
   const options={root:host.cwd()};
   for(let i=1;i<scriptArgs.length;i+=2){
-    const key=scriptArgs[i];if(!['--root','--out','--stage','--qjs','--version'].includes(key)||!scriptArgs[i+1])throw Error('用法：build --qjs 已校验解释器 --out 输出目录 --version 发布版本 [--stage 全新暂存目录]');
+    const key=scriptArgs[i];if(!['--root','--out','--stage','--runtime-out','--qjs','--version'].includes(key)||!scriptArgs[i+1])throw Error('用法：build --qjs 已校验解释器 --out 输出目录 --version 发布版本 [--stage 全新暂存目录]');
     options[key.slice(2)]=scriptArgs[i+1];
   }
   const root=host.realpath(options.root);
@@ -39,7 +40,7 @@ try {
   const pkg=JSON.parse(host.read(root+'/package.json'));
   const version=(declared||nightlyVersion(pkg.version)).replace(/^v/,'');
   if(!/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:alpha|beta|rc)\.(?:0|[1-9][0-9]*)|nightly\.[1-9][0-9]{13}))?$/.test(version))throw Error('发布版本格式无效：'+version);
-  const absolute=p=>/^(?:[A-Za-z]:[\\/]|\/)/.test(p)?p:host.cwd()+'/'+p;
+  const absolute=p=>absoluteBuildPath(p,host.cwd());
   const out=absolute(options.out||root+'/dist');host.mkdirs(out);
   if(!options.qjs)throw Error('缺少 --qjs，请通过 python tools/build.py 或 npm run build 获取 QuickJS');
   const quickjs=JSON.parse(host.read(root+'/quickjs.lock.json'));
@@ -95,6 +96,7 @@ try {
   const sources=[...files.keys()].filter(p=>p==='quickjs/main.mjs'||/^quickjs\/(core|host)\/[^/]+\.mjs$/.test(p)).sort();
   manifest.engine_sources=sources.map(path=>({path,sha256:sha256Bytes(files.get(path))}));
   files.set('quickjs/assets/manifest.json',utf8(JSON.stringify(manifest,null,2)+'\n'));
+  files.set('quickjs/assets/runtime-identity.json',utf8(JSON.stringify({version:release.version,sha256:sha256Bytes(files.get('quickjs/assets/manifest.json'))})+'\n'));
   const original=readZip(input);
   const embedded=sources.concat([...files.keys()].filter(p=>p.startsWith('quickjs/assets/'))).sort();
   const runtime=zip([
@@ -123,9 +125,16 @@ try {
   ]);
   const artifact=out+'/'+release.name+'-'+release.version+'.zip';
   writeBytes(artifact,zip([...distribution.keys()].sort().map(name=>({name:prefix+name,data:distribution.get(name),mode:mode(name)}))));
-  host.mkdirs(root+'/runtime');
-  writeBytes(root+'/runtime/dairn-embedded.com',runtime);
-  writeBytes(root+'/runtime/runtime-integrity.json',files.get('runtime-integrity.json'));
+  if(options['runtime-out']){
+    const target=absolute(options['runtime-out']);
+    if(host.exists(target))throw Error('候选输出目录必须尚不存在：'+target);
+    const parent=target.slice(0,target.lastIndexOf('/'));
+    const resolved=host.realpath(parent)+'/'+target.slice(target.lastIndexOf('/')+1);
+    if(resolved===root+'/runtime'||resolved.startsWith(root+'/.dairn/'))throw Error('候选不得写入固定运行时或根 runtime');
+    host.mkdirs(target);
+    writeBytes(target+'/dairn-embedded.com',runtime);
+    writeBytes(target+'/runtime-integrity.json',files.get('runtime-integrity.json'));
+  }
   if(options.stage){
     const stage=absolute(options.stage);if(host.exists(stage))throw Error('暂存目录必须尚不存在：'+stage);
     host.mkdirs(stage);

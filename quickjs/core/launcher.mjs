@@ -241,7 +241,7 @@ export function runtimeFreshness(h, root, engineSources) {
   return {status, checked: sources.length, stale_sources: stale.slice(0, 20), stale_count: stale.length,
     note: status === 'current'
       ? 'working tree matches the embedded engine sources'
-      : 'working tree differs from the embedded engine sources; rebuild and vendor the runtime before verifying source changes'};
+      : 'working tree differs from the embedded engine sources; 使用独立候选验证源码；需要更新项目 Pin 时单独审阅 Runtime Promotion'};
 }
 
 /* 注册已放入 .dairn/runtime/ 的官方运行时；只读校验，写盘由调用方负责。 */

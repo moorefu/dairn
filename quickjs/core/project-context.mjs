@@ -66,6 +66,7 @@ export function readRefactorContracts(h, root) {
 }
 
 export function contractAppliesTo(contract, paths) {
+  if(contract.paths===undefined)return true;
   if (!Array.isArray(contract.paths) || !contract.paths.length) return false;
   const prefixes = contract.paths.map(x => String(x).replace(/\/$/, ''));
   return paths.some(p => prefixes.some(prefix =>

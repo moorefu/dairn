@@ -29,7 +29,7 @@ const args = windows
   : [path.join(base, 'dairn'), ...process.argv.slice(2)];
 // 让内核拿到分发包自带的运行时载荷目录（init/adopt/upgrade 据此复制运行时）；
 // Windows 直接执行 APE 时没有启动器注入，必须在这里显式传递。
-const env = {...process.env, DAIRN_RUNTIME_DIR: runtimeDir, DAIRN_RUNTIME_SOURCE: 'packaged'};
+const env = {...process.env, DAIRN_RUNTIME:binary,DAIRN_RUNTIME_DIR: runtimeDir, DAIRN_RUNTIME_SOURCE: 'packaged', DAIRN_RUNTIME_ROLE:'installed-source', DAIRN_INSTALLED_ENTRY_SHA256:crypto.createHash('sha256').update(fs.readFileSync(__filename)).digest('hex')};
 const child = spawn(command, args, {stdio: 'inherit', cwd: process.cwd(), windowsHide: true, env});
 let settled = false;
 child.once('error', err => {

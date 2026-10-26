@@ -14,7 +14,7 @@ symbols: ["dairn governance plan --base", "dairn governance explain --base", "da
 
 ## 治理计划（governance plan / explain）
 
-`dairn governance plan --base <ref>` 从可信项目策略合成 `dairn.governance-plan.v1` 最低充分保证计划；`explain` 输出同一计划的人类解释链。计划是**待执行工作的解释，不是门禁结论**：`ready-to-execute` 只表示验证器分派就绪，运行结果由 `dairn.check-run.v1` 保存，授权由受信 Gate 独立计算。
+`dairn governance plan --base <ref>` 从可信项目策略合成 `dairn.governance-plan.v1` 最低充分保证计划；`explain` 输出同一计划的人类解释链。计划是**待执行工作的解释，不是门禁结论**：`ready-to-execute` 只表示验证器分派就绪，运行结果由 `dairn.check-run.v1` 保存，机器结果由 Gate 核对，人工审批和最终合并由 SCM 原生规则独立执行。
 
 合成规则（顺序稳定、可重复）：
 
@@ -25,6 +25,7 @@ symbols: ["dairn governance plan --base", "dairn governance explain --base", "da
 - 缺失执行器（project.json 无 argv）记为 `MISSING_CAPABILITY` 缺口并以非零退出；缺口不被跳过、不等于通过。
 - `local_fast` 仅是速度建议（lint/unit 类）；`ci_required` 始终包含全部强制项，`deferred-to-ci` 永不标记为通过。
 - `plan_sha256` 由规范化 JSON（键排序、LF）在计划正文之外计算，不自引用；计划绑定 `change_paths`，不同变更范围不可复用同一计划。
+- `human_approval` 恒为 `delegated-to-scm`，`merge_eligibility` 为 `not-evaluated`；计划不输出按风险分级的审核者人数或已批准状态。组织审批底线与 Code Owner 规则交由平台配置，不通过机器计划镜像维护。
 - `work_required` 恒为 false；`advisory_workflow` 可为空，建议项（specify/implement/review/refactor:*）不是检查资格。
 
 ## 能力评估（governance assess）
@@ -43,4 +44,10 @@ symbols: ["dairn governance plan --base", "dairn governance explain --base", "da
 
 ## 治理反馈（governance recommend）
 
-`dairn governance recommend --window <days>` 只输出**有证据的建议**（CI_SLOW/REPEATED_RUNS/POLICY_NOISE），每条附观测数据、被保留的保证目标，且全部 `requires_approval`；样本不足时如实输出 `insufficient-evidence`，不宣称任何节约。建议永不自动应用，也不影响计划或门禁的强制项。
+`dairn governance recommend --window <days>` 只输出**有证据的建议**（CI_SLOW/REPEATED_RUNS/FREQUENT_FAILURE/SUSPECTED_FLAKY），每条附观测数据、被保留的保证目标，且全部 `requires_approval`；样本不足时如实输出 `insufficient-evidence`，不宣称任何节约。建议永不自动应用，也不影响计划或门禁的强制项。
+
+## 离线执行与完整性核对
+
+`dairn governance execute --base <SHA> --assurance --json` 在同一 Runtime 内生成计划、执行要求、记录 Run 并核对完整性，只输出机器保障。整个内核不需要 GitHub Token 或 HTTP 客户端；checkout、项目测试和 CI 工件传输仍可能联网。
+
+`--requirements <ID,ID>` 只用于受信执行器分片，Run 明示 partial-plan，不能独立满足完整计划。`dairn gate evaluate --base <SHA> --runs <清单> --jobs <固定作业集合> --needs <直接依赖>` 重新生成同一计划并核对原始 Run 摘要、唯一 Requirement 与成功作业。固定作业集合来自管理员配置，不能从现有结果反推；skipped、neutral、cancelled、失败或缺失均非成功。

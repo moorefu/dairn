@@ -8,10 +8,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_RUNTIME = ROOT / 'runtime/dairn-embedded.com'
-SOURCE_INTEGRITY = ROOT / 'runtime/runtime-integrity.json'
+SOURCE_RUNTIME = Path(os.environ['DAIRN_TEST_RUNTIME'])
+SOURCE_INTEGRITY = Path(os.environ['DAIRN_TEST_RUNTIME']).with_name('runtime-integrity.json')
 SOURCE_LAUNCHER = ROOT / 'dairn'
 POSIX = os.name == 'posix'
 
@@ -58,6 +59,12 @@ class PythonLauncherTest(unittest.TestCase):
     def run_shell_launcher(self, *args):
         return subprocess.run(['/bin/sh', str(self.launcher), *args], capture_output=True, text=True,
                               encoding='utf-8', errors='replace', timeout=180)
+
+    def test_installed_entry_ignores_inherited_candidate_override(self):
+        with patch.dict(os.environ, {'DAIRN_RUNTIME': str(Path(self.temp.name) / 'missing-candidate.com')}):
+            result = self.run_cli('--version')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(self.engine_version, result.stdout)
 
     def test_version(self):
         result = self.run_cli('--version')

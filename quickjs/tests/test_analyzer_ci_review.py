@@ -77,20 +77,30 @@ class AnalyzerCIReview(unittest.TestCase):
    '--signature','.dairn/governance/evidence/statement.json.sig','--key',str(key),'--context','.dairn/governance/evidence/ci-context.json','--root',self.project)
   self.assertNotEqual(verify(wrong).returncode,0)
   ok_verify=verify(pub);self.assertEqual(ok_verify.returncode,0,ok_verify.stdout+'\n'+ok_verify.stderr)
-  # Gate composition (v1 protocol inputs). Post-merge trusts the signed build
-  # chain (approval was enforced pre-merge by the platform); pre-merge without
-  # approval evidence stays INDETERMINATE, never a silent pass. The gate binds
-  # the verified statement to THIS run id, so the fixture reuses the real one.
-  self.subject_file(head)
-  v1run=self.v1_run_file(head,run_id)
+  # 机器保障与平台审批分开；预合并不等待审批镜像，发布阶段仍强制真实签名。
+  # Gate 绑定当前 Run，不能用机器 PASS 声称平台已批准或可以合并。
+  # Gate 必须消费签名覆盖的原始 Run，不能复用 run_id 伪造另一份绿色 JSON。
+  v1run='.dairn/governance/evidence/runs/'+head+'/'+run_id+'/run.json'
+  actual=json.loads((self.project/v1run).read_text())
+  (self.project/'.dairn/governance/evidence/subject.json').write_text(json.dumps(actual['subject']))
   gate=lambda stage='post-merge',key=None: self.call('gate','evaluate','--subject','.dairn/governance/evidence/subject.json',
    '--policy','.dairn/governance/project.json','--check',v1run,
    '--attestation','.dairn/governance/evidence/statement.json',
    '--signature','.dairn/governance/evidence/statement.json.sig','--key',str(key or pub),
    '--context','.dairn/governance/evidence/ci-context.json',
-   '--stage',stage,'--root',self.project)
+   '--stage',stage,'--json','--root',self.project)
   self.assertEqual(gate().returncode,0)
-  self.assertEqual(gate('pre-merge').returncode,3)
+  premerge=gate('pre-merge');self.assertEqual(premerge.returncode,0,premerge.stdout+premerge.stderr)
+  machine=json.loads(premerge.stdout)
+  self.assertEqual(machine['scope'],'machine-assurance')
+  self.assertEqual(machine['human_approval'],'delegated-to-scm')
+  self.assertEqual(machine['merge_eligibility'],'not-evaluated')
+  self.assertEqual(machine['assurance'],'local-observed')
+  for stage in ['post-merge','release']:
+   unsigned=self.call('gate','evaluate','--subject','.dairn/governance/evidence/subject.json',
+    '--policy','.dairn/governance/project.json','--check',v1run,'--stage',stage,'--json','--root',self.project)
+   self.assertEqual(unsigned.returncode,3,unsigned.stdout+unsigned.stderr)
+   self.assertEqual(json.loads(unsigned.stdout)['status'],'INDETERMINATE')
   # Wrong public key: real Ed25519 verification fails closed, never PASS.
   self.assertEqual(gate(key=wrong).returncode,1)
   # Review requires explicit, current-head two-axis decision.

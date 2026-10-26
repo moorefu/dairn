@@ -31,9 +31,20 @@ symbols: ["dairn init", "dairn upgrade", "dairn doctor"]
 
 POSIX 启动器使用按原运行时 SHA256 寻址的持久执行镜像。首次使用某个内容摘要时创建私有临时文件，复制并只给镜像设置 0700 权限，校验摘要后通过原子重命名发布；并发首次调用允许准备相同字节的镜像，发布过程不原地改写正在执行的文件。后续命中只读取原文件及镜像摘要，再通过 `exec /bin/sh` 执行镜像，不复制、不补权限、不删除。原运行时的字节与权限保持不变。
 
-镜像缓存目录为 `${DAIRN_CACHE_HOME:-${XDG_CACHE_HOME:-$HOME/.cache}/dairn}/runtime-images-v1`，必须为当前用户拥有、权限 0700 的真实目录；解析中间符号链接后的父路径须由当前用户或 root 拥有，拒绝非 sticky 的组/其他用户可写目录；`DAIRN_CACHE_HOME` 必须为绝对路径。镜像为 `<源文件摘要>.com`。符号链接、非普通文件、不属于当前用户、权限不是 0700 或摘要不匹配均以退出码 2 拒绝执行；缺少 SHA256 工具、缓存目录不可用或准备失败也退出 2，不回退执行原文件。每次运行仍读取并校验源文件和镜像的摘要，缓存不提升信任级别，也不能替代外部 pin。源运行时升级后自然使用不同摘要的镜像，旧镜像保留，维护者可在没有相关命令运行时清理整个缓存目录。
+缓存目录按以下顺序选择，Windows 原生 APE 入口不使用这些 POSIX 镜像目录：
 
-参数、标准输入输出、工作目录、退出码和信号通过 `exec` 保持原生透传。缓存命中时没有额外的后台监护进程或退出清理。Windows 原生 PE 入口维持直接执行。任何位置都不再从 `runtime/` 目录隐式取运行时：源码仓库根的 `runtime/` 只是构建产物，使用它必须显式设置 `DAIRN_RUNTIME`。
+1. 显式设置 `DAIRN_CACHE_HOME`：镜像放其 `runtime-images-v1/` 子目录。配置必须为非空绝对路径；不安全或不可用都退出 2，不自动回退。
+2. 未显式配置时使用 `${XDG_CACHE_HOME}/dairn/runtime-images-v1`；XDG 未设置时用 `$HOME/.cache/dairn/runtime-images-v1`。只有权限、只读文件系统或安全目录的创建/写入失败可以尝试下一候选。
+3. 已识别项目的 `.dairn/cache/ape-exec/`：以启动器目录的普通 `.dairn/lock.json` 识别项目，安装适配层也可从当前工作目录向上查找。没有项目标记时不在任意目录创建本地缓存。
+
+每个候选使用相同安全校验：缓存目录由当前用户拥有、权限 0700；已有逻辑路径拒绝用户可控符号链接，系统 root 拥有的 `/tmp`、`/var` 别名仍须校验真实路径；所有父目录须由当前用户或 root 拥有，拒绝非 sticky 的组/其他用户可写目录。镜像为 `<源文件摘要>.com`，必须为当前用户拥有、权限 0700 的普通文件，且 SHA256 与原始 Runtime 一致。检测到链接、异常所有权、类型、权限或摘要篡改时直接退出 2，不能以回退掩盖风险。缓存命中时校验现有镜像，不因目录只读而重新写入，也不执行原始载荷作为后备。
+
+全部安全候选不可用时退出 2，输出 `DAIRN_RUNTIME_CACHE_UNAVAILABLE`，说明默认目录不可写、没有安全回退，并提示把 `DAIRN_CACHE_HOME` 设为私有、可写的绝对目录。成功回退不输出前一候选的 mkdir 噪声。缺少 SHA256 工具仍直接退出 2。
+
+缓存只决定执行镜像位置，不提升信任级别，也不能替代外部 pin；`DAIRN_RUNTIME_DIR` 始终指向原始载荷目录。源 Runtime 升级后自然使用不同摘要的镜像，维护者可在没有相关命令运行时清理缓存目录。
+
+
+参数、标准输入输出、工作目录、退出码和信号通过 `exec` 保持原生透传。缓存命中时没有额外的后台监护进程或退出清理。Windows 原生 PE 入口维持直接执行。任何位置都不再从 `runtime/` 目录隐式取运行时：源码仓库根的 `runtime/` 是旧构建遗留；新的源码验证由 with-built-runtime.py 管理隔离候选。
 
 ## 分发与安装时的目录结构
 
@@ -53,12 +64,12 @@ licenses/QuickJS-MIT.txt
 
 npm / PyPI 安装提供同样的启动器与包内运行时。在项目目录中通过已安装的 CLI 运行 `dairn init` / `dairn adopt` 后：项目根生成 `dairn` / `dairn.cmd` 受管启动器，安装适配层设置的 `DAIRN_RUNTIME_DIR` 指向包内运行时目录，CLI 把该目录中的运行时二进制与完整性清单复制到项目的 `.dairn/runtime/`，并写入 vendored 模式的 `.dairn/launcher.json`。安装过程不会在项目里生成 `.dairn/bin/dairn*`，也不会复制 `LICENSE` / `licenses/`。
 
-源码仓库的日常开发使用根启动器执行已提交的 `.dairn/runtime/` 治理运行时快照；修改内核或资产后先 `python tools/build.py`（或 `npm run build`）生成根目录 `runtime/`，再用 `DAIRN_RUNTIME=<仓库>/runtime/dairn-embedded.com ./dairn <args>` 验证新构建。只有需要让治理运行时采用新构建时，才更新 `.dairn/runtime/` 快照并执行 `dairn upgrade --vendor-runtime .dairn/runtime --apply`。
+源码仓库日常使用项目 Pin；源码回归用 with-built-runtime.py 在独占目录构建、验证并清理候选。普通构建不写根 runtime 或项目 Pin。升级和回滚见 [运行时生命周期](runtime-lifecycle.md)。
 
 ## 传递给内核的环境变量
 
 - `DAIRN_RUNTIME`：显式指定的运行时文件，优先级最高，仅供构建验证或显式切换。
-- `DAIRN_RUNTIME_DIR`：启动器导出的**运行时所在目录**（vendored 为项目 `.dairn/runtime/`；external 为 `DAIRN_RUNTIME` 所在目录；安装适配层为包内运行时目录）。init/adopt/upgrade 只把它当作待复制载荷的目录，不参与启动解析。
+- `DAIRN_RUNTIME_DIR`：启动器导出的**运行时所在目录**（vendored 为项目 `.dairn/runtime/`；external 为 `DAIRN_RUNTIME` 所在目录；安装适配层为包内运行时目录）。首次 init/adopt 与显式 Promotion 只把它当作待校验载荷目录；普通 upgrade 不复制载荷，不参与启动解析。
 - `DAIRN_RUNTIME_SOURCE`：启动器导出的来源观察值，取 `vendored` 或 `external`，只用于 `dairn doctor` 报告，不参与身份判断。
 
 `dairn doctor` 报告的 `runtime.source`（`vendored` / `external` / `unknown`）与 `runtime.freshness`（`current` / `outdated` / `unknown` / `not-source-repo`）只是观察字段：source 说明从哪调用，freshness 提示内嵌源码与工作树的陈旧关系；运行时身份仍以项目 lock 的 `runtime_sha256` 为准。旧 `DAIRN_FAST_RUNTIME` 转换开关不再使用；当前 `DAIRN_CACHE_HOME` 仅选择执行镜像缓存位置，不切换运行时来源。`DAIRN_RUNTIME_DIR` 始终指向原载荷目录，不指向镜像缓存。
@@ -107,10 +118,10 @@ vendored 模式：
 
 1. **新项目**：先放置官方运行时（解压分发包，或把官方 Release 的二进制与完整性清单放进 `.dairn/runtime/`），再运行 `dairn init`。存在 `DAIRN_RUNTIME_DIR` 载荷且版本匹配时，`init` 复制运行时并写入 vendored 配置；否则写入 external 配置并提示后续注册。
 2. **接入既有项目**：`dairn adopt` 生成受管启动器与治理文件，同样可从 `DAIRN_RUNTIME_DIR` 复制运行时载荷。
-3. **注册 vendored 运行时**：`dairn upgrade --vendor-runtime .dairn/runtime --plan` 先规划，`--apply` 才写入。`--vendor-runtime` 只接受仓库内相对路径 `.dairn/runtime` 或 `.dairn/runtime/dairn-embedded.com`，拒绝绝对路径、`..`、符号链接与越出项目根的位置；二进制与完整性清单缺一不可。
+3. **维护同一 vendored 身份**：`dairn upgrade --vendor-runtime .dairn/runtime --plan` 先规划，`--apply` 只维护与当前 Pin 相同的身份。不同身份必须使用显式 Runtime Promotion，不得先手工覆盖 Pin 再注册。`--vendor-runtime` 只接受仓库内相对路径 `.dairn/runtime` 或 `.dairn/runtime/dairn-embedded.com`，拒绝绝对路径、`..`、符号链接与越出项目根的位置；二进制与完整性清单缺一不可。
 4. **注册校验**（fail closed）：完整性清单必须是 JSON，含 64 位小写 `sha256` 与非空 `engine_version`；实际二进制 SHA256 由 Dairn 内建实现直接读取并计算，仅在读取不可用时回退 `sha256sum` → `shasum -a 256` → `certutil -hashfile`；`engine_version` 与执行该命令的 Dairn 版本不一致即失败。任何一步失败都不写入 vendored 配置。
-5. **从旧版本升级**：老项目运行 `dairn upgrade --plan`，计划中会出现退役的受管 `.dairn/bin/dairn`、`.dairn/bin/dairn.cmd`（状态 `remove`）以及新建的项目根启动器；`--apply` 删除退役文件、写入根启动器、把 `launcher.json` 的路径迁移为 `dairn` / `dairn.cmd`，并在 `DAIRN_RUNTIME_DIR` 载荷版本匹配时复制运行时、刷新 vendored 配置。维护者必须审阅 Git diff 后再提交。
-6. **版本不一致**：项目已 vendored 旧版本运行时、而执行的 CLI 是更新版本时，`upgrade --apply` 会被拒绝并提示先替换 `.dairn/runtime` 再带 `--vendor-runtime` 注册，避免启动器与新 lock 版本不一致。
+5. **从旧版本升级**：老项目运行 `dairn upgrade --plan`，计划中会出现退役的受管 `.dairn/bin/dairn`、`.dairn/bin/dairn.cmd`（状态 `remove`）以及新建的项目根启动器；`--apply` 删除退役文件、写入根启动器、把 `launcher.json` 的路径迁移为 `dairn` / `dairn.cmd`，；普通 upgrade 不复制载荷，不同身份须先审阅 Runtime Promotion。维护者必须审阅 Git diff 后再提交。
+6. **版本不一致**：项目已 vendored 旧版本运行时、而执行的 CLI 是更新版本时，`upgrade --apply` 会被拒绝并提示使用显式 Runtime Promotion，不先覆写旧 Pin，避免启动器与新 lock 版本不一致。
 7. **`dairn doctor` 复核**：两个根启动器文件存在、`launcher.json` 合法且路径等于受管路径；vendored 模式下还校验运行时与完整性文件存在、JSON 合法、清单摘要与配置摘要一致、实际二进制摘要与记录一致。任一项失败即报告问题并以 unready 退出（退出码 1）。
 8. **`dairn doctor` 的 Runtime Lock 诊断**：运行时版本或摘要与项目 lock 不一致时，`doctor` 不阻断自身，而是输出 `status=drift` 与 `runtime_lock`（`dairn.runtime-lock.v1`：`drift[]` 的 `code/expected/actual`、`next_actions`），以退出码 4 报告漂移。ADVISORY 命令（`version`、`help`、`docs find`、`handoff` 等）在漂移下仍可只读执行；GATE 命令（`validate`、`check`、`analyze plan` 等）保持 fail closed，同样退出码 4 且错误为单行、不含内部堆栈。诊断与计划均不得写入 lock，`upgrade --apply` 仍需人工审阅。
 
@@ -139,13 +150,13 @@ vendored 模式：
 | 退出 2 / `DAIRN_NOT_AVAILABLE` | 启动器同目录缺少 `.dairn/runtime/dairn-embedded.com`：解压分发包、用 `dairn init` / `dairn adopt` 展开项目，或在源码仓库设置 `DAIRN_RUNTIME` 指向新构建 |
 | `dairn: DAIRN_RUNTIME is not a file` | 显式设置的运行时路径不存在；相对路径按启动器目录解析，改为正确的绝对路径或相对路径 |
 | `doctor` 报 launcher missing | 运行 `dairn upgrade --apply` 生成项目根受管启动器 |
-| `doctor` 报 launcher 配置漂移 | 运行 `dairn upgrade --vendor-runtime .dairn/runtime --apply` 重新注册，或移除多余的运行时 |
+| `doctor` 报 launcher 配置漂移 | 先检查当前 Pin、Lock 与载荷身份；相同身份可用 upgrade 维护，不同身份使用 Runtime Promotion，不得以重新注册掩盖漂移 |
 | `doctor` 报摘要不匹配 | 重新放置官方发行版与对应完整性清单；不要修改清单去迁就二进制 |
 | `doctor` 报工具不可用或超时 | 核对报告中的具体命令、退出码和 PATH；Python 命令须与项目检查配置一致 |
 | `Cannot open command output` | 将 `TMPDIR`（或 `TEMP`）设置为当前进程可写的临时目录后重试；不要绕过工具探测 |
 | Windows 弹窗或退出码 `0xC0000142` | 子进程初始化失败，不等于工具未安装；核对进程权限、DLL 和执行环境。Windows 宿主通过 QuickJS Worker 同时排空 stdout/stderr 管道，避免 Cosmopolitan 文件句柄重定向问题；初始化失败仍以非零退出，不反复重试 |
 | Windows 下嵌套 APE 输出为空或退出码 `0xC0000005` | Cosmopolitan 用 `_COSMO_FDS_V2` 传递 fd 表；原生工具（Python/Node 等）再启动 APE 孙进程时该变量指向未继承句柄。在会派生 APE 的原生检查入口清除 `_COSMO_FDS_V2`/`_COSMO_FDS` 后再启动子进程；不要重试或把空日志当作通过 |
-| `Runtime assets differ from project lock` | 当前 CLI 内嵌资产与项目 lock 不一致；用已验证的对应运行时执行 `upgrade --plan`，审阅后 `upgrade --apply`。vendored 项目还须同步对应运行时并带 `--vendor-runtime .dairn/runtime`，不要手改 lock 摘要 |
+| `Runtime assets differ from project lock` | 当前 CLI 内嵌资产与项目 lock 不一致；用已验证的对应运行时执行 `upgrade --plan`，审阅后 `upgrade --apply`。不同载荷须通过显式 Runtime Promotion，不要先手工覆盖 Pin 或修改 lock 摘要 |
 | `Runtime Lock drift: …` / 退出码 4 | 运行时不匹配项目 lock 时的可诊断失败：先跑 `dairn doctor --json` 查看 `runtime_lock.drift`（`code/expected/actual`）与 `next_actions`；只读诊断不写 lock，需人工审阅后执行 `upgrade --plan`/`upgrade --apply`；`validate`/`check` 等 GATE 不会因诊断能力放行 |
 | 运行时版本与执行的 Dairn 版本不一致 | 改用与当前 Dairn 版本匹配的官方发行版重新注册，不要手动改 `version` 字段 |
 | 离线 / 无网络环境 | 从离线发行包获取运行时与完整性清单；启动器不会联网补齐 |

@@ -6,10 +6,12 @@ from dairn_build_backend import ROOT, native_zip, source_files, wheel_from_files
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--out', type=Path, default=ROOT / 'dist')
+parser.add_argument('--runtime-out', type=Path, help='写入尚不存在的独占候选目录；由调用方清理')
 args = parser.parse_args()
 out = args.out.resolve()
-with tempfile.TemporaryDirectory(prefix='dairn-build-') as temp:
+(ROOT / '.build/runs').mkdir(parents=True,exist_ok=True)
+with tempfile.TemporaryDirectory(prefix='package-python-',dir=ROOT / '.build/runs') as temp:
     stage = Path(temp) / 'source'
-    archive = native_zip(out, stage)
+    archive = native_zip(out, stage, args.runtime_out)
     print(out / wheel_from_files(source_files(stage), out))
     print(archive)

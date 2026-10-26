@@ -10,21 +10,27 @@ const stages=[
  {id:'synchronize',skill:'dairn-project-guidance',goal:'Compare observed facts to project documents; propose scoped edits',output:'drift report and human-reviewed documentation diff'},
  {id:'reflect',skill:'dairn-retro',goal:'Record observed process failures and improve automated checks first',output:'concrete environment improvement proposal'}
 ];
-export function recommendWorkflow(text){
+export function recommendWorkflow(text,{intent=null}={}){
  const q=String(text||'').toLowerCase();
+ const explicit=['bug','incident','documentation','review','design','change'];
+ if(intent!==null&&!explicit.includes(intent))throw Error('Unknown workflow kind: '+intent+'; use '+explicit.join('|'));
  const isBug=/(bug|fail|failure|broken|error|debug|diagnos|故障|报错|修复|异常|排障|问题复现)/.test(q);
  const isDoc=/(docs?|readme|agents\.md|documentation|drift|文档|漂移|项目事实|规范同步)/.test(q);
  const isReview=/(review|audit|pr\b|评审|审查|审核)/.test(q);
  const isIncident=/(incident|postmortem|事故|应急|复盘)/.test(q);
  const isDesign=/(architecture|design|spec|规划|架构|设计|方案)/.test(q);
+ const isImplementation=/(实现|实施|开发|重构|精简|优化|迭代|落地|\bimplement(?:ation)?\b|\brefactor\w*\b|\boptimi[sz]\w*\b)/.test(q);
+ const reviewOnly=/(?:仅|只|纯).{0,3}(?:评审|审查|审核)|\breview[ -]only\b|\bonly review\b/.test(q);
+ const designOnly=/(?:仅|只|纯).{0,3}(?:设计|规划)|\bdesign[ -]only\b/.test(q);
+ const classification=intent||(reviewOnly?'review':designOnly?'design':isBug?'bug':isImplementation?'change':isIncident?'incident':isDoc?'documentation':isReview?'review':isDesign?'design':'change');
  let selected=['orient'];
- if(isBug)selected.push('diagnose','implement','review','synchronize');
- else if(isIncident)selected.push('diagnose','review','reflect');
- else if(isDoc)selected.push('synchronize');
- else if(isReview)selected.push('review','synchronize');
- else if(isDesign)selected.push('grill','specify','slice','review','synchronize');
+ if(classification==='bug')selected.push('diagnose','implement','review','synchronize');
+ else if(classification==='incident')selected.push('diagnose','review','reflect');
+ else if(classification==='documentation')selected.push('synchronize');
+ else if(classification==='review')selected.push('review','synchronize');
+ else if(classification==='design')selected.push('grill','specify','slice','review','synchronize');
  else selected.push('grill','specify','slice','implement','review','synchronize');
- return {query:text,classification:isBug?'bug':isIncident?'incident':isDoc?'documentation':isReview?'review':isDesign?'design':'change',
+ return {query:text,classification,
    stages:stages.filter(x=>selected.includes(x.id)),
    invariants:['Start from observed repository facts and authoritative specs',
      'Grill resolves design unknowns before Specify; no open questions may remain',

@@ -113,6 +113,17 @@ try {
     assert(/fatal|unknown revision|Needed a single revision/i.test(String(r.output||'')),
            'git error output missing: '+JSON.stringify(r.output));
   });
+  if(os.platform!=='win32')test('Git 成功 stdout 不混入环境警告，失败仍保留 stderr',()=>{
+    const git=base+'/git';
+    host.write(git,"#!/bin/sh\nprintf '%s\\n' '{\"head\":\"fixture\"}'\necho environment-warning >&2\nexit \"${1:-0}\"\n");
+    host.chmod(git,0o700);
+    try{
+      const success=host.run([git,'0'],cwd,10);
+      assert(success.code===0&&JSON.parse(success.output).head==='fixture','Git 警告污染机器输出：'+JSON.stringify(success));
+      const failed=host.run([git,'17'],cwd,10);
+      assert(failed.code===17&&failed.output.includes('environment-warning'),'Git 失败诊断丢失');
+    }finally{os.remove(git);}
+  });
   test('ES2021/2022 features used by core are available', () => {
     assert('Ａ'.normalize('NFKC')==='A','String.normalize unavailable');
     assert([1,2,3].at(-1)===3,'Array.prototype.at unavailable');

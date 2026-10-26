@@ -115,3 +115,11 @@ dairn guide impact --root ./service --base origin/main --analyzer surface
 签名器校验 bundle、受保护提交及同一流水线来源，调用 `attest prepare` 生成声明，签名后再用外部受信公钥执行 `attest verify`。声明绑定 Run、源码提交、基线、策略、运行时及 CI 上下文；归档任务在推送证据分支前再次验签并读回比对，不依赖 Work 账本。
 
 签名使用自定义 detached Ed25519 格式，不属于 DSSE/in-toto/SLSA；它证明密钥签署了声明，不能独立证明构建节点正确执行了测试。来源保证仍依赖 CI 平台、隔离与 artifact 传输；本地环境变量模拟成功不代表生产签名部署已验证。
+
+## PCC v1 的机器保障与平台委托
+
+默认 `governance execute --base <SHA> --assurance` 离线合成计划、执行并核对本轮证据，输出一个机器结果；已有证据用 `gate evaluate --base <SHA> --check <Run>`。不读取 SCM Token、不枚举 Check/Review/审核者权限。计划与裁决均明示人工审批 delegated-to-scm、合并资格 not-evaluated；组织审批底线、Code Owner、过期审批和 Base/merge_group 重验交给平台规则。
+
+受信入口不能省：组织受信 Required Workflow 或独立固定 Publisher/CI 集成入口仍需部署验收。PR 可修改的普通 Workflow 只提供工程检查；GitHub Actions 共享 App 不等于具体受信 Workflow。测试执行域无发布/签名凭据，聚合域消费本轮直接 needs 与工件摘要，发布只发一个 Dairn / Required Assurance 状态。实际身份治理与平台配置不通过本地布尔字段自证。
+
+post-merge/release 保留强制 Ed25519 验签、Run/Policy/Runtime/Plan 绑定。审批快照仅显式审计归档，机器签名范围不含当前平台审批结论；可用 DAIRN_CI_AUDIT_APPROVAL_SNAPSHOT 指定归档文件，旧 DAIRN_CI_APPROVAL_VERDICT 输入明确拒绝。协议与迁移见 [PCC v1](PCC_V1.md)。

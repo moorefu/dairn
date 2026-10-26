@@ -18,13 +18,15 @@ const REPO_SEGMENTS = /^(?:docs|\.dairn|\.agents|\.github|quickjs|tools|tests|ru
 const REPO_FILES = /^(?:AGENTS|README|CLAUDE|BUILDING|CHANGELOG|CONTRIBUTING|LICENSE|GOVERNANCE|pyproject|package|Makefile)\b/;
 const TOP_COMMANDS = ['version', '--version', 'init', 'adopt', 'detect', 'upgrade', 'doctor', 'validate',
   'validate-core', 'scope', 'check', 'help', 'docs', 'skills', 'guide', 'workflow', 'work', 'analyzers', 'analyze', 'context', 'quality', 'capability', 'tasks', 'hooks', 'hook', 'notes',
-  'evidence', 'gate', 'attest', 'approval', 'handoff', 'governance', 'refactor'];
+  'evidence', 'gate', 'attest', 'approval', 'handoff', 'governance', 'refactor', 'observe', 'runtime'];
 const SUBCOMMANDS = {
+  observe: ['status','report','trace','compare','suggest','ingest','config','reference'],
+  runtime: ['inspect','promote','rollback','recover'],
   docs: ['find', 'show', 'context', 'check'],
   skills: ['catalog', 'list', 'add'],
   guide: ['plan', 'audit', 'scaffold', 'facts', 'drift', 'impact'],
   workflow: ['stages', 'recommend'],
-  work: ['start', 'list', 'status', 'next', 'record', 'advance', 'skip', 'verify', 'finish', 'cancel', 'reopen',
+  work: ['start', 'list', 'status', 'next', 'record', 'advance', 'skip', 'verify', 'finish', 'cancel', 'reopen', 'revise',
     'link-check'],
   analyzers: ['list', 'templates', 'doctor', 'init'],
   analyze: ['run', 'plan', 'import'],
@@ -38,7 +40,7 @@ const SUBCOMMANDS = {
   gate: ['evaluate'],
   attest: ['prepare', 'verify'],
   approval: ['evaluate'],
-  governance: ['plan', 'explain', 'assess', 'recommend'],
+  governance: ['plan', 'explain', 'assess', 'recommend', 'execute'],
   refactor: ['plan', 'compare', 'verify', 'status'],
 };
 

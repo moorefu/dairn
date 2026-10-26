@@ -23,7 +23,7 @@ Dairn 全称为 **Dairn**，对外定位为 **AI-Native Software Engineering Too
 - `dairn-grill`：设计树访谈，把未决问题收敛到零；完成条件与问题 JSON 用 `dairn docs show dairn.engineering.grill` 加载。
 - `dairn-tracer-tasks`：垂直切片与阻塞 DAG；本地任务图用 `dairn tasks check` 校验、`dairn tasks ready` 列出前沿。
 - `dairn-domain-model`：领域词汇与 ADR；`GLOSSARY.md` / `GLOSSARY-MAP.md` 的结构由 `dairn validate` 校验。
-- `dairn-retro`：复盘二选一（新增确定性检查，或写入 Review 标准文档）。
+- `dairn-retro`：复盘 v1（七类环境改进、no-action、回放与效果复评）。
 - `dairn-writing-for-agents`：改 `AGENTS.md`、Skill 或 Spec 时的写作规范；资产一致性由 `dairn docs check` 校验。
 - `dairn hooks install` 生成的 Hook：`dairn hook pre-push` 在推送前复跑本地门禁，`dairn hook turn-end` 记录会话锚点；两者都是本地过程证据。
 - 调用入口 `dairn.engineering.launcher`：根启动器（`dairn`/`dairn.cmd`）的解析顺序、`.dairn/runtime` 与 `.dairn/launcher.json`；用 `dairn docs show dairn.engineering.launcher` 加载。启动器只决定“从哪调用”，不提升信任级别。

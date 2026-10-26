@@ -123,3 +123,9 @@ L0 小改动可直接编辑 → 检查 → 必需评审 → CI/SCM，**Skill 不
 - Agent **不得安装 Dairn**、不得修改全局环境；启动器缺失时停止并报告（`DAIRN_NOT_AVAILABLE` 属于环境阻塞，不是安装许可）。
 - 受管文件（`AGENTS.md` 导航块、lock、`.dairn/runtime/`、受管 Skill）只能由 `init`/`adopt`/`upgrade` 更新并审阅差异。
 - 本地 hook 只产生本机可见的证据锚点，不构成受保护 CI 的信任证明；发布级证据来自受保护 CI 的外部固定运行时与策略。
+
+## 可选过程观测桥
+
+`./dairn hooks install --apply` 同时生成 `observe-adapter.py` 和 `observe-codex.sh`、`observe-dsh.sh`、`observe-claude.sh`。这些桥独立于 Work 账本，不要求存在活跃任务，不自动修改宿主的全局设置。Codex 的观测回合末接线可指向 `observe-codex.sh`；现有 `turn-end-codex.sh` 负责 Work 锚点，两者用途独立。
+
+要统计启动尝试，宿主必须在启动 CLI 前后使用同一个 `DAIRN_INVOCATION_ID` 调用 Python 适配器的 `--phase started|failed|succeeded`，并在完整捕获的 Session 边界提供 `session-start` 与 `turn-end --coverage complete`。仅接回合末无法证明尝试覆盖完整，首次成功率保持 UNKNOWN。适配器仅保存字段白名单与 Session 哈希，不保存 Prompt 或工具参数；关闭配置为 `.dairn/observe/config.json` 中的 `mode: disabled`。没有 Python 或采集失败时产生覆盖缺口，不改变业务退出码。
