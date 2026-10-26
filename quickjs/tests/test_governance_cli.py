@@ -74,8 +74,9 @@ class GovernanceCLI(unittest.TestCase):
         plan = self.obj('governance', 'plan', '--base', base)['plan']
         self.assertEqual(plan['classification']['effective_risk'], 'L2')
         self.assertEqual(len(plan['requirements']), 4)
-        self.assertEqual(plan['approvals'], [{'authority': 'scm-native', 'natural_person': True,
-                                              'min_count': 1, 'required': True, 'origin': 'risk-L2'}])
+        self.assertEqual(plan['human_approval'], 'delegated-to-scm')
+        self.assertEqual(plan['merge_eligibility'], 'not-evaluated')
+        self.assertNotIn('approvals', plan)
         self.assertEqual(plan['status'], 'ready-to-execute')
         # Head 删除执行器不能削弱当前 Base 的必需矩阵。
         del policy['modules'][0]['checks']['integration']

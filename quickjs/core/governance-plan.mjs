@@ -7,7 +7,7 @@
  * to be done, never claims that gates passed (§4.2). */
 import {sha256} from './sha256.mjs';
 import {classify, moduleSelection, manifestValidate, relative} from './policy.mjs';
-import {resolvePolicy, requiredChecksFor, approvalPolicyFor} from './policy-resolver.mjs';
+import {resolvePolicy, requiredChecksFor} from './policy-resolver.mjs';
 import {projectContextOf, readRefactorContracts, contractAppliesTo, validateRefactorContract} from './project-context.mjs';
 
 const RISK_ORDER = ['L0', 'L1', 'L2'];
@@ -30,9 +30,9 @@ function git(h, root, args, timeout) {
  * whitespace, LF — the hash lives OUTSIDE the plan (envelope), so it never
  * references itself (§5.5). */
 export function canonical(value) {
-  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
+  if (Array.isArray(value)) return '[' + value.map(item=>item===undefined?'null':canonical(item)).join(',') + ']';
   if (value && typeof value === 'object')
-    return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + canonical(value[k])).join(',') + '}';
+    return '{' + Object.keys(value).filter(k=>value[k]!==undefined).sort().map(k => JSON.stringify(k) + ':' + canonical(value[k])).join(',') + '}';
   return JSON.stringify(value);
 }
 
@@ -128,16 +128,6 @@ export function planGovernance({trustedPolicy, projectContext, change, refactorC
    *    the complete assurance set — deferred-to-ci is never "passed". */
   const localFast = executors.filter(x => x.phase.includes('local')).map(x => x.module_id + '.' + x.check_id);
   const ciRequired = [...requirements.filter(x => x.required).map(x => x.id)];
-  const approvals = [];
-  const baseApproval=approvalPolicyFor(policy,effectiveRisk),floorApproval=organizationPolicy?approvalPolicyFor(organizationPolicy,effectiveRisk):{};
-  for(const rule of [baseApproval,floorApproval])if(rule.min_count!==undefined)ok(Number.isInteger(rule.min_count)&&rule.min_count>=0,'invalid approval floor');
-  const approvalPolicy={...baseApproval,min_count:Math.max(baseApproval.min_count||0,floorApproval.min_count||0,
-    baseApproval.required!==false?1:0,floorApproval.required===true?1:0),
-    required:baseApproval.required!==false||floorApproval.required===true||Number(floorApproval.min_count||0)>0};
-  const approvalNeeded = approvalPolicy.required !== false || Number(approvalPolicy.min_count || 0) > 0;
-  if (approvalNeeded)
-    approvals.push({...approvalPolicy,authority: 'scm-native', natural_person: true, required: true,
-      origin: 'risk-' + effectiveRisk});
   /* 7. Advisory workflow: suggestions only, zero items is valid (§0 principle 1). */
   const advisory = effectiveRisk === 'L2' ? ['specify', 'implement', 'review']
     : effectiveRisk === 'L1' ? ['implement', 'review'] : [];
@@ -153,7 +143,7 @@ export function planGovernance({trustedPolicy, projectContext, change, refactorC
     classification: {intent: change.intent || null, risk_floor: floor, effective_risk: effectiveRisk,
       governance_mode: change.governance_mode || null, impact_confidence: change.impact_confidence || 'partial',
       reasons: [...new Map(reasons.map(r => [r.rule + '|' + r.source, r])).values()]},
-    requirements, executors, approvals,
+    requirements, executors, human_approval:'delegated-to-scm',merge_eligibility:'not-evaluated',
     execution: {local_fast: [...new Set(localFast)], ci_required: ciRequired},
     advisory_workflow: [...new Set(advisory)],
     work_required: false,
@@ -175,9 +165,9 @@ export function planForChange(h, root, {base, head = 'HEAD', timeout = 30, organ
   const contracts=[];
   const names=git(h,root,['ls-tree','-r','--name-only',baseSha,'--','.dairn/governance/refactors'],timeout).split(/\r?\n/).filter(p=>p.endsWith('.json'));
   for(const name of names){relative(name);contracts.push(validateRefactorContract(JSON.parse(git(h,root,['show',baseSha+':'+name],timeout)),name));}
-  const subject = {schema: 'dairn.subject.v1', repository: change_repository(h, root, timeout), kind: 'git-commit',
+  const subject = {schema: 'dairn.subject.v1', repository: subjectContext?.repository||h.env?.('DAIRN_CI_REPOSITORY')||change_repository(h, root, timeout), kind: 'git-commit',
     source_commit: scope.head, tree_sha: scope.tree, base_commit: scope.base, comparison: 'base-to-source'};
-  if(subjectContext){for(const k of ['repository','source_commit','tree_sha','base_commit'])ok(subjectContext[k]===subject[k],'SUBJECT_MISMATCH: '+k);Object.assign(subject,{stage:subjectContext.stage,change:subjectContext.change});}
+  if(subjectContext){for(const k of ['repository','source_commit','tree_sha','base_commit'])ok(subjectContext[k]===subject[k],'SUBJECT_MISMATCH: '+k);for(const k of ['stage','change'])if(subjectContext[k]!==undefined)subject[k]=subjectContext[k];}
   const result = planGovernance({trustedPolicy: policyJsonValue, projectContext: context,
     change: {paths: scope.paths, modules: scope.modules, risk: scope.risk, risk_floor: scope.risk,
       governance_mode: scope.governance_mode, triggers: scope.triggers, subject,

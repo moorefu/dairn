@@ -4,26 +4,31 @@
 name: Dairn quality and protected evidence
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main]
 permissions:
   contents: read
 jobs:
   pr-quality:
-    if: github.event_name == 'pull_request'
+    name: Dairn / Required Assurance
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: [self-hosted, dairn-unprivileged]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event.merge_group.head_sha || github.event.pull_request.head.sha }}
+      # 此模板只有部署为组织受信 Workflow 或由独立集成固定时才有来源保证。
       - name: Unprivileged gates
         env:
           DAIRN_EXPECTED_POLICY_SHA256: ${{ vars.DAIRN_EXPECTED_POLICY_SHA256 }}
-          TRUSTED_BASE: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_BASE: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
+          DAIRN_CI_REPOSITORY: ${{ github.repository }}
         run: |
           /opt/dairn/dairn validate --base "$TRUSTED_BASE"
-          /opt/dairn/dairn check --base "$TRUSTED_BASE"
+          /opt/dairn/dairn governance execute --base "$TRUSTED_BASE" --assurance --json
 
   protected-build:
     if: github.event_name == 'push' && github.ref_protected == true

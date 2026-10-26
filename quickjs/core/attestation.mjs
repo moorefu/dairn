@@ -26,11 +26,12 @@ export function statementForRun(run, digests = {}, context = {}, signer = {}) {
   ok(run.status === 'passed', 'cannot attest a non-passing run');
   const ci = contextFields(context);
   ok(ci.provider && ci.repository && ci.pipeline_id && ci.build_job_id, 'trusted CI context incomplete');
-  return {schema:'dairn.attestation.v1', type:'dairn.ci.evidence.v1', subject:{repository:run.subject.repository,
+  return {schema:'dairn.attestation.v1', type:'dairn.ci.evidence.v1',scope:'machine-assurance',human_approval:'delegated-to-scm', subject:{repository:run.subject.repository,
     commit:run.subject.source_commit, tree_sha:run.subject.tree_sha}, run_id:run.run_id,
     digests:{run_json_sha256:digests.run_json_sha256 || digests.run_sha256 || null,
       logs_manifest_sha256:digests.logs_manifest_sha256 || null, origin_json_sha256:digests.origin_json_sha256 || null,
-      decision_json_sha256:digests.decision_json_sha256 || null, approval_snapshot_sha256:digests.approval_snapshot_sha256 || null},
+      decision_json_sha256:digests.decision_json_sha256 || null},
+    ...(digests.approval_snapshot_sha256?{audit:{scope:'snapshot-bytes-only',approval_snapshot_sha256:digests.approval_snapshot_sha256}}:{}),
     plan_sha256:run.execution?.check_plan_sha256||null,policy_sha256:run.execution?.policy_sha256 || null, runtime_sha256:run.execution?.runtime_sha256 || null,
     ci, signer:{key_id:signer.key_id || context.key_id || null, algorithm:'Ed25519'}};
 }
@@ -40,11 +41,14 @@ export function validateStatement(statement) {
   const check = (value, message) => { if (!value) errors.push(message); };
   check(statement?.schema === 'dairn.attestation.v1', 'schema must be dairn.attestation.v1');
   check(statement?.type === 'dairn.ci.evidence.v1', 'type invalid');
+  check(statement?.scope==='machine-assurance'&&statement?.human_approval==='delegated-to-scm','statement scope must be machine-assurance with SCM approval delegation');
+  check(statement?.digests?.approval_snapshot_sha256===undefined,'approval snapshot belongs in optional audit scope');
+  if(statement?.audit)check(statement.audit.scope==='snapshot-bytes-only'&&/^[0-9a-f]{64}$/.test(statement.audit.approval_snapshot_sha256||''),'audit snapshot scope/digest invalid');
   check(typeof statement?.subject?.repository === 'string' && statement.subject.repository.length > 0, 'subject.repository required');
   check(/^[0-9a-f]{40,64}$/i.test(statement?.subject?.commit || ''), 'subject.commit invalid');
   check(/^[0-9a-f]{40,64}$/i.test(statement?.subject?.tree_sha || ''), 'subject.tree_sha invalid');
   check(/^run-[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/.test(statement?.run_id || ''), 'run_id invalid');
-  for (const field of ['run_json_sha256','logs_manifest_sha256','origin_json_sha256','decision_json_sha256','approval_snapshot_sha256'])
+  for (const field of ['run_json_sha256','logs_manifest_sha256','origin_json_sha256','decision_json_sha256'])
     if (field !== 'logs_manifest_sha256' || statement?.digests?.[field] != null) check(!statement?.digests?.[field] || /^[0-9a-f]{64}$/i.test(statement.digests[field]), field + ' invalid');
   check(typeof statement?.ci?.provider === 'string' && statement.ci.provider.length > 0, 'ci.provider required');
   check(typeof statement?.ci?.repository === 'string' && statement.ci.repository.length > 0, 'ci.repository required');

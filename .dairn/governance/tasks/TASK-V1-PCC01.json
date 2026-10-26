@@ -1,18 +1,16 @@
 {
   "id": "TASK-V1-PCC01",
-  "title": "受信策略与必需保障",
-  "acceptance": "按 docs/changes/integrated-v1-proposal.md 对应正负向矩阵执行并保留证据；平台能力未部署不得声称上线。",
-  "status": "blocked",
-  "blocked_by": [
-    "TASK-V1-RT01",
-    "TASK-V1-RT02"
-  ],
+  "title": "PCC v1 固定策略与完整离线计划",
+  "acceptance": "固定 Git Base 与组织机器保障下限；Head 不可降低 Requirement；无 Token 或 SCM API 也可计划；审批明确委托平台；必需执行器缺失非零拒绝。",
+  "status": "done",
+  "blocked_by": [],
   "kind": "change",
   "write_scopes": [
-    "quickjs/core/"
+    "quickjs/core/governance-plan.mjs",
+    "quickjs/assets/specs/ci/adaptive-governance.md"
   ],
   "test_seams": [
-    "实际 CLI、临时 Git 项目及原生单元测试"
+    "原生计划回归、真实 Git Base/Head 降低策略回归"
   ],
   "owner": "当前实现 Agent"
 }

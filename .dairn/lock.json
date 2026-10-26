@@ -1,7 +1,7 @@
 {
   "schema": 2,
-  "version": "0.1.0-nightly.20261026012141",
-  "runtime_sha256": "0e7250f3170e8f862d04a7cd93ade2f04aee63a614ebb50bb3777aa0c84bdc66",
+  "version": "0.1.0-nightly.20261026094953",
+  "runtime_sha256": "5ffed22247ad0ef4f784f657c11d30bbc2879fa75c3fcbd833b3e4215ff3ecb9",
   "config": {
     "schema": 2,
     "name": "dairn",

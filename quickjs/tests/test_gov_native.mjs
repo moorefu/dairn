@@ -41,7 +41,7 @@ test('GOV-01 an L0 docs change plans the minimum with zero ceremony', () => {
   assert(plan.work_required === false, 'work must never be required');
   /* Approval defaults conservative (same formula as the gate): a policy that
    * is silent on approvals still gets scm-native listed, never dropped. */
-  assert(plan.approvals.length === 1 && plan.approvals[0].authority === 'scm-native', 'conservative approval missing');
+  assert(plan.human_approval==='delegated-to-scm'&&plan.approvals===undefined,'审批委托缺失');
 });
 
 test('GOV-02 an L2 critical change plans the full matrix and scm-native approval', () => {
@@ -49,7 +49,7 @@ test('GOV-02 an L2 critical change plans the full matrix and scm-native approval
     change: change(['quickjs/core/engine.mjs'], POLICY.modules, 'L2', {triggers: ['governance-critical:quickjs/core/engine.mjs']})});
   assert(plan.classification.effective_risk === 'L2', 'risk wrong');
   assert(plan.requirements.length === 8, 'full matrix over 2 modules: ' + plan.requirements.length);
-  assert(plan.approvals.length === 1 && plan.approvals[0].authority === 'scm-native' && plan.approvals[0].natural_person === true, 'approval wrong');
+  assert(plan.human_approval==='delegated-to-scm'&&plan.merge_eligibility==='not-evaluated','审批委托或范围错误');
   assert(JSON.stringify(plan.advisory_workflow) === JSON.stringify(['specify', 'implement', 'review']), 'advisory wrong');
 });
 

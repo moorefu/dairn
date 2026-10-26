@@ -4,7 +4,7 @@ title: CLI 门禁与证据契约
 summary: 规定完整风险门禁、单项检查、证据格式与失败处理。
 kind: spec
 module: ci
-keywords: ["dairn validate", "dairn check", "CI", "测试", "门禁", "lint", "build", "evidence"]
+keywords: ["dairn validate", "dairn check", "CI", "测试", "门禁", "lint", "build", "evidence", "PCC", "离线", "machine-assurance", "审批委托", "gate evaluate"]
 aliases: ["质量门禁", "risk-gate"]
 related: ["dairn.ci.provider", "dairn.governance.risk"]
 symbols: ["dairn validate --base", "dairn check --base", ".dairn/governance/project.json"]
@@ -37,3 +37,11 @@ symbols: ["dairn validate --base", "dairn check --base", ".dairn/governance/proj
 ## 框架自测门禁
 
 框架自测内建在发布流程中：发行构建先执行 `dairn docs check` 校验分发资产一致性，并在构建产物上运行 `quickjs.tests.test_assets_lint` 回归；完整 Python 套件由本地/专项验证环境执行（依赖 Go/OpenSSL 等工具链），不在发布构建 job 中全量运行。分发资产门禁与本地完整测试都通过才允许发布。
+
+## PCC v1 机器保障范围
+
+默认入口 `dairn governance execute --base <SHA> --assurance --json` 直接核对本次执行结果，不发布逐项平台状态后再通过 SCM API 读回。`dairn gate evaluate --base <SHA> --check <run.json>` 可独立重核本地证据，固定 Base、Head、Tree、仓库、Plan、执行器、输入快照和工具身份必须匹配。每个必需 Requirement 恰好有一个真实零退出成功记录；重复和缺项均拒绝。单项仅有 status=passed 不构成保障。
+
+裁决 schema 仍为 `dairn.gate-verdict.v1`，但 scope 固定为 `machine-assurance`，`human_approval=delegated-to-scm`、`merge_eligibility=not-evaluated`，本地 assurance 为 local-observed。PASS 不声明 SCM 已批准、可信 Workflow 已部署或允许合并。旧 Gate 的 `--approval` 输入明确拒绝；审批快照仅供独立审计归档。
+
+多作业模式的 Run 清单含项目相对 path、原始文件 sha256、job_id；摘要须与直接 needs 对应作业的 outputs.run_sha256 一致。预期作业集合必须先固定并完整成功，不从已有结果推导。每个 Run 的输入覆盖完整、执行前后稳定；跨平台聚合要求各自及聚合检出均干净，并绑定同一 Git 身份，不能拿平台文件模式不同的快照互相替代。

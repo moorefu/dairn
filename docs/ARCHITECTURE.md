@@ -183,7 +183,8 @@ Evidence Bundle + Raw Digests
                 ↓
 Isolated Attestation Verification
                 ↓
-SCM-native Approval + Trusted Gate
+机器保障结果 → CI 单一必需状态
+SCM 原生审批与合并规则独立执行
 ```
 
 当前已有独立 Check、Run Evidence、Bundle、签名验证 CLI 和 Gate 代码；**正式可信结果还依赖组织实际配置和验收的受保护 CI、外部固定策略/工具链、受隔离签名密钥和原生 SCM 审批**。签名证明来源绑定，不证明软件绝对正确。
@@ -198,11 +199,11 @@ SCM-native Approval + Trusted Gate
 | Verified Attestation | 使用外部受信公钥验证了声明与绑定 | 不能自动代替 SCM 人工审批 |
 | SCM-native Human Approval | SCM 确认了符合规则的真实授权人 | 不能代替必需机器 Check |
 
-`FAIL` 或缺少必需证据时，不能降格成“Agent 判断可以继续”。对于来源无法确定的情况，可信 Gate 应保持 `INDETERMINATE`，并在强制 CI 中以非成功退出处理。
+`FAIL` 或缺少必需证据时，不能降格成“Agent 判断可以继续”。本地机器 Gate 的 PASS 仅说明本次证据完整且匹配，scope=machine-assurance，人工审批 delegated-to-scm，合并资格 not-evaluated。来源信任由外部固定入口与 CI 隔离建立，不能由本地 JSON 升格；发布要求签名时，缺少真实验签结果仍保持非成功。
 
 ### 对 CI / SCM 的职责边界
 
-Dairn 支持以现有 GitHub / GitLab 等 SCM 原生机制作为审批事实源；不复制一套“谁批准了 PR”的内部账本。`ci/templates/` 中的受保护 CI 工作流模板需要由部署方真正接入、配置分支保护和证据信任根之后，才能宣称生产级保障。部署与验收步骤见 [GOVERNANCE.md](GOVERNANCE.md) 与 [PROTECTED_RELEASE_ACCEPTANCE.md](PROTECTED_RELEASE_ACCEPTANCE.md)。
+PCC 核心以本地 Git Base、组织固定配置和直接 Run 核对机器保障，不默认请求 SCM API，也不需要 Token/HTTP 客户端。GitHub / GitLab 原生处理审批、过期审批、分支保护和最终合并；Dairn 不镜像 Review/Check/审核者权限。多作业只消费固定直接 needs 与摘要绑定的工件，详见 [PCC v1](PCC_V1.md)。`ci/templates/` 中的受保护 CI 工作流模板需要由部署方真正接入、配置分支保护和证据信任根之后，才能宣称生产级保障。部署与验收步骤见 [GOVERNANCE.md](GOVERNANCE.md) 与 [PROTECTED_RELEASE_ACCEPTANCE.md](PROTECTED_RELEASE_ACCEPTANCE.md)。
 
 ## 9. 质量目标、渐进重构与治理反馈
 

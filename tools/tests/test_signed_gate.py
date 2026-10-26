@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @unittest.skipUnless(shutil.which('openssl'), '需要 OpenSSL 的真实签名验证')
 class SignedGate(unittest.TestCase):
-    def test_signed_approval_bundle_preserves_required_gate_binding(self):
+    def test_machine_signature_keeps_approval_snapshot_in_explicit_audit_scope(self):
         with tempfile.TemporaryDirectory(prefix='dairn-signed-approval-') as directory:
             temp, project = Path(directory), Path(directory) / 'project'
             cli = ROOT / ('dairn.cmd' if os.name == 'nt' else 'dairn')
@@ -83,20 +83,25 @@ class SignedGate(unittest.TestCase):
                     approval_path.write_text(original, encoding='utf-8')
                 passed('attest', 'prepare', '--bundle', bundle, '--context', rel + 'context.json', '--out', statement)
                 signed = json.loads((project / statement).read_text())
-                self.assertEqual(signed['digests']['approval_snapshot_sha256'], expected)
+                self.assertEqual(signed['scope'], 'machine-assurance')
+                self.assertEqual(signed['human_approval'], 'delegated-to-scm')
+                self.assertNotIn('approval_snapshot_sha256', signed['digests'])
+                self.assertEqual(signed['audit']['scope'], 'snapshot-bytes-only')
+                self.assertEqual(signed['audit']['approval_snapshot_sha256'], expected)
                 subprocess.run(['openssl', 'pkeyutl', '-sign', '-inkey', str(key), '-rawin', '-in', str(project / statement),
                                 '-out', str(project / signature)], check=True, capture_output=True)
                 args = ['gate', 'evaluate', '--subject', rel + 'subject.json', '--policy', '.dairn/governance/project.json',
-                        '--check', run_path.relative_to(project).as_posix(), '--approval', rel + 'approval.json',
+                        '--check', run_path.relative_to(project).as_posix(),
                         '--attestation', statement, '--signature', signature, '--key', str(public), '--context', rel + 'context.json',
                         '--stage', stage, '--risk', 'L1', '--json']
                 result = call(*args)
-                self.assertEqual(result.returncode, 0 if status == 'PASS' else 1, result.stdout + result.stderr)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)['human_approval'], 'delegated-to-scm')
                 if index == 0:
                     approval_path.write_text(original + '\n', encoding='utf-8')
                     tampered = call(*args)
-                    self.assertEqual(tampered.returncode, 1, tampered.stdout + tampered.stderr)
-                    self.assertIn('APPROVAL_DIGEST_MISMATCH', tampered.stdout)
+                    self.assertEqual(tampered.returncode, 0, tampered.stdout + tampered.stderr)
+                    self.assertEqual(call('evidence', 'verify', '--bundle', bundle).returncode, 1)
 
     def test_actual_signature_and_forged_run_bytes(self):
         with tempfile.TemporaryDirectory(prefix='dairn-signature-') as directory:

@@ -38,14 +38,15 @@ jq -nc --arg provider "$PROVIDER" --arg repo "$REPO" --arg ref "$REF" --arg sha 
 BUNDLE=.dairn/governance/evidence/bundle.json
 [ ! -e "$BUNDLE" ] || { echo 'Refuse overwriting evidence bundle' >&2;exit 2; }
 set -- evidence bundle --run "$RUN_ID" --evidence "$RUN_JSON" --origin "$ORIGIN" --out "$BUNDLE"
-if [ -n "${DAIRN_CI_APPROVAL_VERDICT:-}" ]; then
+[ -z "${DAIRN_CI_APPROVAL_VERDICT:-}" ] || { echo 'Legacy approval input refused; use explicit audit snapshot archival' >&2;exit 2; }
+if [ -n "${DAIRN_CI_AUDIT_APPROVAL_SNAPSHOT:-}" ]; then
   # 管理员提供由受信 SCM 抓取/裁决得到的文件；只归档原始字节，不由 JSON 自证来源。
-  case "$DAIRN_CI_APPROVAL_VERDICT" in /*) ;; *) echo 'Approval verdict path must be absolute' >&2;exit 2;; esac
-  case "$DAIRN_CI_APPROVAL_VERDICT" in "$PWD"/*) echo 'Approval verdict must come from outside checkout' >&2;exit 2;; esac
-  [ -f "$DAIRN_CI_APPROVAL_VERDICT" ] && [ ! -L "$DAIRN_CI_APPROVAL_VERDICT" ] || { echo 'Unsafe/missing approval verdict' >&2;exit 2; }
+  case "$DAIRN_CI_AUDIT_APPROVAL_SNAPSHOT" in /*) ;; *) echo 'Approval verdict path must be absolute' >&2;exit 2;; esac
+  case "$DAIRN_CI_AUDIT_APPROVAL_SNAPSHOT" in "$PWD"/*) echo 'Approval verdict must come from outside checkout' >&2;exit 2;; esac
+  [ -f "$DAIRN_CI_AUDIT_APPROVAL_SNAPSHOT" ] && [ ! -L "$DAIRN_CI_AUDIT_APPROVAL_SNAPSHOT" ] || { echo 'Unsafe/missing approval verdict' >&2;exit 2; }
   APPROVAL=.dairn/governance/evidence/ci-approval-verdict.json
   [ ! -e "$APPROVAL" ] || { echo 'Refuse overwriting approval verdict' >&2;exit 2; }
-  cp "$DAIRN_CI_APPROVAL_VERDICT" "$APPROVAL"
+  cp "$DAIRN_CI_AUDIT_APPROVAL_SNAPSHOT" "$APPROVAL"
   set -- "$@" --approval "$APPROVAL"
 fi
 "$DAIRN_CI_BIN" "$@"

@@ -165,7 +165,7 @@ class ProtectedBasePlan(unittest.TestCase):
             policy_path.write_text(head_policy, encoding='utf-8')
             passed('work', 'verify', 'base-policy', '--require-machine-gates')
 
-    def test_policy_approval_floor_and_requirement_id_conflict(self):
+    def test_platform_approval_delegation_and_requirement_id_conflict(self):
         with tempfile.TemporaryDirectory(prefix='dairn-plan-contract-') as directory:
             script = Path(directory) / 'plan.mjs'
             script.write_text('import {planGovernance} from '
@@ -175,9 +175,9 @@ const base = {schema:'dairn.policy.v1',risk:{levels:['L0','L1','L2'],default:'L1
   checks:{L0:['unit'],L1:['unit'],L2:['unit']},modules:[module],approvals:{L0:{required:false}}};
 const change = {paths:['app/feature.py'],modules:[module],risk:'L0'};
 const plan = (policy=base, extra={}) => planGovernance({trustedPolicy:policy,change,...extra}).plan;
-const results = {opt_out:plan().approvals,default_l2:plan(base,{change:{...change,risk:'L2'}}).approvals,
-  organization_required:plan(base,{organizationPolicy:{...base,approvals:{L0:{required:true}}}}).approvals,
-  organization_count:plan(base,{organizationPolicy:{...base,approvals:{L0:{min_count:2}}}}).approvals};
+const results = {opt_out:plan().human_approval,default_l2:plan(base,{change:{...change,risk:'L2'}}).human_approval,
+  organization_required:plan(base,{organizationPolicy:{...base,approvals:{L0:{required:true}}}}).human_approval,
+  organization_count:plan(base,{organizationPolicy:{...base,approvals:{L0:{min_count:2}}}}).human_approval};
 try { plan(base,{refactorContracts:[{id:'app',paths:['.'],baseline:{contracts:['unit']}}]});
   results.conflict = null;
 } catch (error) { results.conflict=String(error); }
@@ -189,10 +189,8 @@ print(JSON.stringify(results));
                                     text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             plans = json.loads(result.stdout)
-            self.assertEqual(plans['opt_out'], [])
-            self.assertGreaterEqual(plans['default_l2'][0]['min_count'], 1)
-            self.assertGreaterEqual(plans['organization_required'][0]['min_count'], 1)
-            self.assertEqual(plans['organization_count'][0]['min_count'], 2)
+            for key in ['opt_out', 'default_l2', 'organization_required', 'organization_count']:
+                self.assertEqual(plans[key], 'delegated-to-scm')
             self.assertIn('REQUIREMENT_ID_CONFLICT', plans['conflict'] or '')
 
     def test_head_cannot_lower_base_and_global_requirement_runs(self):
@@ -232,8 +230,8 @@ print(JSON.stringify(results));
             result = call('governance', 'plan', '--base', base, '--json')
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             envelope = json.loads(result.stdout)
-            self.assertGreaterEqual(envelope['plan']['approvals'][0]['min_count'], 1,
-                                    '必需自然人审批的默认下限不能是零')
+            self.assertEqual(envelope['plan']['human_approval'], 'delegated-to-scm')
+            self.assertNotIn('approvals', envelope['plan'])
             self.assertEqual({r['id'] for r in envelope['plan']['requirements']},
                              {'app.lint', 'app.unit', 'app.integration', 'app.build', 'global-api.compat'})
             executed = call('governance', 'execute', '--base', base, '--plan-sha256', envelope['plan_sha256'], '--json')

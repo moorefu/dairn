@@ -1,18 +1,21 @@
 {
   "id": "TASK-V1-PCC02",
-  "title": "执行证据与受信 Gate",
-  "acceptance": "按 docs/changes/integrated-v1-proposal.md 对应正负向矩阵执行并保留证据；平台能力未部署不得声称上线。",
-  "status": "blocked",
+  "title": "PCC v1 可信执行与单一机器保障结果",
+  "acceptance": "直接核对固定 Requirement、作业和本轮 Run；缺项、重复、跳过、取消、身份/摘要漂移拒绝；输出仅限机器保障；独立入口不查询 Review/Check API，发布签名保持强制；实际可信平台入口部署单独保留未验收。",
+  "status": "in-progress",
   "blocked_by": [
-    "TASK-V1-RT02",
     "TASK-V1-PCC01"
   ],
   "kind": "change",
   "write_scopes": [
-    "ci/"
+    "ci/",
+    "quickjs/core/gate.mjs",
+    "quickjs/core/assurance.mjs",
+    "quickjs/core/attestation.mjs",
+    "quickjs/core/project.mjs"
   ],
   "test_seams": [
-    "实际 CLI、临时 Git 项目及原生单元测试"
+    "离线实际 CLI、固定 Runtime 入口与 Publisher 请求故障注入、真实签名与篡改回归"
   ],
   "owner": "当前实现 Agent"
 }

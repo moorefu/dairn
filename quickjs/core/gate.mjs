@@ -1,22 +1,18 @@
-/* Final gate composition. Work state is intentionally absent from this API.
- * PASS/FAIL are deterministic outcomes; INDETERMINATE means required evidence
- * was missing or could not be established (architecture §12) and must exit
- * non-zero in enforcing CI, the same as FAIL.
- * P0 hardening (consolidated plan §2.2/§24.2): the gate consumes (a) the full
- * (module_id, check_id) matrix the trusted policy requires for the risk level,
- * (b) a cryptographically verified attestation result — never a bare
- * statement — and (c) approval verdicts bound to this change's identity. */
+/* 仅组合机器保障；审批与合并资格委托 SCM，不消费 Work 状态或审批裁决。
+ * 必需矩阵完整通过才返回 PASS。缺失签名等无法确定的证据返回 INDETERMINATE，
+ * 与 FAIL 一样以非零退出。发布阶段只信任真实验签结果，不信任裸声明。 */
 import {validateSubject} from './subject.mjs';
 import {validateCheckRun} from './evidence.mjs';
-import {verifyApproval} from './approval.mjs';
 import {validateStatement,isVerifiedAttestation} from './attestation.mjs';
 import {sha256} from './sha256.mjs';
-import {resolvePolicy, approvalPolicyFor, requiredChecksFor} from './policy-resolver.mjs';
+import {resolvePolicy, requiredChecksFor} from './policy-resolver.mjs';
+
+import {planCoverage,dependencyErrors} from './assurance.mjs';
 
 const VERIFIED_ATTESTATION = 'dairn.verified-attestation.v1';
 const RISKS = ['L0', 'L1', 'L2'];
 
-function verdict(status, reasons) { return {schema:'dairn.gate-verdict.v1', status, reasons:[...new Set(reasons)]}; }
+function verdict(status,reasons,coverage=[]) {return {schema:'dairn.gate-verdict.v1',scope:'machine-assurance',status,machine_assurance:status,human_approval:'delegated-to-scm',merge_eligibility:'not-evaluated',assurance:'local-observed',coverage,reasons:[...new Set(reasons)]};}
 const STAGES = ['pre-merge','post-merge','release'];
 
 /* Every affected module must have a passing record for every policy-required
@@ -73,61 +69,48 @@ export function evaluate(input = {}) {
   const fail = [], pending = [];
   const stage = input.requiredStage || 'pre-merge';
   if (!STAGES.includes(stage)) fail.push('invalid requiredStage: ' + stage);
+  if(input.subject?.stage&&input.subject.stage!==stage)fail.push('SUBJECT_STAGE_MISMATCH');
   const risk = input.risk || 'L2';
   if (!RISKS.includes(risk)) fail.push('invalid risk: ' + risk);
   const subjectErrors = validateSubject(input.subject);
   if (subjectErrors.length) fail.push(...subjectErrors.map(x => 'subject: ' + x));
   const policy = resolvePolicy(input.trustedPolicy || input.policy || null);
   if (!policy) fail.push('trusted policy missing or invalid');
-  const checkErrors = validateCheckRun(input.check);
-  if (checkErrors.length) fail.push(...checkErrors.map(x => 'check: ' + x));
-  if(stage==='pre-merge')pending.push('SCM_ORIGIN_UNVERIFIED: 本地 JSON 不能认证受信 Check/Review 来源；需由受保护 PCC Verifier 实时查询 SCM');
-  if (input.check && !checkErrors.length) {
-    if (input.check.status !== 'passed') fail.push('required checks did not pass');
-    else fail.push(...coverageErrors(input.trustedPolicy || input.policy, risk, input.check, input.modules).map(x => 'coverage: ' + x));
-  }
-  if (input.subject && input.check?.subject &&
-    JSON.stringify(input.subject) !== JSON.stringify(input.check.subject)) fail.push('subject mismatch');
-  // Bare statements are the pre-hardening input shape; reject loudly instead of
-  // silently re-interpreting them so no caller keeps an insecure invocation.
-  if (input.attestation) fail.push('bare attestation statements are not accepted; supply the verified result of `dairn attest verify` (verifiedAttestation)');
-  const approvalPolicy = approvalPolicyFor(policy, risk);
-  const approvalRequired = stage === 'pre-merge' ? approvalPolicy.required !== false : !!approvalPolicy.min_count;
-  if (approvalRequired) {
-    if (!input.approval) pending.push('approval evidence missing (cannot determine SCM approval state)');
-    else {
-      // Change-identity binding (T36): a verdict copied from another
-      // repository, PR or head must never authorize this change.
-      const binding = [];
-      if (input.approval.subject?.repository !== input.subject?.repository) binding.push('repository');
-      if (input.approval.subject?.reviewed_head_sha !== input.subject?.source_commit) binding.push('reviewed_head_sha');
-      if (input.subject?.change?.number != null && input.approval.subject?.number != null &&
-        input.approval.subject.number !== input.subject.change.number) binding.push('number');
-      if (binding.length) fail.push('approval verdict is bound to a different change: ' + binding.join('+') + ' mismatch');
-      else {
-        const approval = verifyApproval(input.approval, approvalPolicy);
-        if (approval.status === 'FAIL') fail.push(...approval.reasons.map(x => 'approval: ' + x));
-        else if (approval.status === 'INDETERMINATE') pending.push(...approval.reasons.map(x => 'approval: ' + x));
-      }
+  const runs=input.runs||[input.check];
+  const check=runs.length===1?runs[0]:null;
+  let coverage=[];
+  if(input.plan){
+    try{const result=planCoverage(input.plan,runs,input.subject);fail.push(...result.errors);coverage=result.coverage;}
+    catch(_){fail.push('INVALID_MACHINE_EVIDENCE');}
+  }else{
+    if(runs.length!==1)fail.push('完整计划缺失，不能聚合多个 Run');
+    const checkErrors=validateCheckRun(check);
+    fail.push(...checkErrors.map(x=>'check: '+x));
+    if(check&&!checkErrors.length){
+      if(check.status!=='passed')fail.push('required checks did not pass');
+      else fail.push(...coverageErrors(input.trustedPolicy||input.policy,risk,check,input.modules).map(x=>'coverage: '+x));
     }
+    if(input.subject&&check?.subject&&JSON.stringify(input.subject)!==JSON.stringify(check.subject))fail.push('subject mismatch');
   }
+  fail.push(...dependencyErrors(input.expectedJobs,input.needs));
+  if(input.attestation)fail.push('bare attestation statements are not accepted; supply the verified result of `dairn attest verify` (verifiedAttestation)');
+  if(input.approval||input.approvalRaw)fail.push('APPROVAL_INPUT_NOT_SUPPORTED: 人工审批由 SCM 处理；快照仅供显式审计归档');
   if (stage === 'post-merge' || stage === 'release') {
     if (!input.verifiedAttestation) pending.push('attestation evidence missing (cannot determine signed evidence)');
     else {
-      fail.push(...verifiedAttestationErrors(input.verifiedAttestation,input.subject,input.check));
+      fail.push(...verifiedAttestationErrors(input.verifiedAttestation,input.subject,check));
       if(isVerifiedAttestation(input.verifiedAttestation)){
         const st=input.verifiedAttestation.statement;
+        if(st.scope!=='machine-assurance')fail.push('ATTESTATION_SCOPE_MISMATCH');
         if(!input.checkRaw||sha256(input.checkRaw)!==st.digests?.run_json_sha256)fail.push('RUN_DIGEST_MISMATCH');
-        if(input.checkRaw&&JSON.stringify(JSON.parse(input.checkRaw))!==JSON.stringify(input.check))fail.push('RUN_CONTENT_MISMATCH');
+        if(input.checkRaw&&JSON.stringify(JSON.parse(input.checkRaw))!==JSON.stringify(check))fail.push('RUN_CONTENT_MISMATCH');
         if(st.ci?.stage!==stage)fail.push('ATTESTATION_STAGE_MISMATCH');
-        if(st.runtime_sha256!==input.check?.execution?.runtime_sha256)fail.push('RUNTIME_IDENTITY_MISMATCH');
-        if(!st.plan_sha256||st.plan_sha256!==input.check?.execution?.check_plan_sha256)fail.push('PLAN_OR_POLICY_MISMATCH');
-        if(approvalRequired&&(!input.approvalRaw||sha256(input.approvalRaw)!==st.digests?.approval_snapshot_sha256))fail.push('APPROVAL_DIGEST_MISMATCH');
-        if(input.check?.execution?.policy_sha256!==st.policy_sha256||!input.policyRaw||sha256(input.policyRaw)!==st.policy_sha256)fail.push('POLICY_DIGEST_MISMATCH');
+        if(st.runtime_sha256!==check?.execution?.runtime_sha256)fail.push('RUNTIME_IDENTITY_MISMATCH');
+        if(!st.plan_sha256||st.plan_sha256!==check?.execution?.check_plan_sha256)fail.push('PLAN_OR_POLICY_MISMATCH');
+        if(check?.execution?.policy_sha256!==st.policy_sha256||!input.policyRaw||sha256(input.policyRaw)!==st.policy_sha256)fail.push('POLICY_DIGEST_MISMATCH');
       }
     }
   }
-  if (fail.length) return verdict('FAIL', fail);
-  if (pending.length) return verdict('INDETERMINATE', pending);
-  return verdict('PASS', []);
+  const result=verdict(fail.length?'FAIL':pending.length?'INDETERMINATE':'PASS',fail.length?fail:pending,coverage);
+  return {...result,subject:input.subject,plan_sha256:input.plan?.plan_sha256||check?.execution?.check_plan_sha256||null};
 }

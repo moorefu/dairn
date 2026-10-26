@@ -1,37 +1,88 @@
-# PCC v1 组件与部署验收
+# PCC v1：核心离线、平台职责委托、可信入口保留
 
-统一目标见 [实施契约](specs/engineering/integrated-v1.md)。当前代码提供受信 Base 计划、完整 Requirement 执行与证据绑定，以及独立 GitHub 核验组件。**源码组件通过测试不代表 PCC Required Gate 已在平台上线。**
+Dairn 负责确定本次变更必须完成的机器保障，并核对执行证据；CI 负责可信执行与工件传输；GitHub/GitLab 负责人工审批、过期审批、Code Owner 与最终合并。源码组件通过不代表可信入口已部署。实施依据见 [离线收敛计划](changes/pcc-offline-v1.md)。
 
-治理计划从完整 Base SHA 读取策略和生效 Refactor 契约；Head 策略修改不能减小本次要求。每项必需保障有 scope、requirement_id、执行器、argv/cwd/timeout、Subject 与计划摘要；全局契约没有执行器时明确 REQUIRED_EXECUTOR_MISSING。Quality 概览放 advisory，不在计划哈希内偷偷增加执行含义。
+## 默认执行路径
 
-普通 check --base 使用 Base 策略执行同一计划的 Requirement，包括 module_id 为空的全局契约。check --all 是本地完整基线，使用当前配置，不充当受保护 Base 认证。Run 记录计划、执行器、输入快照与日志摘要；输入变化、覆盖不全或检查失败不能成功。
+```sh
+./dairn governance plan --base <完整BaseSHA> --json
+./dairn governance execute --base <完整BaseSHA> --assurance --json
+# 已有本轮 Run 时，只重核证据，不重跑项目测试
+./dairn gate evaluate --base <完整BaseSHA> --check <run.json> --json
+```
 
-隔离执行器可使用外部固定 Runtime 的 `governance execute --base <SHA> --context <文件> --plan-sha256 <SHA>`，独立重算并执行 Base 要求，不提升项目 Pin。context 提供 Subject 与管理员来源绑定，不能把普通本地运行升级为受信平台证据。
+核心不读取 Token、不调用 SCM API，也不依赖 HTTP 客户端。这里的离线不约束 Git checkout、项目测试依赖、CI 上传或可选发布/审计适配器的联网。
 
-本地 gate evaluate 的 pre-merge 输入仍无法认证 SCM 来源，返回 INDETERMINATE。post-merge/release 要求当前进程真实 Ed25519 验签，不能从磁盘 JSON 重新导入“已验证”标签；签名必须覆盖本次 Run 原始字节、Policy 与 Subject。
+Base 中的策略与生效 Refactor 契约决定要求，组织配置只能增加机器保障下限。Head 不能删除当前要求。每个 Requirement 恰好对应一个实际成功结果，绑定仓库、Base/Head/Tree、Plan、执行器、输入快照、工具身份和原始日志摘要。缺项、重复、非零、skipped、neutral、cancelled、身份错配或输入漂移都不能满足要求。
 
-有审批下限时，使用 `evidence bundle --run <id> --evidence <run.json> --approval <approval.json> --out <bundle.json>` 归档实际消费的审批文件。`attest prepare` 先复核所有成员字节，再把 `approval_snapshot_sha256` 写入签名声明；签名前后篡改审批或 Run 都会拒绝。受保护构建可通过绝对路径 `DAIRN_CI_APPROVAL_VERDICT` 接收 checkout 外的审批裁决文件。该路径只提供输入和字节绑定，部署方仍须认证 SCM 来源，普通 JSON 不能自行获得信任。
+输出仍是 v1，但 scope 固定为 machine-assurance：
 
-## 独立核验入口
+```text
+Machine assurance: PASS
+Human approval: delegated to SCM
+Merge eligibility: not evaluated locally
+```
 
-`ci/protected/pcc-gate.py` 必须由管理员在隔离 Verifier 环境部署，源码、Python、Git 和 APE 均需在 PR 控制之外固定。管理员配置放 checkout 外，使用独立 pin 指定配置摘要。配置 schema 为 dairn.pcc-admin.v1，包含：
+本地 assurance 为 local-observed；不填 approved=true，不宣称平台已批准、可以合并或受信入口已上线。`gate evaluate --approval` 不再接受；显式审批快照审计仍独立可用。计划不再维护按风险分级的审核者人数。
 
-- runtime：checkout 之外的固定 APE 绝对路径；runtime_sha256：经过审阅的二进制 SHA256。
-- organization_policy：可选的 dairn.policy.v1 组织下限，必需项与 Base 要求合并。
-- requirements：Requirement ID 到专用 GitHub App 的 app_id 和 check_name 映射。
-- min_approvals：组织审批下限，和计划中的要求取最大值。
+## 固定 CI 集成入口
 
-受信 Job 提供只读 DAIRN_GITHUB_TOKEN；Token 不进入参数、日志或 verdict。脚本从认证 GitHub API 重读 PR、受保护 Base、Head Tree、完整分页 Check 与 Review，并在结束时检查 Head/Base 没有移动。
+`ci/protected/pcc-gate.py` 是薄的离线适配器：核对管理员配置、入口 pin 与本地 Git 身份后，调用固定的项目启动器/Runtime，不读取 PR、Check、Review 或权限 API。部署时脚本、启动器、Runtime 和配置均位于 checkout 外的只读受控位置。管理员配置 schema 仍为 dairn.pcc-admin.v1：
 
-每个 Required Check 的 external_id 为 `pcc:<完整计划SHA>:<Requirement ID 的SHA256>:<HeadSHA>`。发布 Check 的专用 App 只能由受信执行器持有：执行器必须在无发布/签名密钥的隔离 Job 中按固定 Base 计划执行，核对 Run、快照、计划和工具身份之后，再把实际结论交给独立 Publisher。GitHub Actions 共享 App 不能区分 PR 自造同名 job，组件拒绝用其 App 身份满足要求。较新的失败或 pending 不得被旧成功覆盖。
+```json
+{
+  "schema": "dairn.pcc-admin.v1",
+  "repository": "org/repo",
+  "launcher": "/opt/dairn/dairn",
+  "launcher_sha256": "<启动器SHA256>",
+  "runtime": "/opt/dairn/.dairn/runtime/dairn-embedded.com",
+  "runtime_sha256": "<APE的SHA256>",
+  "verifier": "/opt/dairn/ci/protected/pcc-gate.py",
+  "verifier_sha256": "<离线适配器SHA256>"
+}
+```
 
-当前入口只读验证并输出 dairn.pcc-verdict.v1；0/1/3 分别为 PASS/FAIL/INDETERMINATE。它不把普通 CI 名称自动解释成 PCC 身份，也不自动配置 App、Ruleset 或发布 check。
+可选 organization_policy 只增加机器要求。旧 requirements→App/Check 映射及 min_approvals 配置明确拒绝，不静默当成新协议。外部配置的完整 SHA256 独立固定；Base/Head 来自受信 CI 事件上下文，必须是完整不可变 SHA。启动器负责正确进入内嵌 CLI，POSIX 使用私有执行缓存，Windows 保持原生 APE。
 
-## 仍需部署方完成
+```sh
+python /opt/dairn/ci/protected/pcc-gate.py \
+  --admin-config /etc/dairn/pcc-admin.json --admin-sha256 <配置SHA256> \
+  --repository org/repo --root <checkout> --base <BaseSHA> --head <HeadSHA> \
+  --execute
+```
 
-1. 隔离执行器与 Publisher 的代码来源、安装身份、权限和不可由 PR 修改的 pin。
-2. 将独立 App 来源的 PCC 状态绑定为 Required Check；审批使用 SCM 原生 Review Rule，避免状态与审批互锁。
-3. 按提案 PC01–PC11 做真实 PR 故障注入：降低策略、删除必需项、同名伪造状态、旧 Head、缺项、超时和 stale/dismissed/self review 均不能合并。
-4. 保留平台 API、Required Check、拒绝合并和恢复正向结果的证据。未完成这些之前，PCC-02 状态只能是组件已实现、平台闭环未验证。
+`--execute` 在无发布/签名凭据的域中执行完整计划并直接核对；已有证据时用 `--check <run.json>`。0/1/3 分别表示机器 PASS/FAIL/INDETERMINATE。固定配置和本地文件不能自行认证平台身份。
 
-当前分支已获准准备 PR，供源码审查和平台 CI 验证；本次未修改线上保护规则或部署 App。平台闭环的未验收项仍按上述清单保留。
+## 多作业直接聚合
+
+固定的 expected_jobs 由管理员配置提供，不能从现有结果反推。需要分片时，各受信作业运行 `governance execute --base <SHA> --requirements app.lint,app.unit`，保留完整 Plan 身份、所执行的 Requirement 和局部 Run；局部成功不能独立宣称完整保障通过。
+
+聚合输入是本轮直接 needs 和 Run 清单，形状分别为：
+
+```json
+{"quality":{"result":"success","outputs":{"run_sha256":"<Run原始SHA256>"}}}
+```
+
+```json
+[{"job_id":"quality","path":".dairn/governance/evidence/run.json","sha256":"<同一原始SHA256>"}]
+```
+
+以 `gate evaluate --base <SHA> --runs <清单> --jobs <固定作业数组> --needs <直接上下文>` 核对。每个固定作业必须真实 success，且其输出摘要与所取回的 Run 字节相符；集合缺项、重复、取消、跳过均拒绝。各 Run 共同恰好覆盖完整 Requirement 集合。跨平台输入必须绑定同一 Git 身份，各自和聚合检出保持干净；不把不同平台的文件模式快照强行视为相同。
+
+## 单一发布结果与平台审批
+
+目标项目只发布一个 `Dairn / Required Assurance`。组织条件允许时，用 Required Workflow 固定执行定义、来源仓库和 Runtime；不能假定个人仓库拥有这一能力。普通 PR 可修改的 Workflow 仅提供工程检查，不能声明已防止恶意 PR 绕过。GitHub Actions 共享 App 身份不等于特定受信 Workflow。
+
+可选 `ci/providers/publish-github-assurance.py` 只发布一个汇总 Check，内部不枚举 SCM。管理员配置还需固定 publisher、publisher_sha256、expected_jobs。它只接受本轮直接 needs 与摘要绑定的 Run 清单，不接受裸 verdict 文件或 --execute；needs 文件由受信作业在 checkout 外创建并只读提供，不能由 PR 或测试工件替代。它先调用固定离线核验器，只把实际核对结果发布到固定仓库/Head/状态名；未知和失败都发布 failure，不将 neutral/skipped 变成平台成功。单次完成发布使用一个 POST，禁止重定向，凭据仅在该隔离入口读取。
+
+执行域不能取得 Publisher 凭据、签名密钥，不能改写聚合域的固定配置和 needs 输入；可信代码及凭据通过独立 runner/受信集成挂载。禁止在 pull_request_target 高权限任务直接运行 PR 代码。
+
+平台统一执行审批底线和敏感路径 Code Owner；审核者的组织身份由团队管理。Base 更新后重验、严格合并条件和 Merge Queue 的 merge_group 验证由平台触发，Dairn 不轮询。部署模板不会自动更改线上 Ruleset、App 或权限。
+
+## 发布签名与可选归档
+
+默认预合并机器保障不等待发布签名链。post-merge/release 仍要求真实 Ed25519 验签、外部受信公钥、本次 Run 原始字节、Policy、Plan、Runtime 与 CI 上下文；缺失或篡改仍拒绝。
+
+声明 scope 为 machine-assurance，human_approval 为 delegated-to-scm。仅在显式 `evidence bundle --approval <快照>` 审计归档时，签名的 audit 部分绑定审批文件原始摘要并标记 snapshot-bytes-only；不证明当前平台审批，不成为机器 Gate 条件。原有 v1 无范围声明或旧混合审批声明不静默解释为新语义，需由已验证构建重新生成。证据保存与签名隔离要求见[签名规范](../quickjs/assets/specs/ci/protected-attestation.md)。
+
+实际平台验收仍需确认受信入口来源、不可由 PR 修改的配置、凭据隔离、单一 Required Check/Workflow 与原生审批规则，并执行缺项、错配、跳过、伪造同名状态和 Base 更新故障注入。组件测试或模拟 needs 只证明组件，不代表上述部署已完成。

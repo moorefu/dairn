@@ -2,6 +2,7 @@ stages: [quality]
 variables:
   GIT_DEPTH: "0"
 dairn:quality:
+  # 单一机器保障作业；审批由 GitLab 原生规则执行。
   stage: quality
   script:
     - test -n "$DAIRN_EXPECTED_POLICY_SHA256" && test -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
@@ -10,7 +11,7 @@ dairn:quality:
     - sh "$DAIRN_BIN_VALUE" guide impact --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
     - if [ "${DAIRN_ENFORCE_DOC_DRIFT:-false}" = "true" ]; then sh "$DAIRN_BIN_VALUE" guide drift --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --strict; fi
     - sh "$DAIRN_BIN_VALUE" validate --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-    - sh "$DAIRN_BIN_VALUE" check --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    - sh "$DAIRN_BIN_VALUE" governance execute --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --assurance --json
   artifacts:
     when: always
     paths: [.dairn/governance/evidence/]

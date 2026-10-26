@@ -63,8 +63,8 @@ export function runtimeIdentity(h){
   for(const x of m.assets||[]) invariant(sha256(read(h,ASSETS+x.type+'/'+x.path))===x.sha256,'Embedded asset checksum mismatch: '+x.path);
   return sha256(raw);
 }
-const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--analyzer','--suite','--artifact','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars','--window','--file','--capability','--for','--limit','--section','--lines','--mode','--invocation','--baseline','--experiment','--source','--plan-sha256','--to','--transaction','--organization-policy'];
-const FLAG_OPTIONS={'--plan':'plan','--dry-run':'plan','--discover':'discover','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--refresh':'refresh','--change':'change','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
+const VALUE_OPTIONS=['--root','--path','--name','--stack','--module','--modules','--ci','--base','--timeout','--id','--kind','--analyzer','--suite','--artifact','--template','--session','--provider','--payload','--event','--reason','--launcher','--vendor-runtime','--actor','--run','--evidence','--bundle','--subject','--policy','--context','--check','--approval','--attestation','--statement','--signature','--key','--out','--stage','--risk','--snapshot','--origin','--task','--note','--max-chars','--window','--file','--capability','--for','--limit','--section','--lines','--mode','--invocation','--baseline','--experiment','--source','--plan-sha256','--to','--transaction','--organization-policy','--runs','--jobs','--needs','--requirements'];
+const FLAG_OPTIONS={'--assurance':'assurance','--plan':'plan','--dry-run':'plan','--discover':'discover','--apply':'apply','--diff':'diff','--sample':'sample','--all':'all','--json':'json','--strict':'strict','--refresh':'refresh','--change':'change','--require-machine-gates':'require_machine_gates','--require-session-anchor':'require_session_anchor','--require-review-actor':'require_review_actor','--stdin':'stdin','--no-check':'no_check','--force':'force','--git':'git','--allow-unattributed':'allow_unattributed'};
 // Suite 与 Fitness 共用模式分派，导入错误保留来源并提供 UNKNOWN 所需的缺失观测。
 function runAnalysisTarget(h,root,def,base){
   if((def.mode||'execute')!=='import')return executeAnalyzer(h,root,def.id,{base});
@@ -786,7 +786,7 @@ function evidenceCmd(h,o,root){
       invariant(file(h,approvalPath),'approval not found: '+o.approval);
       const raw=read(h,approvalPath),approval=JSON.parse(raw);
       invariant(!validateApprovalVerdict(approval).length,'Invalid approval verdict');
-      // 固定 Gate --approval 消费的同一文件字节；打包本身不认证 SCM 来源。
+      // 显式审计归档只绑定快照文件字节，不认证 SCM 来源或当前审批状态。
       files.approval_snapshot={path:o.approval,sha256:sha256(raw)};
     }
     const bundle={schema:'dairn.evidence-bundle.v1',run:checked.run,files};
@@ -802,24 +802,46 @@ function evidenceCmd(h,o,root){
 function gateCmd(h,o,root){
   const op=o.pos[0]||'evaluate';
   invariant(op==='evaluate','Usage: dairn gate evaluate --subject <s.json> --policy <p.json> [...]');
-  invariant(o.subject&&o.policy,'gate evaluate requires --subject and --policy');
+  invariant(o.base||(o.subject&&o.policy),'gate evaluate requires --base or --subject and --policy');
   // P0: the gate consumes the RESULT of real Ed25519 verification, never a
   // bare statement JSON (consolidated plan §2.2). A statement without its
   // signature and CI-controlled public key cannot gate anything.
   if(o.attestation)invariant(o.signature&&o.key,
     'gate evaluate --attestation requires --signature <sig> and --key <absolute trusted pubkey> (real Ed25519 verification)');
-  const subject=readJsonRel(h,root,o.subject,'subject');
-  const policy=readJsonRel(h,root,o.policy,'policy');
-  const check=o.check?readJsonRel(h,root,o.check,'check run') : null;
-  const approval=o.approval?readJsonRel(h,root,o.approval,'approval verdict') : null;
-  const context=o.context?readJsonRel(h,root,o.context,'context') : {};
+  const context=o.context?readJsonRel(h,root,o.context,'context'):{};
+  const plan=o.base?planForChange(h,root,{base:o.base,organizationPolicy:o.organization_policy?readJsonRel(h,root,o.organization_policy,'organization policy'):null,subjectContext:context.subject||null,authorityContext:context.authority||null}):null;
+  let policyRaw;
+  if(plan){const found=h.run(['git','show',plan.plan.subject.base_commit+':.dairn/governance/project.json'],root,30);invariant(found.code===0&&!found.timedOut,'POLICY_UNTRUSTED');policyRaw=found.output;}
+  else policyRaw=h.read(o.policy.startsWith('/')?o.policy:j(root,o.policy));
+  const subject=plan?plan.plan.subject:readJsonRel(h,root,o.subject,'subject');
+  const policy=JSON.parse(policyRaw);
+  invariant(!(o.check&&o.runs),'gate evaluate accepts --check or --runs, not both');
+  const check=o.check?readJsonRel(h,root,o.check,'check run'):null;
+  const expectedJobs=o.jobs?readJsonRel(h,root,o.jobs,'expected jobs'):undefined;
+  const needs=o.needs?readJsonRel(h,root,o.needs,'direct needs'):undefined;
+  if(o.jobs||o.needs)invariant(o.runs&&o.jobs&&o.needs,'直接作业聚合需要 --runs、--jobs 和 --needs，不能以单个 --check 代替逐作业证据');
+  let runs;
+  if(o.runs){
+    const manifest=readJsonRel(h,root,o.runs,'run manifest');
+    invariant(Array.isArray(manifest)&&manifest.length>0,'Run manifest must be a nonempty array');
+    runs=manifest.map(item=>{
+      invariant(typeof item.path==='string'&&/^[0-9a-f]{64}$/.test(item.sha256||''),'Run manifest entry invalid');
+      const path=safeRelInside(h,root,item.path);
+      const raw=h.read(path);
+      invariant(sha256(raw)===item.sha256,'RUN_DIGEST_MISMATCH');
+      if(expectedJobs){invariant(expectedJobs.includes(item.job_id)&&needs?.[item.job_id]?.outputs?.run_sha256===item.sha256,'JOB_EVIDENCE_MISMATCH');}
+      return JSON.parse(raw);
+    });
+    if(expectedJobs)invariant(manifest.length===expectedJobs.length&&new Set(manifest.map(x=>x.job_id)).size===expectedJobs.length,'JOB_EVIDENCE_MISSING_OR_DUPLICATED');
+  }
   let verifiedAttestation=null;
   if(o.attestation){
     const statement=readJsonRel(h,root,o.attestation,'attestation statement');
     let verified;
     try { verified=verifyAttestation(h,root,o.attestation,o.signature,o.key,context); }
     catch(e){
-      const failed={schema:'dairn.gate-verdict.v1',status:'FAIL',
+      const failed={schema:'dairn.gate-verdict.v1',scope:'machine-assurance',status:'FAIL',
+        machine_assurance:'FAIL',human_approval:'delegated-to-scm',merge_eligibility:'not-evaluated',assurance:'local-observed',
         reasons:['attestation verification failed: '+String(e&&e.message||e)]};
       if(o.json)h.log(fmt(failed));
       else h.error('ERROR gate: FAIL — '+failed.reasons[0]);
@@ -828,10 +850,18 @@ function gateCmd(h,o,root){
     verifiedAttestation=verified;
   }
   const modules=o.modules?String(o.modules).split(',').map(x=>x.trim()).filter(Boolean):null;
-  const verdict=gateEvaluate({subject,policy,policyRaw:h.read(j(root,o.policy)),check,approvalRaw:o.approval?h.read(j(root,o.approval)):null,checkRaw:o.check?h.read(j(root,o.check)):null,approval,context,verifiedAttestation,modules,
-    risk:o.risk||null,requiredStage:o.stage||'pre-merge',trustedPolicy:policy});
+  const checkRaw=o.check?h.read(o.check.startsWith('/')?o.check:j(root,o.check)):null;
+  const verdict=gateEvaluate({subject,policy,policyRaw,check,checkRaw,runs,plan,expectedJobs,needs,
+    approval:o.approval?{unsupported:true}:null,context,verifiedAttestation,modules,
+    risk:plan?plan.plan.classification.effective_risk:o.risk||null,requiredStage:o.stage||'pre-merge',trustedPolicy:policy});
+  if(plan&&verdict.status==='PASS'){
+    const current=captureWorktree(h,root,30,[],{snapshot_exclusions:policy.snapshot_exclusions||[]});
+    const records=runs||[check];
+    const mismatch=current.input_coverage!=='declared-complete'||(records.length===1?current.snapshot_sha256!==records[0]?.execution?.snapshot_after_sha256:current.status!=='clean'||records.some(r=>r.execution?.worktree_status!=='clean'));
+    if(mismatch){verdict.status=verdict.machine_assurance='FAIL';verdict.reasons.push('CURRENT_INPUT_SNAPSHOT_MISMATCH');}
+  }
   if(o.json)h.log(fmt(verdict));
-  else h.log('gate: '+verdict.status+(verdict.reasons.length?' — '+verdict.reasons.join('; '):''));
+  else {h.log('Machine assurance: '+verdict.status+(verdict.reasons.length?' — '+verdict.reasons.join('; '):''));h.log('Human approval: delegated to SCM');h.log('Merge eligibility: not evaluated locally');}
   return verdict.status==='PASS'?0:verdict.status==='INDETERMINATE'?3:1;
 }
 /* 平台审批快照裁决：消费 ci/providers 抓取的规范化快照，不触网、不信 PR 自带 JSON。 */
@@ -842,7 +872,7 @@ function approvalCmd(h,o,root){
   invariant(o.snapshot,'approval evaluate requires --snapshot <platform snapshot json>');
   const snapshot=readJsonRel(h,root,o.snapshot,'approval snapshot');
   const policy=o.policy?readJsonRel(h,root,o.policy,'policy'):{};
-  const verdict=approvalPlatformVerdict(snapshot,policy.approvals||policy);
+  const verdict={...approvalPlatformVerdict(snapshot,policy.approvals||policy),scope:'approval-snapshot-audit',assurance:'unverified-import',merge_eligibility:'not-evaluated'};
   if(o.json)h.log(fmt(verdict));
   else h.log('approval: '+verdict.status+' provider='+verdict.provider+
     ' eligible=['+verdict.eligible_reviewer_ids.join(',')+']'+
@@ -903,12 +933,18 @@ function governanceCmd(h,o,root){
     const result=h.run(['git','show',envelope.plan.subject.base_commit+':.dairn/governance/project.json'],root,30);
     invariant(result.code===0&&!result.timedOut,'POLICY_UNTRUSTED');
     const policy=JSON.parse(result.output);
-    const run=runChecks(h,root,{policy,base:envelope.plan.subject.base_commit,risk:envelope.plan.classification.effective_risk,timeout:Number(o.timeout),governancePlan:envelope,subjectOverride:envelope.plan.subject,runtimeSha:runtimeIdentity(h)});
+    const run=runChecks(h,root,{policy,base:envelope.plan.subject.base_commit,risk:envelope.plan.classification.effective_risk,timeout:Number(o.timeout),governancePlan:envelope,subjectOverride:envelope.plan.subject,runtimeSha:runtimeIdentity(h),requirementIds:o.requirements?String(o.requirements).split(','):null});
+    if(o.assurance){
+      const verdict=gateEvaluate({trustedPolicy:policy,subject:run.subject,check:run,plan:envelope,risk:envelope.plan.classification.effective_risk});
+      h.log(fmt({...verdict,run_id:run.run_id,evidence_ref:run.evidence_ref}));
+      return verdict.status==='PASS'?0:verdict.status==='INDETERMINATE'?3:1;
+    }
     h.log(fmt(run));return run.status==='passed'?0:1;
   }
   if(op==='plan'||op==='explain'){
     invariant(o.base,'governance '+op+' requires --base <trusted-ref>');
-    const {plan,plan_sha256,advisory}=planForChange(h,root,{base:o.base,organizationPolicy:o.organization_policy?JSON.parse(h.read(o.organization_policy)):null});
+    const context=o.context?readJsonRel(h,root,o.context,'local plan context'):null;
+    const {plan,plan_sha256,advisory}=planForChange(h,root,{base:o.base,organizationPolicy:o.organization_policy?JSON.parse(h.read(o.organization_policy)):null,subjectContext:context?.subject||null,authorityContext:context?.authority||null});
     if(op==='plan'){
       if(o.json)h.log(fmt({plan,plan_sha256,advisory}));
       else{
@@ -918,7 +954,7 @@ function governanceCmd(h,o,root){
         for(const r of plan.requirements)h.log('  require '+r.id+' ['+r.origin+']');
         for(const e of plan.executors)h.log('  executor '+e.module_id+':'+e.check_id+' phase='+e.phase);
         h.log('  local-fast: '+(plan.execution.local_fast.join(', ')||'none')+'; ci-required: '+plan.execution.ci_required.length);
-        h.log('  approvals: '+(plan.approvals.length?'scm-native natural person':'none'));
+        h.log('  human approval: delegated to SCM; merge eligibility: not evaluated locally');
         h.log('  advisory: '+(plan.advisory_workflow.join(' > ')||'none')+'; work required: '+plan.work_required);
         for(const g of plan.gaps)h.error('GAP '+g.kind+' '+g.module_id+':'+g.check_id+' — '+g.reason);
         h.log('  plan_sha256: '+plan_sha256);
@@ -937,7 +973,7 @@ function governanceCmd(h,o,root){
     for(const r of plan.requirements)lines.push('  - '+r.id+' required by '+r.origin);
     for(const g of plan.gaps)lines.push('  - MISSING capability '+g.module_id+':'+g.check_id+' — CI must fail until an executor exists');
     lines.push('Local fast feedback ('+(plan.execution.local_fast.join(', ')||'none')+') is speed advice; CI required set is complete: '+plan.execution.ci_required.length+' items.');
-    lines.push('Approvals: '+(plan.approvals.length?'SCM-native, natural person — granted by the platform, never by this plan':'not required at this risk level'));
+    lines.push('Human approval: delegated to SCM; merge eligibility: not evaluated locally.');
     lines.push('No work ledger is required for any of this (work_required=false).');
     for(const line of lines)h.log(line);
     if(o.json)h.log(fmt({plan,plan_sha256,advisory}));

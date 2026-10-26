@@ -1,5 +1,7 @@
 # Dairn v1 一体化工程治理提案
 
+> PCC 后续收敛：本轮用户已要求实施[核心离线与平台职责委托](pcc-offline-v1.md)。涉及 PCC 默认在线取证、审批镜像和混合 PASS 的历史设计，以该收敛计划及[当前实施契约](../specs/engineering/integrated-v1.md)为准；原平台故障注入仍需真实部署验收，但不再要求内核枚举 SCM API。本文其余历史方案保留用于追溯。
+
 ## Runtime Lifecycle · Observability · Retro · PCC-01/02
 
 **文档版本**：Integrated Architecture Proposal v1 · 2026-10-25
