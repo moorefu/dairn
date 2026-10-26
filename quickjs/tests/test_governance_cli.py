@@ -63,7 +63,8 @@ class GovernanceCLI(unittest.TestCase):
         # explain renders the human-readable reasoning chain
         text = self.call('governance', 'explain', '--base', base, ok=True).stdout
         self.assertIn('Governance plan explanation', text)
-        self.assertIn('never by this plan', text)
+        self.assertIn('Human approval: delegated to SCM', text)
+        self.assertIn('merge eligibility: not evaluated locally', text)
 
     def test_plan_l2_keeps_full_matrix_and_reports_capability_gaps(self):
         self.commit_change(self.repo / 'auth.go', 'package hello\nfunc VerifyToken(s string) bool { return len(s) > 0 }\n')
